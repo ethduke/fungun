@@ -16,7 +16,7 @@ Run `npm run dev:api` in a second terminal for the read service. See
 
 ## Working controls
 
-- The top market feed shows the source's tracked ETH and SHARES pairs together,
+- The top market feed shows the source's Robinhood ETH and SHARES pairs together,
   fetched through same-origin `GET /api/tracked-feed` approximately every four
   seconds. It uses the public `https://rh-monitor.fly.dev/api` source without
   credentials. Each lane preserves source order and scrolls through all returned
@@ -24,7 +24,11 @@ Run `npm run dev:api` in a second terminal for the read service. See
   response clears them. The receipt time is not a per-token valuation timestamp.
 - Popularity groups count similarly named distinct contracts in this selected
   feed, deduplicated by chain and token and ranked by count then inflow. They
-  refresh on every response. Base rows keep their observed-snapshot label.
+  refresh on every response. Other chains are excluded from this tracker.
+- COPY transfers the selected token's name and ticker into the launch form and
+  jumps to the coin details immediately. It clears old artwork and invalidates
+  pending uploads so another token's image cannot carry over. The current public
+  source supplies no token image or metadata URL; artwork must be uploaded separately.
 - Upload/drop a PNG, JPEG, WebP or GIF, preview and remove it. Files stay in memory.
 - Enter name, ticker and optional description; review per-launchpad validation.
 - Ticker edits auto-fill the coin name unless a custom name has been entered.

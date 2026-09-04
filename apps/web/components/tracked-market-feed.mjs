@@ -19,6 +19,15 @@ const number = (value) =>
 const chain = (row) => Number(row.chain_id ?? 4663);
 const token = (row) => String(row.meme || row.token || '');
 const rowKey = (row) => `${chain(row)}:${row.pool || token(row)}`;
+
+export function trackedTokenDraft(row) {
+  const ticker = typeof row.sym === 'string' ? row.sym : '';
+  return {
+    name: typeof row.name === 'string' && row.name.trim() ? row.name : ticker,
+    ticker,
+  };
+}
+
 const nameKey = (value) =>
   value
     .normalize('NFKD')
@@ -164,8 +173,8 @@ function ladder(trail) {
 
 function card(row) {
   const address = token(row),
-    id = chain(row),
     name = String(row.name || row.sym || 'Unnamed token');
+  const draft = trackedTokenDraft(row);
   const rawLaunchpad = String(row.launchpad || 'Unknown launchpad');
   const isLong = /^long(?: launchpad)?$/i.test(rawLaunchpad.trim());
   const launchpad = isLong
@@ -178,41 +187,39 @@ function card(row) {
     : '';
   const quote =
     row.quote_symbol || (row.quote_kind === 'eth' ? 'ETH' : 'SHARES');
-  const network =
-    id === 4663 ? 'Robinhood' : id === 8453 ? 'Base' : `Chain ${id}`;
-  const chart =
-    /^0x[0-9a-f]{40}$/i.test(address) && [4663, 8453].includes(id)
-      ? `https://gmgn.ai/${id === 8453 ? 'base' : 'robinhood'}/token/${address}`
-      : null;
+  const chart = /^0x[0-9a-f]{40}$/i.test(address)
+    ? `https://gmgn.ai/robinhood/token/${address}`
+    : null;
   const short = address
     ? `${address.slice(0, 8)}…${address.slice(-6)}`
     : 'Address unavailable';
-  return `<div class="metadata"><span class="launchpad" title="${esc(rawLaunchpad)}">${launchpadIcon}${esc(launchpad)}</span><span>${esc(network)}${id === 8453 ? ' · Observed snapshot' : ''}</span></div>
+  return `<div class="metadata"><span class="launchpad" title="${esc(rawLaunchpad)}">${launchpadIcon}${esc(launchpad)}</span><button class="copy-button" type="button" aria-label="Copy ${esc(name)} to launch form"${!draft.name && !draft.ticker ? ' disabled' : ''}>COPY</button></div>
+    <div class="flow"><div class="metric-title">ETH-equivalent per bin</div>${ladder(row.trail)}</div>
     <div class="identity"><strong title="${esc(name)}">${esc(name)}</strong><span class="quote">/ ${esc(quote)}</span></div>
     <div class="address">${chart ? `<a href="${esc(chart)}" target="_blank" rel="noopener noreferrer" title="${esc(address)}">${esc(short)} ↗</a>` : esc(short)}${row.sym && row.name ? ` <span>${esc(row.sym)}</span>` : ''}</div>
-    <div class="metric-title">ETH-equivalent per bin</div>${ladder(row.trail)}
     <div class="totals"><span>Total inflow <b>${number(row.total_in)} ETH</b></span><span>${number(row.swaps)} swaps</span></div>`;
 }
 
 const styles = `
-  :host{display:block;color:var(--feed-text,#223a2c);font:14px/1.45 Arial,Helvetica,sans-serif}
+  :host{display:block;color:var(--feed-text,#223a2c);font:12px/1.4 Arial,Helvetica,sans-serif}
   *{box-sizing:border-box}section{border:1px solid var(--feed-border);border-radius:16px;background:var(--feed-bg);overflow:hidden}
-  .top{padding:18px 20px;border-bottom:1px solid var(--feed-border)}.heading,.metadata,.identity,.totals{display:flex;align-items:center;justify-content:space-between;gap:12px}
-  h2,h3,p{margin:0}h2{font-size:16px}.status{font-size:12px;color:var(--feed-muted)}.status[data-error=true]{color:#92520e}
-  .popular{display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-top:14px}.popular-label{font-size:12px;letter-spacing:.08em;font-weight:750;color:var(--feed-muted)}
+  .top{padding:14px 16px;border-bottom:1px solid var(--feed-border)}.heading,.metadata,.identity,.totals{display:flex;align-items:center;justify-content:space-between;gap:10px}
+  h2,h3,p{margin:0}h2{font-size:14px}.status{font-size:11px;color:var(--feed-muted)}.status[data-error=true]{color:#92520e}
+  .popular{display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-top:10px}.popular-label{font-size:11px;letter-spacing:.08em;font-weight:750;color:var(--feed-muted)}
   .popular a{padding:5px 9px;border-radius:6px;border:1px solid var(--feed-border);background:var(--feed-panel);overflow-wrap:anywhere}.popular small{font-size:12px;color:var(--feed-muted);margin-left:6px}
-  .columns{display:grid;grid-template-columns:1fr 1fr;gap:1px;background:var(--feed-border)}.lane{min-width:0;background:var(--feed-bg);padding:14px}
-  h3{font-size:14px;letter-spacing:.1em;margin:0 4px 10px}h3 span{font-weight:400;color:var(--feed-muted);letter-spacing:0}
-  .list{max-height:320px;overflow:auto;scrollbar-gutter:stable;display:flex;flex-direction:column;gap:10px;overscroll-behavior:contain}
-  article{background:var(--feed-panel);padding:13px;border:1px solid var(--feed-border);border-radius:10px;min-width:0}
-  .metadata{align-items:center;font-size:12px;color:var(--feed-muted);margin-bottom:7px;overflow-wrap:anywhere}.metadata>.launchpad{display:inline-flex;align-items:center;gap:8px;font-size:14px;font-weight:700;color:var(--feed-text)}.metadata>span:last-child{text-align:right}
-  .launchpad-icon{display:grid;place-items:center;width:26px;height:26px;flex-shrink:0;border-radius:7px;color:#2f5034;background:#e6efcf}.launchpad-icon svg{width:18px;height:18px}
-  .identity{justify-content:flex-start;gap:8px}.identity strong{font-size:15px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.quote{flex-shrink:0;font-size:12px;color:var(--feed-accent)}
-  a{color:var(--feed-accent);text-decoration:none}a:hover{text-decoration:underline}a:focus-visible,.ladder:focus-visible,.list:focus-visible{outline:2px solid var(--feed-accent);outline-offset:3px}
-  .address{font-size:12px;color:var(--feed-muted);margin:3px 0 12px;overflow-wrap:anywhere}.metric-title{font-size:12px;color:var(--feed-muted);margin-bottom:6px}
+  .columns{display:grid;grid-template-columns:1fr 1fr;gap:1px;background:var(--feed-border)}.lane{min-width:0;background:var(--feed-bg);padding:10px}
+  h3{font-size:12px;letter-spacing:.1em;margin:0 4px 8px}h3 span{font-weight:400;color:var(--feed-muted);letter-spacing:0}
+  .list{max-height:320px;overflow:auto;scrollbar-gutter:stable;display:flex;flex-direction:column;gap:8px;overscroll-behavior:contain}
+  article{background:var(--feed-panel);padding:10px;border:1px solid var(--feed-border);border-radius:8px;min-width:0}
+  .metadata{align-items:center;color:var(--feed-muted);margin-bottom:6px;overflow-wrap:anywhere}.metadata>.launchpad{display:inline-flex;align-items:center;gap:6px;font-size:12px;font-weight:700;color:var(--feed-text)}
+  .launchpad-icon{display:grid;place-items:center;width:22px;height:22px;flex-shrink:0;border-radius:6px;color:#2f5034;background:#e6efcf}.launchpad-icon svg{width:16px;height:16px}
+  .copy-button{flex-shrink:0;border:1px solid var(--feed-border);border-radius:4px;background:var(--feed-panel);color:var(--feed-text);font:600 11px/1 Arial,Helvetica,sans-serif;padding:6px 9px;cursor:pointer}.copy-button:hover{background:var(--feed-bg)}.copy-button:disabled{opacity:.5;cursor:not-allowed}
+  .flow{margin-bottom:7px}.identity{justify-content:flex-start;gap:7px}.identity strong{font-size:13px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.quote{flex-shrink:0;font-size:11px;color:var(--feed-accent)}
+  a{color:var(--feed-accent);text-decoration:none}a:hover{text-decoration:underline}a:focus-visible,button:focus-visible,.ladder:focus-visible,.list:focus-visible{outline:2px solid var(--feed-accent);outline-offset:3px}
+  .address{font-size:11px;color:var(--feed-muted);margin:2px 0 0;overflow-wrap:anywhere}.metric-title{font-size:11px;color:var(--feed-muted);margin-bottom:4px}
   .ladder{display:grid;grid-template-columns:repeat(11,minmax(44px,1fr));gap:3px;overflow-x:auto;padding:2px;scrollbar-width:thin}
-  .bin{border:1px solid var(--feed-border);border-radius:4px;text-align:center;padding:5px 2px;font:12px/1.25 ui-monospace,monospace;min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
-  .pending{border-style:dashed;color:var(--feed-muted)}.current{outline:1px solid var(--feed-accent);outline-offset:0}.totals{font-size:12px;color:var(--feed-muted);margin-top:10px}.totals b{font-weight:500;color:var(--feed-text)}
+  .bin{border:1px solid var(--feed-border);border-radius:4px;text-align:center;padding:4px 2px;font:10px/1.25 ui-monospace,monospace;min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .pending{border-style:dashed;color:var(--feed-muted)}.current{outline:1px solid var(--feed-accent);outline-offset:0}.totals{font-size:10px;color:var(--feed-muted);margin-top:6px}.totals b{font-weight:500;color:var(--feed-text)}
   .empty{color:var(--feed-muted);padding:12px 4px;font-size:12px}
   @media(max-width:760px){.columns{grid-template-columns:1fr}.top{padding:15px}.heading{align-items:flex-start;flex-direction:column;gap:4px}.list{max-height:280px}}
 `;
@@ -230,6 +237,23 @@ if (
       this.receivedAt = null;
       this.generation = 0;
       this.nodes = new Map();
+      this.shadowRoot.addEventListener('click', (event) => {
+        const button =
+          event.target instanceof Element
+            ? event.target.closest('.copy-button')
+            : null;
+        if (!button || button.hasAttribute('disabled')) return;
+        const key = button.closest('article')?.dataset.rowKey;
+        const row = this.rows.find((item) => rowKey(item) === key);
+        if (!row) return;
+        this.dispatchEvent(
+          new CustomEvent('fungun:copy-tracked-token', {
+            bubbles: true,
+            composed: true,
+            detail: trackedTokenDraft(row),
+          }),
+        );
+      });
       this.render();
     }
 
@@ -270,7 +294,12 @@ if (
         if (!this.running || generation !== this.generation) return;
         const seen = new Set();
         this.rows = snapshot.pools.filter((row) => {
-          if (!row || !['eth', 'shares'].includes(row.quote_kind)) return false;
+          if (
+            !row ||
+            chain(row) !== 4663 ||
+            !['eth', 'shares'].includes(row.quote_kind)
+          )
+            return false;
           const key = rowKey(row);
           if (seen.has(key)) return false;
           seen.add(key);
@@ -337,6 +366,7 @@ if (
           let node = this.nodes.get(key);
           if (!node) {
             node = document.createElement('article');
+            node.dataset.rowKey = key;
             this.nodes.set(key, node);
           }
           const html = card(row);
@@ -347,20 +377,32 @@ if (
                 ? focused.getAttribute('href')
                 : null;
             const previousLadder = node.querySelector('.ladder');
+            const focusCopy =
+              focused?.classList.contains('copy-button') &&
+              node.contains(focused);
             const scrollLeft = previousLadder?.scrollLeft ?? 0;
-            const focusLadder = Boolean(previousLadder && focused === previousLadder);
+            const focusLadder = Boolean(
+              previousLadder && focused === previousLadder,
+            );
             node.innerHTML = html;
             node._html = html;
             const nextLadder = node.querySelector('.ladder');
             if (nextLadder) nextLadder.scrollLeft = scrollLeft;
             if (focusLadder) nextLadder?.focus({ preventScroll: true });
+            if (focusCopy)
+              node
+                .querySelector('.copy-button')
+                ?.focus({ preventScroll: true });
             if (focusHref)
               [...node.querySelectorAll('a')]
                 .find((a) => a.getAttribute('href') === focusHref)
                 ?.focus({ preventScroll: true });
           }
-          if (list.children[i] !== node)
+          if (list.children[i] !== node) {
+            const focused = this.shadowRoot.activeElement;
             list.insertBefore(node, list.children[i] || null);
+            if (focused && node.contains(focused)) focused.focus({ preventScroll: true });
+          }
         });
         if (!rows.length) {
           const empty = document.createElement('p');

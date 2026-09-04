@@ -47,14 +47,17 @@ payout asset with a launchpad breakdown, not by ticker alone.
 
 ## Market feed
 
-The top of the launch page shows ETH and SHARES from a selected tracked cohort.
+The top of the launch page shows ETH and SHARES from a selected Robinhood cohort.
 Same-origin `GET /api/tracked-feed` forwards the public source with no credentials.
 The feed refreshes approximately every four seconds and retries interruptions,
 retaining the last successful rows with a reconnect status. Receipt time confirms
-a response; it is not a per-token valuation timestamp. Base rows remain labeled
-as observed snapshots. Popularity counts similarly named distinct contracts by
+a response; it is not a per-token valuation timestamp. Other chains are excluded.
+Popularity counts similarly named distinct contracts by
 chain, ranked by count then inflow, with links to X search. It makes no claim
 about social trends or complete market coverage. This feed cannot trade or sign.
+COPY fills the coin name and ticker and jumps to the launch form immediately.
+It clears prior artwork and pending uploads. This source does not provide a token
+image or metadata URL; upload artwork separately.
 
 ## Optional browser tools
 

@@ -1,6 +1,10 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { binCells, popularTokens } from "../apps/web/components/tracked-market-feed.mjs";
+import {
+  binCells,
+  popularTokens,
+  trackedTokenDraft,
+} from "../apps/web/components/tracked-market-feed.mjs";
 import { handleTrackedFeed, projectTrackedPayload } from "../apps/web/lib/tracked-feed-handler.mjs";
 
 const address = (n) => `0x${n.toString(16).padStart(40, "0")}`;
@@ -31,6 +35,8 @@ test("projection preserves cohort ordering and preconverted share values, droppi
     row(2, { quote_kind: "other" }),
     row(3),
     row(4, { quote_kind: "shares" }),
+    row(5, { chain_id: 8453 }),
+    row(6, { chain_id: 1, quote_kind: "shares" }),
   ];
   const result = projectTrackedPayload({ pools, extra: "omit" });
   assert.deepEqual(
@@ -48,6 +54,23 @@ test("projection preserves cohort ordering and preconverted share values, droppi
   assert.equal(Number.isFinite(Date.parse(result.fetched_at)), true);
   for (const payload of [null, {}, { pools: null }])
     assert.throws(() => projectTrackedPayload(payload));
+});
+
+test("COPY uses the token ticker, never its quote symbol or contract address", () => {
+  assert.deepEqual(
+    trackedTokenDraft(
+      row(1, {
+        name: "Moon Club",
+        sym: "MOON",
+        quote_symbol: "NVDA",
+        quote_kind: "shares",
+      }),
+    ),
+    { name: "Moon Club", ticker: "MOON" },
+  );
+  assert.deepEqual(trackedTokenDraft({ sym: "TOKEN" }), { name: "TOKEN", ticker: "TOKEN" });
+  assert.deepEqual(trackedTokenDraft({ name: "Only a name" }), { name: "Only a name", ticker: "" });
+  assert.deepEqual(trackedTokenDraft({}), { name: "", ticker: "" });
 });
 
 test("popularity counts distinct contracts per chain, not pools or high-volume singletons", () => {

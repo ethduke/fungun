@@ -25,7 +25,12 @@ export function projectTrackedPayload(payload) {
   return {
     fetched_at: new Date().toISOString(),
     pools: payload.pools
-      .filter((row) => row && ['eth', 'shares'].includes(row.quote_kind))
+      .filter(
+        (row) =>
+          row &&
+          Number(row.chain_id ?? 4663) === 4663 &&
+          ['eth', 'shares'].includes(row.quote_kind),
+      )
       .map((row) => {
         const out = Object.fromEntries(
           fields

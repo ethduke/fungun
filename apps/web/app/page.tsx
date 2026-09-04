@@ -88,6 +88,26 @@ export default function Home() {
     [],
   );
 
+  useEffect(() => {
+    function copyTrackedToken(event: Event) {
+      if (!(event instanceof CustomEvent)) return;
+      const { name: copiedName, ticker: copiedTicker } = event.detail ?? {};
+      if (typeof copiedName !== 'string' || typeof copiedTicker !== 'string') return;
+      // A pending upload must not attach another token's artwork to this draft.
+      imageSequence.current += 1;
+      setName(copiedName);
+      setTicker(copiedTicker);
+      setImage(null);
+      setImagePending(false);
+      setImageError('');
+      document.querySelector('[aria-labelledby="coin-details-heading"]')
+        ?.scrollIntoView({ behavior: 'instant', block: 'start' });
+      document.getElementById('coin-name')?.focus({ preventScroll: true });
+    }
+    document.addEventListener('fungun:copy-tracked-token', copyTrackedToken);
+    return () => document.removeEventListener('fungun:copy-tracked-token', copyTrackedToken);
+  }, [setName, setTicker, setImage]);
+
   usePreviewTools(
     () => ({
       mode: 'preview',
