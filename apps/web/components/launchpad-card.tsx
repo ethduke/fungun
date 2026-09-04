@@ -33,11 +33,13 @@ export function LaunchpadCard({
   onChange,
   catalog,
   loading = false,
+  onPairingOpen,
 }: {
   destination: Destination;
   onChange: (destination: Destination) => void;
   catalog?: CatalogPad;
   loading?: boolean;
+  onPairingOpen?: () => void;
 }) {
   const long = pad.id === 'long';
   const o1 = pad.id === 'o1';
@@ -75,6 +77,9 @@ export function LaunchpadCard({
       {pad.selected && (
         <Select
           value={pad.pairId}
+          onOpenChange={(open) => {
+            if (open && o1) onPairingOpen?.();
+          }}
           onValueChange={(value) => {
             if (
               (o1 && value === 'native') ||

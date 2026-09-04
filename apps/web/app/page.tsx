@@ -511,6 +511,7 @@ export default function Home() {
                     onChange={updateDestination}
                     catalog={pad.id === 'longbow' ? undefined : reads.catalog?.pads[pad.id]}
                     loading={reads.catalogLoading}
+                    onPairingOpen={reads.ensureCatalog}
                   />
                 ))}
               {errors.destinations && (
@@ -518,16 +519,6 @@ export default function Home() {
                   {errors.destinations}
                 </p>
               )}
-              <Button
-                variant="ghost"
-                size="sm"
-                disabled={reads.catalogLoading}
-                onClick={reads.refreshCatalog}
-              >
-                {reads.catalogLoading
-                  ? 'Loading O1 pairings…'
-                  : 'Refresh O1 pairings'}
-              </Button>
               {reads.catalogError && (
                 <p role="alert" className="notice">
                   {reads.catalogError}
