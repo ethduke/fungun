@@ -73,11 +73,39 @@ test("blank optional fee configuration remains valid and cannot enable claims", 
     report.features.find((entry) => entry.id === "long_locked_pool_claims").status,
     "missing_configuration",
   );
-  for (const id of ["launch_execution", "image_storage", "paid_image_generation"])
+  for (const id of ["image_storage", "paid_image_generation"])
     assert.equal(
       feature({ READ_UPSTREAMS: "true", READ_FEES: "true", WALLET_CLAIMS: "true" }, id).status,
       "not_implemented",
     );
+});
+
+test("Long wallet launch reports all server settings and remains disabled by default", () => {
+  assert.deepEqual(feature({}, "long_wallet_launch"), {
+    id: "long_wallet_launch",
+    missing: [
+      "ROBINHOOD_RPC",
+      "LONG_LAUNCH_PROFILE_JSON",
+      "LONG_LAUNCH_GUARDS_JSON",
+      "LAUNCH_ASSET_SERVICE_ORIGIN",
+    ],
+    disabled: ["READ_UPSTREAMS", "LONG_WALLET_LAUNCH"],
+    status: "missing_configuration",
+  });
+  const configured = {
+    ROBINHOOD_RPC: "https://rpc.example.invalid",
+    LONG_WALLET_LAUNCH: "false",
+    LONG_LAUNCH_PROFILE_JSON: "{}",
+    LONG_LAUNCH_GUARDS_JSON: "{}",
+    LAUNCH_ASSET_SERVICE_ORIGIN: "https://assets.example.invalid",
+    READ_UPSTREAMS: "true",
+  };
+  assert.deepEqual(feature(configured, "long_wallet_launch"), {
+    id: "long_wallet_launch",
+    missing: [],
+    disabled: ["LONG_WALLET_LAUNCH"],
+    status: "disabled",
+  });
 });
 
 test("fee readiness requires chain-specific escrow configuration", () => {

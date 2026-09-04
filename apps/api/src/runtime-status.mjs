@@ -57,6 +57,16 @@ export function runtimeStatus(env) {
         reads,
       ),
       feature("tracked_prices", [rpc], reads),
+      feature(
+        "long_wallet_launch",
+        [
+          rpc,
+          ["LONG_LAUNCH_PROFILE_JSON", present(env.LONG_LAUNCH_PROFILE_JSON)],
+          ["LONG_LAUNCH_GUARDS_JSON", present(env.LONG_LAUNCH_GUARDS_JSON)],
+          ["LAUNCH_ASSET_SERVICE_ORIGIN", present(env.LAUNCH_ASSET_SERVICE_ORIGIN)],
+        ],
+        ["READ_UPSTREAMS", "LONG_WALLET_LAUNCH"],
+      ),
       feature("o1_indexed_fees", [o1], fees),
       ...["long", "longbow"].flatMap((padId) => [
         feature(`${padId}_locked_pool_fees`, [rpc, lockedFees(padId)], fees),
@@ -87,7 +97,7 @@ export function runtimeStatus(env) {
         ],
         claims,
       ),
-      ...["launch_execution", "image_storage", "paid_image_generation"].map((id) => ({
+      ...["image_storage", "paid_image_generation"].map((id) => ({
         id,
         status: "not_implemented",
         missing: [],

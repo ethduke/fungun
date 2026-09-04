@@ -88,7 +88,11 @@ strict unsigned-builder format. Each quote's guards contain `tokenBeacon`,
 `tokenImplementation`, `oracleAggregator` (address/runtime hash) and a reviewed
 `heartbeatSeconds` between 1 and 86,400. The asset origin is a pinned HTTPS origin or the existing Fly private
 `http://<asset-app>.internal:8790` service.
-Enablement requires the existing RPC and read budget. No credentials enter client
+The launch path is disabled by default. It becomes eligible for live verification only
+when `LONG_WALLET_LAUNCH=true`, `READ_UPSTREAMS=true`, the other three settings are
+present and valid, and the existing `ROBINHOOD_RPC` is configured. `npm run runtime:status`
+reports these requirements under `long_wallet_launch` without exposing their values.
+No credentials enter client
 build variables; only public deployment information accompanies an unsigned plan.
 
 The portable encoder lives in `apps/web/lib/long-encoding`; the API imports it
