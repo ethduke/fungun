@@ -2,7 +2,8 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import {
   autofillCoinName,
-  grokPromptPlaceholder,
+  autofillGrokPrompt,
+  buildGrokPrompt,
   DEFAULT_DESTINATIONS,
   DEFAULT_CHAIN_ID,
   IMAGE_LIMIT,
@@ -27,35 +28,65 @@ const draft = {
 };
 const destinations = () => structuredClone(DEFAULT_DESTINATIONS);
 
-await test('Grok placeholder uses the coin name and permits only ticker text', () => {
+await test('Grok prompt uses the coin name and permits only ticker text', () => {
   assert.equal(
-    grokPromptPlaceholder('Moon Department', 'MOON'),
+    buildGrokPrompt('Moon Department', 'MOON'),
     'Create a bright, simple logo for a memecoin named "Moon Department". Use bold shapes, no small details, and a square composition. The only text should be the ticker "MOON".',
   );
   assert.match(
-    grokPromptPlaceholder('Sunny', 'SUN'),
+    buildGrokPrompt('Sunny', 'SUN'),
     /named "Sunny".*ticker "SUN"/,
   );
   assert.match(
-    grokPromptPlaceholder('🌙', 'Moon'),
+    buildGrokPrompt('🌙', 'Moon'),
     /named "🌙".*ticker "Moon"/,
   );
 });
 
-await test('Grok placeholder handles partial, blank and cleared identity fields', () => {
+await test('Grok prompt handles partial, blank and cleared identity fields', () => {
   assert.match(
-    grokPromptPlaceholder('   ', ' MOON '),
+    buildGrokPrompt('   ', ' MOON '),
     /named "MOON".*ticker "MOON"/,
   );
   assert.match(
-    grokPromptPlaceholder(' Moon ', ''),
+    buildGrokPrompt(' Moon ', ''),
     /named "Moon".*Do not include any text\.$/,
   );
   assert.equal(
-    grokPromptPlaceholder('', ''),
+    buildGrokPrompt('', ''),
     'Create a bright, simple logo for a memecoin. Use bold shapes, no small details, and a square composition. Do not include any text.',
   );
-  assert.equal(grokPromptPlaceholder(' ', ' '), grokPromptPlaceholder('', ''));
+  assert.equal(buildGrokPrompt(' ', ' '), buildGrokPrompt('', ''));
+});
+
+await test('ticker fills real prompt text and follows typing, replacement and clearing', () => {
+  let current = { name: '', ticker: '', prompt: '' };
+  for (const ticker of ['M', 'MO', 'MOON', 'SUN', 'SU', '', 'STAR']) {
+    const named = { ...current, name: autofillCoinName(current.name, current.ticker, ticker) };
+    named.prompt = autofillGrokPrompt(current, named);
+    const next = { ...named, ticker };
+    next.prompt = autofillGrokPrompt(named, next);
+    assert.equal(next.prompt, ticker ? buildGrokPrompt(ticker, ticker) : '');
+    current = next;
+  }
+});
+
+await test('generated prompt follows manual names and staged or copied identities', () => {
+  const current = { name: 'MOON', ticker: 'MOON', prompt: buildGrokPrompt('MOON', 'MOON') };
+  const named = { ...current, name: 'Moon Department' };
+  named.prompt = autofillGrokPrompt(current, named);
+  assert.equal(named.prompt, buildGrokPrompt('Moon Department', 'MOON'));
+  const copied = { ...named, name: 'Sun Club' };
+  copied.prompt = autofillGrokPrompt(named, copied);
+  assert.equal(autofillGrokPrompt(copied, { name: 'Sun Club', ticker: 'SUN' }), buildGrokPrompt('Sun Club', 'SUN'));
+});
+
+await test('custom image prompts are preserved and clearing allows the next ticker to fill them', () => {
+  const current = { name: 'MOON', ticker: 'MOON', prompt: 'A bright moon wearing sunglasses.' };
+  for (const next of [{ name: 'SUN', ticker: 'SUN' }, { name: '', ticker: '' }, { name: 'Moon Club', ticker: 'MOON' }])
+    assert.equal(autofillGrokPrompt(current, next), current.prompt);
+  assert.equal(autofillGrokPrompt({ ...current, prompt: '' }, { name: 'SUN', ticker: 'SUN' }), buildGrokPrompt('SUN', 'SUN'));
+  assert.equal(autofillGrokPrompt({ name: '', ticker: '', prompt: '' }, { name: 'Moon', ticker: '' }), '');
 });
 
 await test('coin name follows ticker typing, replacement and clearing', () => {

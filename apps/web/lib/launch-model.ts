@@ -45,7 +45,7 @@ export function autofillCoinName(
   return !name.trim() || name === previousTicker ? ticker : name;
 }
 
-export function grokPromptPlaceholder(name: string, ticker: string) {
+export function buildGrokPrompt(name: string, ticker: string) {
   const symbol = ticker.trim();
   const coinName = name.trim() || symbol;
   const subject = coinName
@@ -55,6 +55,18 @@ export function grokPromptPlaceholder(name: string, ticker: string) {
     ? `The only text should be the ticker ${JSON.stringify(symbol)}.`
     : 'Do not include any text.';
   return `Create a bright, simple logo for ${subject}. Use bold shapes, no small details, and a square composition. ${text}`;
+}
+
+export function autofillGrokPrompt(
+  previous: { name: string; ticker: string; prompt: string },
+  next: { name: string; ticker: string },
+) {
+  if (
+    previous.prompt.trim() &&
+    previous.prompt !== buildGrokPrompt(previous.name, previous.ticker)
+  )
+    return previous.prompt;
+  return next.ticker.trim() ? buildGrokPrompt(next.name, next.ticker) : '';
 }
 
 export const IMAGE_LIMIT = 2 * 1024 * 1024;

@@ -12,6 +12,7 @@ import {
 } from 'react';
 import {
   autofillCoinName,
+  autofillGrokPrompt,
   DEFAULT_CHAIN_ID,
   DEFAULT_DESTINATIONS,
   normalizeTicker,
@@ -72,13 +73,16 @@ export function useDraftField<K extends keyof LaunchDraft>(
     (value: SetStateAction<LaunchDraft[K]>) => {
       setDraft((current) => {
         const next = typeof value === 'function' ? value(current[key]) : value;
-        return {
+        const updated = {
           ...current,
           [key]:
             key === 'ticker' && typeof next === 'string'
               ? normalizeTicker(next)
               : next,
         };
+        return key === 'name' || key === 'ticker'
+          ? { ...updated, prompt: autofillGrokPrompt(current, updated) }
+          : updated;
       });
     },
     [key, setDraft],

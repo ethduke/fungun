@@ -33,7 +33,6 @@ import { LaunchpadCard } from '@/components/launchpad-card';
 import { LaunchSection } from '@/components/launch-section';
 import {
   autofillCoinName,
-  grokPromptPlaceholder,
   IMAGE_LIMIT,
   imageFileError,
   imageKind,
@@ -338,7 +337,7 @@ export default function Home() {
                     </label>
                     <Textarea
                       id="image-prompt"
-                      placeholder={grokPromptPlaceholder(name, ticker)}
+                      placeholder="Enter a ticker to start, or describe your image."
                       maxLength={1000}
                       value={prompt}
                       onChange={(event) => setPrompt(event.target.value)}
