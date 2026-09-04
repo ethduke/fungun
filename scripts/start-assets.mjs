@@ -3,6 +3,7 @@ import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { parseEnv } from "node:util";
 import { assetEnvironment } from "../apps/api/src/asset-environment.mjs";
+import { maintenanceArguments } from "../apps/api/src/asset-maintenance.mjs";
 
 try {
   let local = {};
@@ -13,12 +14,12 @@ try {
       if (error.code !== "ENOENT") throw error;
     }
   }
-  const initialize = process.argv.slice(2);
-  if (initialize.length && (initialize.length !== 1 || initialize[0] !== "--initialize-new-volume"))
-    throw new Error();
+  const args = process.argv.slice(2);
+  const initialize = args.length === 1 && args[0] === "--initialize-new-volume";
+  if (args.length && !initialize) maintenanceArguments(args);
   const child = spawn(
     process.execPath,
-    [initialize.length ? "src/init-assets.mjs" : "src/asset-server.mjs", ...initialize],
+    [initialize ? "src/init-assets.mjs" : args.length ? "src/asset-maintenance.mjs" : "src/asset-server.mjs", ...args],
     {
       cwd: fileURLToPath(new URL("../apps/api/", import.meta.url)),
       env: assetEnvironment(process.env, local),

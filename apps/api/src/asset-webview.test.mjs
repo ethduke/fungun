@@ -7,6 +7,7 @@ import sharp from "sharp";
 import { privateKeyToAccount, generatePrivateKey } from "viem/accounts";
 import { hexToString } from "viem";
 import { AssetStore, initializeAssetStore } from "./asset-store.mjs";
+import { maintainAssets } from "./asset-maintenance.mjs";
 import { validateAssetInput } from "./asset-service.mjs";
 import { createAssetProxy } from "../../web/lib/asset-proxy.ts";
 import {
@@ -262,6 +263,91 @@ test("publication rejection preserves safe explanation and backoff without unloc
     },
   );
   assert.equal(readAssetRecovery(storage, origin).id, approval.id);
+});
+
+test("only an exact terminal expiry receipt unlocks the browser without another signature or publication", async (t) => {
+  const { store, account, image, provider, providerCalls, client, storage, config } =
+    await setup(t);
+  const approval = await prepareAsset(image, account.address, draft, origin, client);
+  const signature = await signWalletAsset(provider, approval, () => true);
+  const recovery = await recoveryFor(approval);
+  await assert.rejects(
+    publishAsset(
+      approval,
+      signature,
+      recovery,
+      storage,
+      () => true,
+      async () => {
+        throw new Error();
+      },
+    ),
+  );
+  const terminal = {
+    id: recovery.id,
+    status: "expired",
+    imageHash: recovery.imageHash,
+    metadataHash: recovery.metadataHash,
+  };
+  for (const changed of [
+    { id: "f".repeat(48) },
+    { imageHash: "f".repeat(64) },
+    { metadataHash: "f".repeat(64) },
+    { status: "cancelled" },
+    { extra: true },
+  ]) {
+    await assert.rejects(
+      checkAssetStatus(recovery, account.address, storage, async () =>
+        Response.json({ ...terminal, ...changed }),
+      ),
+    );
+    assert.equal(readAssetRecovery(storage, origin).id, recovery.id);
+    const proxy = createAssetProxy(
+      () => config,
+      async () => Response.json({ ...terminal, ...changed }),
+    );
+    const result = await proxy(
+      new Request(origin + "/api/assets/status", {
+        method: "POST",
+        headers: { origin, "content-type": "application/json", "x-fungun-intent": "asset-status" },
+        body: JSON.stringify({
+          chainId: 4663,
+          wallet: account.address,
+          id: recovery.id,
+          imageHash: recovery.imageHash,
+          metadataHash: recovery.metadataHash,
+        }),
+      }),
+      "status",
+    );
+    assert.equal(result.status, 503);
+  }
+  maintainAssets({
+    root: store.root,
+    mode: "expire-pending",
+    execute: true,
+    serviceStopped: true,
+    now: () => approval.expiresAt + 1,
+  });
+  config.enabled = false;
+  const methods = [...providerCalls];
+  const result = await checkAssetStatus(
+    recovery,
+    account.address,
+    storage,
+    async (path, options) => {
+      assert.equal(path, "/api/assets/status");
+      return client(path, options);
+    },
+  );
+  assert.deepEqual(result, terminal);
+  assert.equal(readAssetRecovery(storage, origin), null);
+  assert.deepEqual(providerCalls, methods);
+  assert.equal(store.db.prepare("SELECT COUNT(*) AS n FROM asset_objects").get().n, 0);
+  await assert.rejects(
+    store.publish({ id: approval.id, wallet: account.address, image, draft, signature }),
+    { code: "asset_approval_expired" },
+  );
 });
 
 test("changed wallet context, rejection, expiry and double clicks cannot publish or sign twice", async (t) => {

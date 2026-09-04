@@ -28,9 +28,12 @@ it locked and offers a read-only status check; it never replays publication or
 requests another signature. Safe error causes and Retry-After remain visible.
 
 The server database is authoritative; a browser marker is not a durable job
-queue. Pending, reserved, expired/unknown or inconsistent records never authorize
-another publication. Terminal cancellation and operator recovery are still
-required before broad rollout. Closing a tab may lose its session marker.
+queue. Pending, reserved, unknown or inconsistent records never authorize
+another publication. Only an exact ID/hash-bound, permanently expired receipt
+can release an unsuccessful attempt; elapsed browser time is not evidence.
+Offline maintenance can expire pending approvals that never reserved storage.
+Partially written reservations still need operator investigation. Closing a tab
+may lose its session marker.
 
 The web server needs runtime-only `APP_ORIGIN`, `ASSET_PUBLIC_ORIGIN`,
 `ASSET_SERVICE_ORIGIN` and `ASSET_UPLOADS`. The service origin is a pinned HTTPS
@@ -141,7 +144,8 @@ The HTTP contract is deliberately narrow:
   the processed preview. Neither route accepts filenames, URLs or decoder options.
 - `POST /v1/asset-status`: exact chain, wallet, challenge ID and both content
   hashes. Looks up only the matching owner-bound record and verifies committed
-  object bytes. It returns `pending`, `uncertain`, or the exact published receipt,
+  object bytes. It returns `pending`, `uncertain`, an ID/hash-bound terminal
+  `expired` receipt, or the exact published receipt,
   without signing, decoding, publishing or RPC. It remains available when uploads
   are disabled. Published receipts include the challenge `id`.
 - All POST routes require the exact configured Origin, JSON content type and
@@ -169,7 +173,43 @@ public reads. Exact successful retries return the same URLs without another
 charge. Interrupted reservations remain charged and blocked; do not reset the
 database, delete orphan files or approve another upload to work around them.
 Publication attempt quotas can remain charged if later reservation checks fail.
-Read-only status exists; terminal operator recovery is still required before broad rollout.
+Read-only status and offline pending-expiry recovery exist. Reserved/partial
+publication recovery remains an operator gate before broad rollout.
+
+## Offline maintenance
+
+Schema 2 preserves terminal expired records. Migration 001 is unchanged; migration
+002 adds that state without changing challenge identity, quota counters, objects,
+HMAC key or pinned origins. New explicit initialization installs both migrations.
+Normal startup refuses schema 1; it never migrates or resets existing storage.
+
+With the ignored `ASSET_STORE_ROOT` configured, inspect or plan without writing:
+
+```sh
+node scripts/start-assets.mjs --inspect
+node scripts/start-assets.mjs --migrate-schema
+node scripts/start-assets.mjs --expire-pending
+```
+
+These modes use a read-only SQLite connection and print aggregate counts only.
+For an existing store, take a consistent independent backup and stop the asset
+service before applying maintenance. Add both `--execute --service-stopped` to
+the selected migration/expiry command. Inside the asset image, the equivalent
+entrypoint is `node src/asset-maintenance.mjs` with the same arguments.
+
+The acknowledgement is not a process lock: database transactions revalidate
+invariants and synchronize competing writes. Expiry atomically persists the
+clock barrier and changes only `pending` rows strictly older than its cutoff.
+Reservation rechecks state and expiry inside its own transaction. No signature,
+wallet key, new file, publication, RPC, quota refund or deletion is involved.
+Status remains read-only, and an expired approval can never publish again.
+
+Unknown IDs cannot be reconstructed. Reserved rows stay charged and locked, even
+when files appear complete. No command finalizes or discards partial objects.
+Challenge history is retained with a 4,096-row admission ceiling; expiry does
+not reclaim that capacity. The service pauses new previews at the ceiling until
+a separately reviewed retention policy exists. Never delete rows or reset quotas
+to reopen it. Backups and real restore testing remain required.
 
 Fly volumes are not automatically shared between Machines. Keep this store
 single-writer and separately backed up; adding another Machine with an empty

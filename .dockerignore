@@ -9,6 +9,7 @@
 !apps/api/Dockerfile.assets
 !apps/api/migrations/
 !apps/api/migrations/001-assets.sql
+!apps/api/migrations/002-assets-expiry.sql
 !apps/decoder/
 !apps/decoder/Dockerfile
 !apps/decoder/package.json

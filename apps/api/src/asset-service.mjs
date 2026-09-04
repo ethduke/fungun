@@ -20,6 +20,7 @@ const messages = {
   invalid_launch_details: "Check the coin name, ticker and description before trying again.",
   request_too_large: "Choose an image no larger than 2 MiB.",
   asset_storage_full: "Image storage is temporarily full. Please try again later.",
+  asset_history_full: "Publication is paused while storage history is reviewed. Please try again later.",
   rate_limited: "Too many requests. Please wait before trying again.",
   asset_busy: "Another image is being processed. Please try again shortly.",
   decoder_unavailable:

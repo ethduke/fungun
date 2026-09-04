@@ -49,6 +49,19 @@ function checkRoot(root, production) {
   }
 }
 
+export function checkAssetStorage(root, production = false) {
+  checkRoot(root, production);
+  for (const [name, directory] of [["assets.sqlite", false], ["objects", true]]) {
+    const path = join(root, name);
+    const stat = lstatSync(path);
+    if (
+      realpathSync(path) !== path ||
+      (directory ? !stat.isDirectory() : !stat.isFile() || stat.nlink !== 1) ||
+      (stat.mode & 0o077) !== 0
+    ) throw new ServiceError("asset_storage_unavailable");
+  }
+}
+
 export function initializeAssetStore(root, production = false, now = Date.now) {
   checkRoot(root, production);
   if (existsSync(join(root, "objects")))
@@ -59,6 +72,7 @@ export function initializeAssetStore(root, production = false, now = Date.now) {
   try {
     budget.db.exec(readFileSync(new URL("../migrations/001-assets.sql", import.meta.url), "utf8"));
     budget.db.prepare("INSERT INTO settings VALUES (?, ?)").run("asset-schema", "1");
+    budget.db.exec(readFileSync(new URL("../migrations/002-assets-expiry.sql", import.meta.url), "utf8"));
     budget.db.prepare("INSERT INTO settings VALUES (?, ?)").run("asset-bytes", "0");
     budget.db.prepare("INSERT INTO settings VALUES (?, ?)").run("asset-origin", "");
     budget.db.prepare("INSERT INTO settings VALUES (?, ?)").run("asset-app-origin", "");
@@ -132,25 +146,13 @@ function validOrigin(value) {
 
 export class AssetStore {
   constructor({ root, publicOrigin, appOrigin, production = false, now = Date.now }) {
-    checkRoot(root, production);
+    checkAssetStorage(root, production);
     if (
       !validOrigin(publicOrigin) ||
       (!validOrigin(appOrigin) &&
         (production || !["http://127.0.0.1:3000", "http://localhost:3000"].includes(appOrigin)))
     )
       throw new ServiceError("invalid_asset_origin");
-    for (const [name, directory] of [
-      ["assets.sqlite", false],
-      ["objects", true],
-    ]) {
-      const path = join(root, name);
-      if (
-        realpathSync(path) !== path ||
-        (directory ? !lstatSync(path).isDirectory() : !lstatSync(path).isFile()) ||
-        (lstatSync(path).mode & 0o077) !== 0
-      )
-        throw new ServiceError("asset_storage_unavailable");
-    }
     this.root = root;
     this.directory = join(root, "objects");
     this.publicOrigin = publicOrigin;
@@ -162,13 +164,14 @@ export class AssetStore {
       const setting = (name) =>
         this.db.prepare("SELECT value FROM settings WHERE name = ?").get(name)?.value;
       const used = Number(setting("asset-bytes"));
+      if (setting("asset-schema") === "1") throw new ServiceError("asset_migration_required");
       const reserved = this.db
         .prepare(
-          "SELECT COALESCE(SUM(bytes), 0) AS bytes FROM asset_challenges WHERE state != 'pending'",
+          "SELECT COALESCE(SUM(bytes), 0) AS bytes FROM asset_challenges WHERE state IN ('reserved', 'published')",
         )
         .get().bytes;
       if (
-        setting("asset-schema") !== "1" ||
+        setting("asset-schema") !== "2" ||
         !/^\d+$/.test(setting("asset-bytes") ?? "") ||
         !Number.isSafeInteger(used) ||
         used > maximumBytes ||
@@ -250,13 +253,12 @@ export class AssetStore {
       throw new ServiceError("invalid_wallet", 400);
     const bundle = this.bundle(image, draft);
     const now = this.clock();
-    this.db
-      .prepare("DELETE FROM asset_challenges WHERE state = 'pending' AND expires < ?")
-      .run(now);
+    if (this.db.prepare("SELECT COUNT(*) AS count FROM asset_challenges").get().count >= 4096)
+      throw new ServiceError("asset_history_full", 507);
     if (
       this.db
-        .prepare("SELECT COUNT(*) AS count FROM asset_challenges WHERE state = 'pending'")
-        .get().count >= 64
+        .prepare("SELECT COUNT(*) AS count FROM asset_challenges WHERE state = 'pending' AND expires >= ?")
+        .get(now).count >= 64
     )
       throw new ServiceError("asset_busy", 429, 60);
     this.budget.debit([
@@ -313,7 +315,7 @@ export class AssetStore {
       )
         throw new ServiceError("invalid_asset_approval", 400);
       const bundle = this.bundle(image, draft);
-      const row = this.db.prepare("SELECT * FROM asset_challenges WHERE id = ?").get(id);
+      let row = this.db.prepare("SELECT * FROM asset_challenges WHERE id = ?").get(id);
       if (
         !row ||
         row.owner !== this.owner(wallet) ||
@@ -330,6 +332,9 @@ export class AssetStore {
       }
       if (signer.toLowerCase() !== wallet.toLowerCase())
         throw new ServiceError("invalid_asset_approval", 400);
+      row = this.db.prepare("SELECT * FROM asset_challenges WHERE id = ?").get(id);
+      if (!row) throw new ServiceError("asset_publication_uncertain", 409);
+      if (row.state === "expired") throw new ServiceError("asset_approval_expired", 409);
       if (row.state === "published") {
         this.read(`${bundle.imageHash}.webp`);
         this.read(`${bundle.metadataHash}.json`);
@@ -346,6 +351,7 @@ export class AssetStore {
       ]);
       this.db.exec("BEGIN IMMEDIATE");
       try {
+        if (row.expires < this.clock()) throw new ServiceError("asset_approval_expired", 409);
         const used = Number(
           this.db.prepare("SELECT value FROM settings WHERE name = 'asset-bytes'").get().value,
         );
@@ -408,6 +414,8 @@ export class AssetStore {
       row.metadata_hash !== metadataHash
     )
       throw new ServiceError("asset_approval_changed", 404);
+    if (row.state === "expired")
+      return { id, status: "expired", imageHash, metadataHash };
     if (row.state !== "published")
       return { id, status: row.state === "reserved" ? "uncertain" : "pending" };
     this.read(`${imageHash}.webp`);

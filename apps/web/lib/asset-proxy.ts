@@ -9,6 +9,7 @@ import {
   readAssetJson,
   validateAssetPreview,
   validatePublishedAsset,
+  validateExpiredAsset,
   type AssetApproval,
 } from './asset-protocol.ts';
 
@@ -159,6 +160,7 @@ export function createAssetProxy(
           'invalid_asset_approval',
           'asset_publication_uncertain',
           'asset_storage_full',
+          'asset_history_full',
           'asset_integrity_failed',
           'rate_limited',
           'asset_busy',
@@ -208,6 +210,14 @@ export function createAssetProxy(
         imageUrl: `${publicOrigin}/launch-assets/${String(value.imageHash)}.webp`,
         metadataUrl: `${publicOrigin}/launch-assets/${String(value.metadataHash)}.json`,
       };
+      if (
+        operation === 'status' &&
+        raw &&
+        typeof raw === 'object' &&
+        'status' in raw &&
+        raw.status === 'expired'
+      )
+        return Response.json(validateExpiredAsset(raw, expected), { headers });
       if (operation === 'publish') {
         const { assetHash } = await import('./asset-protocol.ts');
         const draft = assetDraft(value.draft);

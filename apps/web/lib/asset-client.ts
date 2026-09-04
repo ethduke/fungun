@@ -8,9 +8,11 @@ import {
   readAssetJson,
   validateAssetPreview,
   validatePublishedAsset,
+  validateExpiredAsset,
   type AssetApproval,
   type AssetDraft,
   type PublishedAsset,
+  type ExpiredAsset,
 } from './asset-protocol.ts';
 
 export type AssetRecovery = Pick<
@@ -232,7 +234,7 @@ export async function checkAssetStatus(
   wallet: string,
   storage: Storage,
   fetcher: typeof fetch = fetch,
-): Promise<PublishedAsset | null> {
+): Promise<PublishedAsset | ExpiredAsset | null> {
   const account = assetWallet(wallet);
   if (
     (await assetHash(new TextEncoder().encode(account))) !== recovery.walletHash
@@ -255,7 +257,13 @@ export async function checkAssetStatus(
     ['pending', 'uncertain'].includes(raw.status as string)
   )
     return null;
-  const result = validatePublishedAsset(raw, recovery);
+  const result =
+    raw &&
+    typeof raw === 'object' &&
+    'status' in raw &&
+    raw.status === 'expired'
+      ? validateExpiredAsset(raw, recovery)
+      : validatePublishedAsset(raw, recovery);
   clearAssetRecovery(storage, recovery);
   return result;
 }

@@ -26,6 +26,25 @@ export type PublishedAsset = Pick<
   AssetApproval,
   'id' | 'imageHash' | 'metadataHash' | 'imageUrl' | 'metadataUrl'
 > & { status: 'published'; launchReady: false };
+export type ExpiredAsset = Pick<
+  AssetApproval,
+  'id' | 'imageHash' | 'metadataHash'
+> & { status: 'expired' };
+
+export function validateExpiredAsset(
+  value: unknown,
+  expected: Pick<AssetApproval, 'id' | 'imageHash' | 'metadataHash'>,
+): ExpiredAsset {
+  if (
+    !objectFields(value, ['id', 'status', 'imageHash', 'metadataHash']) ||
+    value.status !== 'expired' ||
+    value.id !== expected.id ||
+    value.imageHash !== expected.imageHash ||
+    value.metadataHash !== expected.metadataHash
+  )
+    throw new AssetError('invalid_asset_response');
+  return value as ExpiredAsset;
+}
 
 export class AssetError extends Error {
   code: string;
@@ -64,6 +83,8 @@ const messages: Record<string, string> = {
     'The processed image is too large. Choose a smaller or simpler image.',
   asset_storage_full:
     'Image storage is temporarily full. Please try again later.',
+  asset_history_full:
+    'Publication is paused while storage history is reviewed. Please try again later.',
   asset_integrity_failed:
     'Stored files could not be verified. Contact support before publishing again.',
   asset_publication_uncertain:

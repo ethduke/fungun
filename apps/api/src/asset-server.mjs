@@ -44,7 +44,7 @@ try {
     );
 } catch {
   console.error(
-    "Asset service refused to start. Verify its dedicated volume, origins and Machine identity.",
+    "Asset service refused to start. Verify its dedicated volume, schema migrations, origins and Machine identity.",
   );
   process.exitCode = 1;
 }

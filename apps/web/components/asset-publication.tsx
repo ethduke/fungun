@@ -94,6 +94,7 @@ export function AssetPublication({
     context?: string;
   } | null>(null);
   const [error, setError] = useState('');
+  const [recoveryNotice, setRecoveryNotice] = useState('');
   const [expiredId, setExpiredId] = useState('');
   const expires = preview?.approval.id === expiredId;
   const [cooldown, setCooldown] = useState(false);
@@ -153,6 +154,7 @@ export function AssetPublication({
     inFlight.current = true;
     setBusy('Checking image…');
     setError('');
+    setRecoveryNotice('');
     setPreview(null);
     setPublished(null);
     const revision = context;
@@ -250,7 +252,13 @@ export function AssetPublication({
         sessionStorage,
       );
       if (mounted.current) {
-        if (result) {
+        if (result?.status === 'expired') {
+          setPublished(null);
+          setPreview(null);
+          setRecoveryNotice(
+            'That approval expired without publishing. You can prepare a new preview.',
+          );
+        } else if (result) {
           setPublished({ result });
           setPreview(null);
         } else
@@ -375,6 +383,7 @@ export function AssetPublication({
         </>
       )}
       {busy && <output>{busy}</output>}
+      {recoveryNotice && <output>{recoveryNotice}</output>}
       {recoveryBlocked && (
         <p className="field-error" role="alert">
           {savedRecovery === 'unavailable'
