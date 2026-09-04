@@ -1,8 +1,8 @@
 # Read-service milestone
 
 The webview now calls a separate Node service for catalogs and explicit ticker
-checks. External reads are off by default. Long reservation reads were verified
-locally on 4 September 2026; O1 authenticated reads and Fly deployment remain
+checks. External reads are off by default. Long reservation reads and authenticated
+O1 catalogs were verified locally on 4 September 2026; Fly deployment remains
 pending. No provider credentials were copied from the reference project.
 
 ## Local setup
@@ -14,7 +14,10 @@ http://127.0.0.1:3000; its development proxy forwards `/api/catalog` and
 `GET /api/tracked-feed` route runs in the web server. SQLite runtime files live in ignored
 `apps/api/local/`; never delete them to reset a spent quota.
 
-An ignored root `.env` can hold backend runtime configuration. Leave the committed
+An ignored root `.env` can hold backend runtime configuration. The local API
+launcher forwards only its allowlisted settings, excluding wallet signing keys
+and unrelated credentials; see [runtime secret handling](runtime-secrets.md).
+Leave the committed
 `.env.example` blank. `READ_UPSTREAMS=true` is the explicit opt-in to provider reads:
 
 - `O1_API_KEY`: server-only O1 catalog access with `config:read` scope. The upstream origin is fixed in code.
@@ -39,10 +42,23 @@ The reviewed LongLauncher source identity was matched to its verified, nonproxy
 deployment. Four read-only `cast` operations checked chain ID, captured a block,
 matched runtime bytecode to the reviewed pin, and decoded a reservation lookup at
 that same block. The web-to-backend ticker path then passed an HTTP smoke check.
-Only local catalog/ticker reads were opted in; O1 remains unavailable without its
-key, and wallet claims, launches and payments remain disabled. Registry identities
+Only local catalog/ticker reads were opted in. The user-configured O1 key passed
+the authenticated Robinhood catalog check. The running web-to-API path then
+returned 194 Robinhood and 10 Base RWA pairings. These are observed counts, not
+fixed expected counts or launch approval. An earlier Base request was throttled;
+no immediate retry was sent and a later explicit check succeeded.
+Wallet claims, launches and payments remain disabled. Registry identities
 and the RPC endpoint stay in the ignored local environment, never this document.
 This proves a reservation read works, not global uniqueness or launch readiness.
+
+With the local webview and API running, `npm run verify:catalog:local -- 4663`
+checks Robinhood; use `8453` for Base. Each explicit command makes one local HTTP
+request through the real web proxy, validates the browser response shape, and
+prints only statuses and pair counts. It does not read `.env`, print pair data,
+retry, bypass the API's cache/quota, or change feature switches. A ready O1 catalog
+can pass while Long remains unavailable. Throttling returns a retry delay and a
+nonzero exit code; wait before requesting another check. These checks do not
+verify fees, ticker uniqueness, contract execution or wallet claims.
 
 Before enabling Long checks, verify chain ID, target code hash, ABI and whether
 the target is a proxy using read-only `cast` against the configured RPC. The current
@@ -136,10 +152,15 @@ fair per-user limits are a separate production step, not an excuse to loosen cap
 
 ## Fly preparation (not deployed)
 
-Before provisioning, choose the Fly organization, app name, region, web/API
-domains, and approve the single-Machine persistent-volume budget. An authenticated
-local Fly CLI is sufficient; do not send a Fly token in chat. Do not create a
-second backend in an existing app or overwrite another service's configuration.
+Use the authenticated Fly CLI to discover the organization, existing apps and
+regions before requesting configuration from the operator. Inspection found an
+existing bot deployment with its own signing/Telegram settings and persistent
+data; it must remain untouched. Create a dedicated aggregator app and volume,
+not a second backend in that bot app. Existing organization/region defaults can
+be reused, but production still needs the webview's exact HTTPS origin. A custom
+API hostname is optional because Fly supplies an app hostname. Confirm the new
+single-Machine persistent-volume deployment before provisioning; no Fly token
+needs to be sent in chat.
 Load API/RPC keys and reviewed contract identities through an ignored local file
 or Fly secrets, never shell history, tracked files or public browser variables.
 
