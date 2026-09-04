@@ -50,7 +50,7 @@ try {
   const processor = uploadsEnabled || imageConfig.enabled ? new AssetDecoder(process.env.ASSET_DECODER_ORIGIN) : null;
   const imagePath=imageJobsPath(config.root,production);
   const images=imageConfig.enabled || existsSync(imagePath) ? new ImageJobStore(imagePath) : null;
-  const payments=imageConfig.enabled ? createImagePayments({asset:imageConfig.asset,facilitatorUrl:process.env.X402_FACILITATOR_URL,bearerToken:process.env.X402_FACILITATOR_TOKEN}) : null;
+  const payments=imageConfig.enabled ? createImagePayments({asset:imageConfig.asset,facilitatorUrl:process.env.X402_FACILITATOR_URL}) : null;
   const settlementReader=imageConfig.enabled ? createImageSettlementReader({asset:imageConfig.asset,rpcUrl:process.env.ROBINHOOD_RPC}) : null;
   const worker=imageConfig.enabled ? createImageWorker(images,createGrokImageProvider({apiKey:process.env.OPENROUTER_API_KEY}),processor,payments,settlementReader) : null;
   const imageHandler=createImageHandler(imageConfig,images,worker,payments,settlementReader);

@@ -15,7 +15,7 @@ export const TRANSFER_AUTHORIZATION_TYPES = {
 };
 export function readImageConfig(env = process.env) {
   const enabled = env.IMAGE_GENERATION === "true";
-  const amount = env.IMAGE_PRICE_USDG_BASE_UNITS || "100000";
+  const amount = "100000";
   const payTo = (env.IMAGE_PAYMENT_RECIPIENT || "").toLowerCase();
   const asset = (env.IMAGE_USDG_ADDRESS || "").toLowerCase();
   if (

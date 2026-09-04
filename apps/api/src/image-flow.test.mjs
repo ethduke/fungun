@@ -12,6 +12,7 @@ import { ImageJobStore, initializeImageJobs } from "./image-job-store.mjs";
 import {
   createImageHandler,
   imagePaymentRequired,
+  readImageConfig,
   TRANSFER_AUTHORIZATION_TYPES,
 } from "./image-service.mjs";
 
@@ -43,6 +44,21 @@ const operation = (index = 1) => ({
 const encode = (value) => Buffer.from(JSON.stringify(value)).toString("base64");
 const decodeHeader = (response, header) =>
   JSON.parse(Buffer.from(response.headers.get(header), "base64"));
+
+test("image runtime uses only required configuration and a fixed USDG price", () => {
+  assert.deepEqual(
+    readImageConfig({
+      APP_ORIGIN: origin,
+      IMAGE_GENERATION: "true",
+      IMAGE_PAYMENT_RECIPIENT: config.payTo,
+      IMAGE_USDG_ADDRESS: USDG_ADDRESS,
+      OPENROUTER_API_KEY: "EXAMPLE",
+      X402_FACILITATOR_URL: "https://payments.example",
+      ROBINHOOD_RPC: "https://rpc.example",
+    }),
+    config,
+  );
+});
 
 async function signedProof(job, { signer = account, authorization = {} } = {}) {
   const quote = imagePaymentRequired(job, origin);

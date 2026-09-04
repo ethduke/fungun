@@ -14,10 +14,8 @@ const names = [
   "IMAGE_PAYMENT_RECIPIENT",
   "IMAGE_USDG_ADDRESS",
   "ROBINHOOD_RPC",
-  "IMAGE_PRICE_USDG_BASE_UNITS",
   "OPENROUTER_API_KEY",
   "X402_FACILITATOR_URL",
-  "X402_FACILITATOR_TOKEN",
 ];
 
 export function assetEnvironment(inherited = {}, local = {}) {

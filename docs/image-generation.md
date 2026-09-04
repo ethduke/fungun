@@ -16,17 +16,19 @@ verification work; generating or publishing artwork does not enable a token laun
 Generation defaults to disabled. Configure the **asset service**, not the read
 service or browser bundle, with these runtime values:
 
-| Variable                      | Purpose                                                                        |
-| ----------------------------- | ------------------------------------------------------------------------------ |
-| `IMAGE_GENERATION=true`       | Enable new image requests after setup                                          |
-| `OPENROUTER_API_KEY`          | Server-only image API credential                                               |
-| `IMAGE_PAYMENT_RECIPIENT`     | One operator-controlled address receiving every image payment                  |
-| `IMAGE_USDG_ADDRESS`          | Canonical USDG contract from the official Robinhood contracts registry         |
-| `IMAGE_PRICE_USDG_BASE_UNITS` | Integer price, six decimals; defaults to `100000` (0.10 USDG), maximum 10 USDG |
-| `X402_FACILITATOR_URL`        | HTTPS facilitator supporting v2 `exact` / `eip155:4663` / EIP-3009             |
-| `X402_FACILITATOR_TOKEN`      | Optional server-only facilitator credential                                    |
-| `ROBINHOOD_RPC`               | Server-only HTTPS RPC for read-only settlement reconciliation                  |
-| `ASSET_DECODER_ORIGIN`        | Existing isolated image decoder                                                |
+| Variable                  | Purpose                                                            |
+| ------------------------- | ------------------------------------------------------------------ |
+| `IMAGE_GENERATION=true`   | Enable new image requests after setup                              |
+| `OPENROUTER_API_KEY`      | Server-only image API credential                                   |
+| `IMAGE_PAYMENT_RECIPIENT` | One operator-controlled address receiving every image payment      |
+| `IMAGE_USDG_ADDRESS`      | Canonical USDG contract from the official Robinhood registry       |
+| `X402_FACILITATOR_URL`    | HTTPS facilitator supporting v2 exact / Robinhood / EIP-3009       |
+| `ROBINHOOD_RPC`           | Server-only HTTPS RPC for read-only settlement reconciliation      |
+| `ASSET_DECODER_ORIGIN`    | Existing isolated image decoder                                    |
+
+The service charges a fixed `100000` base units (0.10 USDG) for one image. The
+OpenRouter request is fixed to one low-quality 1K image, so it has no text-token
+cap variable.
 
 Use the existing `APP_ORIGIN`, `ASSET_STORE_ROOT`, `ASSET_PUBLIC_ORIGIN` and
 single-Machine configuration. Set `ASSET_UPLOADS=true` for subsequent artwork and
