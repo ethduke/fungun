@@ -47,6 +47,14 @@ Run `npm run dev:api` in a second terminal for the read service. See
   Address matching uses the official production asset snapshot, cached daily;
   token names and tickers cannot trigger exclusions. Filtering precedes cards,
   counts and popularity. Currently the Robinhood registry lists canonical USDG.
+- Below popular tokens, a single row links up to ten tickers to GMGN after their
+  reported total inflow exceeds 10 ETH-equivalent. It uses the existing filtered
+  snapshots with no additional requests. Tokens enter once per contract in the
+  current view, oldest on the left; a new arrival evicts the oldest beyond ten.
+  Repeated snapshots, duplicate pools and metadata updates do not change arrival
+  order. The largest reported pool total is used, without adding pools together.
+  Entries survive feed gaps until evicted; reloading starts a new queue, and the
+  first snapshot uses feed order rather than claiming historical crossing times.
 - COPY transfers the selected token's name and ticker into the launch form and
   jumps to the coin details immediately. It clears old artwork and invalidates
   pending uploads so another token's image cannot carry over. The current public

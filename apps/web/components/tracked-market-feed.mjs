@@ -1,5 +1,9 @@
 import { TrackedFeedPoller } from '../lib/tracked-feed-poller.mjs';
 import { feedLaunchpad } from '../lib/tracked-feed-labels.mjs';
+import {
+  gmgnTokenUrl,
+  TrackedInflowQueue,
+} from '../lib/tracked-feed-inflow.mjs';
 
 const finite = (value) =>
   (typeof value === 'number' ||
@@ -188,9 +192,7 @@ function card(row) {
     : '';
   const quote =
     row.quote_symbol || (row.quote_kind === 'eth' ? 'ETH' : 'SHARES');
-  const chart = /^0x[0-9a-f]{40}$/i.test(address)
-    ? `https://gmgn.ai/robinhood/token/${address}`
-    : null;
+  const chart = gmgnTokenUrl(row);
   const short = address
     ? `${address.slice(0, 8)}…${address.slice(-6)}`
     : 'Address unavailable';
@@ -208,6 +210,8 @@ const styles = `
   h2,h3,p{margin:0}h2{font-size:14px}.status{font-size:11px;color:var(--feed-muted)}.status[data-error=true]{color:#92520e}
   .popular{display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-top:10px}.popular-label{font-size:11px;letter-spacing:.08em;font-weight:750;color:var(--feed-muted)}
   .popular a{padding:5px 9px;border-radius:6px;border:1px solid var(--feed-border);background:var(--feed-panel);overflow-wrap:anywhere}.popular small{font-size:12px;color:var(--feed-muted);margin-left:6px}
+  .inflow{display:flex;align-items:center;gap:8px;margin-top:7px;min-width:0}.inflow>.popular-label{flex-shrink:0}
+  .inflow-tokens{display:flex;align-items:center;gap:6px;min-width:0;overflow-x:auto;padding:3px;white-space:nowrap;scrollbar-width:thin}.inflow-tokens a{flex-shrink:0;max-width:110px;overflow:hidden;text-overflow:ellipsis;padding:4px 7px;border:1px solid var(--feed-border);border-radius:5px;background:var(--feed-panel);font-size:11px;font-weight:600}.inflow-tokens .empty{padding:4px 0;font-size:11px}
   .columns{display:grid;grid-template-columns:1fr 1fr;gap:1px;background:var(--feed-border)}.lane{min-width:0;background:var(--feed-bg);padding:10px}
   h3{font-size:12px;letter-spacing:.1em;margin:0 4px 8px}h3 span{font-weight:400;color:var(--feed-muted);letter-spacing:0}
   .list{max-height:320px;overflow:auto;scrollbar-gutter:stable;display:flex;flex-direction:column;gap:8px;overscroll-behavior:contain}
@@ -222,7 +226,7 @@ const styles = `
   .bin{border:1px solid var(--feed-border);border-radius:4px;text-align:center;padding:4px 2px;font:10px/1.25 ui-monospace,monospace;min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
   .pending{border-style:dashed;color:var(--feed-muted)}.current{outline:1px solid var(--feed-accent);outline-offset:0}.totals{font-size:10px;color:var(--feed-muted);margin-top:6px}.totals b{font-weight:500;color:var(--feed-text)}
   .empty{color:var(--feed-muted);padding:12px 4px;font-size:12px}
-  @media(max-width:760px){.columns{grid-template-columns:1fr}.top{padding:15px}.heading{align-items:flex-start;flex-direction:column;gap:4px}.list{max-height:280px}}
+  @media(max-width:760px){.columns{grid-template-columns:1fr}.top{padding:15px}.heading{align-items:flex-start;flex-direction:column;gap:4px}.list{max-height:280px}.inflow{align-items:stretch;flex-direction:column;gap:3px}}
 `;
 
 if (
@@ -233,8 +237,10 @@ if (
     constructor() {
       super();
       this.attachShadow({ mode: 'open' });
-      this.shadowRoot.innerHTML = `<style>${styles}</style><section aria-label="Tracked market feed"><div class="top"><div class="heading"><h2>Market feed</h2><span class="status" role="status" aria-live="polite">Connecting…</span></div><div class="popular"></div></div><div class="columns"><div class="lane"><h3>ETH <span class="count-eth"></span></h3><div class="list" data-kind="eth" tabindex="0" role="region" aria-label="Tracked ETH pairs"></div></div><div class="lane"><h3>SHARES <span class="count-shares"></span></h3><div class="list" data-kind="shares" tabindex="0" role="region" aria-label="Tracked SHARES pairs"></div></div></div></section>`;
+      this.shadowRoot.innerHTML = `<style>${styles}</style><section aria-label="Tracked market feed"><div class="top"><div class="heading"><h2>Market feed</h2><span class="status" role="status" aria-live="polite">Connecting…</span></div><div class="popular"></div><div class="inflow"><span class="popular-label">&gt;10 ETH TOTAL INFLOW</span><nav class="inflow-tokens" aria-label="Tokens over 10 ETH total inflow, oldest first"></nav></div></div><div class="columns"><div class="lane"><h3>ETH <span class="count-eth"></span></h3><div class="list" data-kind="eth" tabindex="0" role="region" aria-label="Tracked ETH pairs"></div></div><div class="lane"><h3>SHARES <span class="count-shares"></span></h3><div class="list" data-kind="shares" tabindex="0" role="region" aria-label="Tracked SHARES pairs"></div></div></div></section>`;
       this.rows = [];
+      this.inflowQueue = new TrackedInflowQueue();
+      this.inflows = [];
       this.receivedAt = null;
       this.inView = false;
       this.pageHidden = false;
@@ -266,6 +272,7 @@ if (
           // Shared responses keep the relay's receipt time, including cache hits.
           const received = Date.parse(snapshot.fetched_at);
           this.receivedAt = Number.isFinite(received) ? received : Date.now();
+          this.inflows = this.inflowQueue.update(this.rows);
           this.error = false;
           this.render();
         },
@@ -381,6 +388,30 @@ if (
         popular._html = popularHTML;
         if (focusHref)
           [...popular.querySelectorAll('a')]
+            .find((a) => a.getAttribute('href') === focusHref)
+            ?.focus({ preventScroll: true });
+      }
+      const inflow = this.shadowRoot.querySelector('.inflow-tokens');
+      const inflowHTML = this.inflows.length
+        ? this.inflows
+            .map(
+              (item) =>
+                `<a href="${esc(item.href)}" target="_blank" rel="noopener noreferrer" title="${esc(item.ticker)} · ${number(item.flow)} ETH total inflow · Open on GMGN">${esc(item.ticker)}</a>`,
+            )
+            .join('')
+        : '<span class="empty">Waiting for tokens over 10 ETH</span>';
+      if (inflow._html !== inflowHTML) {
+        const focused = this.shadowRoot.activeElement;
+        const focusHref =
+          focused && inflow.contains(focused)
+            ? focused.getAttribute('href')
+            : null;
+        const scrollLeft = inflow.scrollLeft;
+        inflow.innerHTML = inflowHTML;
+        inflow._html = inflowHTML;
+        inflow.scrollLeft = scrollLeft;
+        if (focusHref)
+          [...inflow.querySelectorAll('a')]
             .find((a) => a.getAttribute('href') === focusHref)
             ?.focus({ preventScroll: true });
       }
