@@ -48,6 +48,21 @@ function published() {
   };
 }
 
+await test('IPFS cache upgrades exact legacy gateway paths without losing publication identity', () => {
+  const ipfs = { profile: 'pinata-v1-256k', schema: 'long-ipfs-v1', imageCid: `b${'a'.repeat(58)}`, metadataCid: `b${'b'.repeat(58)}` };
+  const saved = { sourceKey: 'd'.repeat(64), result: { ...published(), ipfs,
+    imageUrl: `https://assets.example.test/files/${ipfs.imageCid}`,
+    metadataUrl: `https://assets.example.test/files/${ipfs.metadataCid}` } };
+  const restored = validateDraftPublication(saved);
+  assert.deepEqual(restored, { ...saved, result: { ...saved.result,
+    imageUrl: saved.result.imageUrl.replace('/files/', '/ipfs/'),
+    metadataUrl: saved.result.metadataUrl.replace('/files/', '/ipfs/') } });
+  for (const field of ['imageUrl', 'metadataUrl'] as const) {
+    assert.equal(validateDraftPublication({ ...saved, result: { ...saved.result, [field]: saved.result[field] + '?changed=1' } }), null);
+    assert.equal(validateDraftPublication({ ...saved, result: { ...saved.result, [field]: saved.result[field].replace('assets.example.test', 'other.example.test') } }), null);
+  }
+});
+
 await test('round trip stores the Blob bytes and draft fields, never its object URL', async () => {
   const original = draft();
   const encoded = await encodeLaunchDraft(original);

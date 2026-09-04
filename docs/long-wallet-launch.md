@@ -98,7 +98,12 @@ build variables; only public deployment information accompanies an unsigned plan
 The portable encoder lives in `apps/web/lib/long-encoding`; the API imports it
 through a wrapper that preserves API error handling. The web image includes no
 API service source. API packaging includes only this portable encoding directory.
-Existing asset, decoder and facilitator images need no change.
+The integrated release also updates the existing asset service for Pinata's
+canonical `/ipfs/{cid}` gateway URLs. Decoder and facilitator images need no change.
+Exact legacy `/files/{cid}` browser recovery records are normalized to `/ipfs/{cid}`
+without changing publication IDs, hashes, CIDs or wallet bindings. Both URLs must
+match the recorded origin and CIDs; altered paths or queries remain rejected.
+Recovery continues through the existing status endpoint without another signature.
 
 Publication's version-2 message and server journal remain compatible with pending
 approvals. Removing the signature would require another authenticated admission
@@ -112,3 +117,5 @@ Sources: [Robinhood network configuration](https://docs.robinhood.com/chain/conn
 [Chainlink Robinhood feed directory](https://reference-data-directory.vercel.app/feeds-robinhood-mainnet.json),
 [Doppler deployment registry](https://github.com/whetstoneresearch/doppler/blob/main/Deployments.json),
 [Sourcify verified contracts](https://sourcify.dev/).
+
+Gateway format: [Pinata retrieving files](https://docs.pinata.cloud/gateways/retrieving-files).

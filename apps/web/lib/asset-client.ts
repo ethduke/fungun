@@ -83,6 +83,13 @@ export function readAssetRecovery(
     || !/^b[a-z2-7]{58}$/.test(String(value.ipfs.imageCid))
     || !/^b[a-z2-7]{58}$/.test(String(value.ipfs.metadataCid))))
     throw new AssetError('asset_publication_uncertain');
+  if (ipfs && value.imageUrl === `${publicOrigin}/files/${String((value.ipfs as Record<string, unknown>).imageCid)}`
+    && value.metadataUrl === `${publicOrigin}/files/${String((value.ipfs as Record<string, unknown>).metadataCid)}`) {
+    // Upgrade only the exact legacy gateway paths; publication identity and
+    // wallet binding remain unchanged, so recovery never needs another signature.
+    value.imageUrl = `${publicOrigin}/ipfs/${String((value.ipfs as Record<string, unknown>).imageCid)}`;
+    value.metadataUrl = `${publicOrigin}/ipfs/${String((value.ipfs as Record<string, unknown>).metadataCid)}`;
+  }
   if (
     value.imageUrl !== (ipfs ? `${publicOrigin}/ipfs/${String((value.ipfs as Record<string, unknown>).imageCid)}`
       : `${publicOrigin}/launch-assets/${String(value.imageHash)}.webp`) ||
