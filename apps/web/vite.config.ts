@@ -22,6 +22,12 @@ export default defineConfig(async () => {
     server: {
       host: '127.0.0.1',
       strictPort: true,
+      proxy: {
+        '/api': {
+          target: 'http://127.0.0.1:8787',
+          rewrite: (path: string) => path.replace(/^\/api(?=\/)/, '/v1'),
+        },
+      },
       watch: isCodexSeatbeltSandbox
         ? { useFsEvents: false, usePolling: true }
         : undefined,

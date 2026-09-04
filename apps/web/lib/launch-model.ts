@@ -1,6 +1,12 @@
 export type PadId = 'long' | 'o1';
 export type ChainId = 4663 | 8453;
-export type PairId = 'native' | 'sample-nvda' | 'sample-aapl' | 'sample-tsla';
+export type PairId =
+  | 'native'
+  | 'sample-nvda'
+  | 'sample-aapl'
+  | 'sample-tsla'
+  | `rwa-${string}`;
+import type { Catalog } from './read-service';
 export type Route = 'rwa' | 'standard';
 
 export interface Destination {
@@ -91,6 +97,8 @@ export function validateDraft(
   draft: CoinDraft,
   destinations: Destination[],
   chainId?: ChainId,
+  catalog?: Catalog | null,
+  now = performance.now(),
 ) {
   const errors: Record<string, string> = {};
   const active = destinations.filter((pad) => pad.selected);
@@ -131,9 +139,18 @@ export function validateDraft(
       errors.destinations = 'Unsupported chain.';
     if (
       pad.route === 'rwa' &&
-      !SAMPLE_PAIRS.some((pair) => pair.id === pad.pairId)
+      !(
+        SAMPLE_PAIRS.some((pair) => pair.id === pad.pairId) &&
+        catalog?.pads[pad.id]?.status !== 'ready'
+      ) &&
+      !(
+        catalog?.chainId === pad.chainId &&
+        catalog.expiresAt > now &&
+        catalog.pads[pad.id]?.status === 'ready' &&
+        catalog.pads[pad.id]?.pairs.some((pair) => pair.id === pad.pairId)
+      )
     )
-      errors.destinations = 'Choose a sample RWA pairing.';
+      errors.destinations = 'Choose an available RWA pairing.';
     if (pad.route === 'standard' && pad.pairId !== 'native')
       errors.destinations = 'Standard launches require native pairing.';
   }

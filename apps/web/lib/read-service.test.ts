@@ -1,0 +1,83 @@
+import assert from 'node:assert/strict';
+import test from 'node:test';
+import {
+  localExpiry,
+  expiryDelay,
+  parseCatalog,
+  tickerKey,
+  tickerLabel,
+} from './read-service.ts';
+import { DEFAULT_DESTINATIONS, validateDraft } from './launch-model.ts';
+
+await test('ticker identity changes on edits and chain changes but not launchpad order', () => {
+  assert.equal(
+    tickerKey(4663, 'MOON', ['long', 'o1']),
+    tickerKey(4663, 'MOON', ['o1', 'long']),
+  );
+  assert.notEqual(
+    tickerKey(4663, 'MOON', ['o1']),
+    tickerKey(8453, 'MOON', ['o1']),
+  );
+  assert.notEqual(
+    tickerKey(4663, 'MOON', ['o1']),
+    tickerKey(4663, 'SUN', ['o1']),
+  );
+});
+
+await test('expired reservations and unknown reads never display as available', () => {
+  assert.equal(
+    tickerLabel({ status: 'unreserved', expiresAt: 100 }, 100),
+    'Check again',
+  );
+  assert.equal(
+    tickerLabel({ status: 'unreserved', expiresAt: 101 }, 100),
+    'Unreserved',
+  );
+  assert.equal(tickerLabel({ status: 'unverified' }), 'Unverified');
+  assert.equal(tickerLabel(), 'Not checked');
+});
+
+await test('freshness is response-relative and monotonic despite browser clock skew', () => {
+  assert.equal(localExpiry(1_015_000, 1_000_000, 100, 50, 15_000), 15050);
+  assert.equal(localExpiry(1_000_000, 1_000_000, 100, 50, 15_000), 100);
+  assert.equal(localExpiry(99_000_000, 1_000_000, 100, 50, 15_000), 15050);
+  assert.throws(() => localExpiry(Infinity, 1_000_000, 100, 50, 15_000));
+  assert.equal(expiryDelay([1000], 900, 1100), 0);
+  assert.equal(expiryDelay([1000], 1001, 1100), null);
+  assert.equal(expiryDelay([1200, 1500], 1000, 1100), 100);
+});
+
+await test('catalog is validated and live pair IDs belong to the exact chain and pad', () => {
+  const id = `rwa-${'a'.repeat(24)}` as const;
+  const catalog = parseCatalog(
+    {
+      chainId: 4663,
+      expiresAt: Date.now() + 60_000,
+      pads: {
+        o1: { status: 'ready', pairs: [] },
+        long: { status: 'ready', pairs: [{ id, symbol: 'MOON' }] },
+      },
+    },
+    4663,
+  );
+  const draft = {
+    name: 'MOON',
+    ticker: 'MOON',
+    description: '',
+    hasImage: true,
+  };
+  const pads = [{ ...DEFAULT_DESTINATIONS[0], pairId: id }];
+  assert.deepEqual(validateDraft(draft, pads, 4663, catalog), {});
+  assert.ok(
+    validateDraft(draft, pads, 4663, { ...catalog, expiresAt: 0 }).destinations,
+  );
+  assert.ok(
+    validateDraft(draft, pads, 4663, { ...catalog, chainId: 8453 })
+      .destinations,
+  );
+  assert.ok(
+    validateDraft(draft, DEFAULT_DESTINATIONS, 4663, catalog).destinations,
+  );
+  assert.throws(() => parseCatalog({ ...catalog, chainId: 8453 }, 4663));
+  assert.throws(() => parseCatalog({ ...catalog, pads: {} }, 4663));
+});

@@ -7,12 +7,16 @@ npm run setup
 npm run dev
 ```
 
+In a second terminal, run `npm run dev:api` (Node 24.4+). External reads default
+to disabled; see [read-service setup](docs/read-service.md) for runtime configuration.
+
 Open http://127.0.0.1:3000. See [development notes](docs/development.md) for
 working controls, deliberate limitations, tests and the Fly backend boundary.
 
-This milestone is a local, clickable webview. Live deployments, ticker lookups,
-RPC services and paid image generation remain disabled until their adapters
-and safeguards are verified. Telegram integration is out of scope.
+This milestone is a local webview with a guarded read-service backend. Configured
+adapters can load Long/O1 catalogs and check Long ticker reservations; O1 ticker
+availability stays unverified. Transactions, fees/claims and paid image generation
+remain disabled. Telegram integration is out of scope.
 
 ## Agent documentation
 

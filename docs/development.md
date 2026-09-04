@@ -2,7 +2,7 @@
 
 ## Run locally
 
-Use Node 22.13 or newer (Node 24 recommended).
+Use Node 24.4 or newer for the combined webview and backend.
 
 ```sh
 npm run setup
@@ -11,6 +11,8 @@ npm run dev
 
 Open http://127.0.0.1:3000 in a browser. Use a browser with Rabby or MetaMask
 installed to test wallet connection; embedded browsers may have no injected wallet.
+Run `npm run dev:api` in a second terminal for the read service. See
+[read-service setup and limits](read-service.md); external reads default to disabled.
 
 ## Working controls
 
@@ -19,7 +21,9 @@ installed to test wallet connection; embedded browsers may have no injected wall
 - Ticker edits auto-fill the coin name unless a custom name has been entered.
 - Choose one chain: Robinhood (default) offers Long and O1; Base offers O1.
 - Select launchpads and pairings. Changing chains clears incompatible selections.
-- Choose clearly labeled sample stock symbols; these are not a live RWA catalog.
+- Load per-chain Long/O1 catalogs when the backend is configured; otherwise samples
+  remain labeled. Refresh is explicit; no periodic background calls.
+- Check Long ticker reservations on click; O1 availability remains unverified.
 - The inline launch section updates coin details, destinations and draft validation as you edit.
 - Image checks show an inline loading state; O1's metadata-update toggle stays in the launch section.
 - Open the Grok/x402 flow preview; no image generation or payment occurs.
@@ -45,8 +49,10 @@ must not be reused as a claim transaction.
 
 ## Deliberately disabled
 
-No signing, transactions, paid generation, live quotes, ticker requests, balance
-reads, block subscriptions, RPC proxy, or server upload endpoint is implemented.
+No signing, transactions, paid generation, live quotes, balance reads, block
+subscriptions, arbitrary RPC proxy, or server upload endpoint is implemented.
+The read service implements guarded catalogs and Long reservation checks, off
+until runtime credentials and verified contract identity are configured.
 WalletConnect QR support requires a later opt-in relay configuration. No wallet
 state is persisted by the app; wallet integration is loaded only after a click.
 The extension itself may make network requests after the user connects.
@@ -71,14 +77,19 @@ npm run check:history
 ```
 
 The optional browser WebMCP surface can read a redacted draft or stage a name and
-ticker. It cannot connect wallets, transmit images, sign, pay, or launch.
+ticker. It cannot trigger ticker checks, connect wallets, transmit images, sign,
+pay, or launch. Setting identity does not initiate an upstream request.
 It has not been exercised in a WebMCP-enabled browser. Real wallet-extension
 interaction and visual/browser-click QA remain for the user's review.
 
 Lint covers owned application code. Generated UI primitives are left unchanged
 and excluded from lint; TypeScript still checks them.
 
-## Fly backend: next milestone
+## Fly backend: implemented read boundary and remaining work
+
+The guarded read service and Fly packaging are implemented in `apps/api`;
+[read-service notes](read-service.md) describe exact current limits and setup.
+The constraints below also apply to later fee, launch and paid-image adapters.
 
 Serve narrowly scoped application endpoints, never arbitrary RPC methods,
 addresses, calldata, upstream URLs, or user-supplied forwarding headers.

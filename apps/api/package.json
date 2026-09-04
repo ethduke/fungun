@@ -1,0 +1,15 @@
+{
+  "name": "fungun-api",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "start": "node --env-file-if-exists=../../.env src/server.mjs",
+    "test": "node --test src/*.test.mjs"
+  },
+  "dependencies": {
+    "viem": "2.56.0"
+  },
+  "engines": {
+    "node": ">=24.4.0"
+  }
+}

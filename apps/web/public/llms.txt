@@ -1,10 +1,13 @@
 # Fungun
 
-> Noncustodial launchpad composer for Long and O1. This version is a local webview scaffold, not a live trading or deployment service.
+> Noncustodial launchpad composer for Long and O1, with a guarded optional read service. Launches, claims and payments are not enabled.
 
-Agents can help prepare a coin draft and explain its validation. Launches, fee
-reads and claims, ticker availability, live quotes, paid image generation and
-payments are not enabled. An unavailable balance is unknown, not zero.
+Agents can help prepare a coin draft and explain its validation. Configured
+backends can load RWA catalogs and check Long ticker reservations on explicit
+request. External reads default to disabled; O1 ticker availability remains
+unverified. Fee reads, live quotes and paid image generation are not enabled.
+An unavailable balance is unknown, not zero. A reservation check is not proof
+of global ticker uniqueness or launch readiness.
 
 Only one chain can be selected at a time: Robinhood Chain (default) supports
 Long and O1; Base supports O1. Selecting both launchpads represents separate

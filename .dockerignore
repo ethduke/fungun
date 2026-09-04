@@ -1,5 +1,11 @@
 **
 !apps/
+!apps/api/
+!apps/api/src/
+!apps/api/src/*.mjs
+!apps/api/package.json
+!apps/api/package-lock.json
+!apps/api/Dockerfile
 !apps/web/
 !apps/web/app/
 !apps/web/app/**
@@ -24,3 +30,8 @@
 **/uploads/**
 **/captures/**
 **/secrets/**
+**/*.test.*
+**/local/**
+**/private/**
+**/*.sqlite*
+**/*.db

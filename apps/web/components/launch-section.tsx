@@ -11,6 +11,11 @@ import {
   pairingName,
   type Destination,
 } from '@/lib/launch-model';
+import {
+  tickerLabel,
+  type Catalog,
+  type TickerCheck,
+} from '@/lib/read-service';
 
 export function LaunchSection({
   name,
@@ -20,6 +25,10 @@ export function LaunchSection({
   errors,
   destinations,
   onChange,
+  catalog,
+  tickerCheck,
+  checking = false,
+  now = 0,
 }: {
   name: string;
   ticker: string;
@@ -28,6 +37,10 @@ export function LaunchSection({
   errors: Record<string, string>;
   destinations: Destination[];
   onChange: (destination: Destination) => void;
+  catalog?: Catalog | null;
+  tickerCheck?: TickerCheck | null;
+  checking?: boolean;
+  now?: number;
 }) {
   const status = draftStatus(errors, imagePending);
   const statusText = {
@@ -84,8 +97,10 @@ export function LaunchSection({
                 <div>
                   <dt>Pairing</dt>
                   <dd>
-                    {pairingName(pad.pairId)}
-                    {pad.route === 'rwa' ? ' · sample' : ''}
+                    {catalog?.pads[pad.id]?.pairs.find(
+                      (pair) => pair.id === pad.pairId,
+                    )?.symbol ?? pairingName(pad.pairId)}
+                    {pad.pairId.startsWith('sample-') ? ' · sample' : ''}
                   </dd>
                 </div>
                 <div>
@@ -120,7 +135,11 @@ export function LaunchSection({
                 </div>
                 <div>
                   <dt>Ticker</dt>
-                  <dd>Not checked</dd>
+                  <dd>
+                    {checking
+                      ? 'Checking…'
+                      : tickerLabel(tickerCheck?.results[pad.id], now)}
+                  </dd>
                 </div>
               </dl>
             </div>
@@ -146,8 +165,8 @@ export function LaunchSection({
             — <span>Deployment + network fees</span>
           </div>
           <p id="launch-preview-notice" className="launch-note">
-            Preview only. Live launch, quotes and eligibility checks are not
-            connected.
+            Live launch and quotes are not connected. Catalog and reservation
+            checks do not guarantee a successful launch.
           </p>
         </div>
         <Button

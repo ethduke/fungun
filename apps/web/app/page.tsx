@@ -44,6 +44,7 @@ import {
 } from '@/lib/launch-model';
 import { usePreviewTools } from '@/lib/preview-webmcp';
 import { useDraftField } from '@/lib/launch-draft';
+import { useReadService } from '@/lib/use-read-service';
 
 export default function Home() {
   const [selection, setSelection] = useDraftField('selection');
@@ -56,15 +57,21 @@ export default function Home() {
   const [imageError, setImageError] = useState('');
   const [imagePending, setImagePending] = useState(false);
   const [dragging, setDragging] = useState(false);
-  const [tickerNotice, setTickerNotice] = useState(false);
   const [generationOpen, setGenerationOpen] = useState(false);
   const fileInput = useRef<HTMLInputElement>(null);
   const imageSequence = useRef(0);
   const active = destinations.filter((pad) => pad.selected);
+  const reads = useReadService(
+    chainId,
+    ticker,
+    active.map((pad) => pad.id),
+  );
   const errors = validateDraft(
     { name, ticker, description, hasImage: !!image },
     destinations,
     chainId,
+    reads.catalog,
+    reads.now,
   );
   const imageBytes = image
     ? `${Math.max(1, Math.round(image.size / 1024))} KB`
@@ -85,13 +92,19 @@ export default function Home() {
       hasImage: !!image,
       destinations: active,
       validationErrors: errors,
-      liveChecks: false,
+      liveChecks: {
+        catalogs:
+          !!reads.catalog &&
+          Object.values(reads.catalog.pads).some(
+            (pad) => pad?.status === 'ready',
+          ),
+        ticker: !!reads.check,
+      },
       signingEnabled: false,
     }),
     (value) => {
       setName(value.name);
       setTicker(value.ticker);
-      setTickerNotice(false);
     },
   );
 
@@ -147,7 +160,6 @@ export default function Home() {
         ),
       };
     });
-    setTickerNotice(false);
   }
 
   function updateChain(nextChainId: ChainId) {
@@ -156,7 +168,6 @@ export default function Home() {
       chainId: nextChainId,
       destinations: selectChain(current.destinations, nextChainId),
     }));
-    setTickerNotice(false);
   }
 
   return (
@@ -365,7 +376,6 @@ export default function Home() {
                           autofillCoinName(current, ticker, nextTicker),
                         );
                         setTicker(nextTicker);
-                        setTickerNotice(false);
                       }}
                       aria-invalid={!!ticker && !!errors.ticker}
                       aria-describedby={
@@ -383,22 +393,30 @@ export default function Home() {
               <div className="ticker-status">
                 <span>
                   <span className="small-dot neutral" />
-                  Availability not checked
+                  {reads.checking
+                    ? 'Checking…'
+                    : reads.check
+                      ? 'Reservation check'
+                      : 'Availability not checked'}
                 </span>
                 <Button
                   variant="ghost"
                   size="sm"
-                  disabled={!ticker || !!errors.ticker || !active.length}
-                  onClick={() => setTickerNotice(true)}
+                  disabled={
+                    !ticker ||
+                    !!errors.ticker ||
+                    !active.length ||
+                    reads.checking
+                  }
+                  onClick={() => void reads.runCheck()}
                 >
                   Check ticker <ArrowRight size={12} />
                 </Button>
               </div>
-              {tickerNotice && (
-                <output className="notice">
-                  Live checks are not connected. Long checks a 24-hour
-                  reservation; O1 availability remains unverified. No RPC
-                  request was sent.
+              {(reads.check || reads.checkError) && (
+                <output className="notice" aria-live="polite">
+                  {reads.checkError ??
+                    'Long checks its 24-hour reservation registry only; O1 remains unverified. See results in Launch.'}
                 </output>
               )}
               <Collapsible className="extra-details">
@@ -462,6 +480,8 @@ export default function Home() {
                     key={pad.id}
                     destination={pad}
                     onChange={updateDestination}
+                    catalog={reads.catalog?.pads[pad.id]}
+                    loading={reads.catalogLoading}
                   />
                 ))}
               {errors.destinations && (
@@ -469,6 +489,16 @@ export default function Home() {
                   {errors.destinations}
                 </p>
               )}
+              <Button
+                variant="ghost"
+                size="sm"
+                disabled={reads.catalogLoading}
+                onClick={reads.refreshCatalog}
+              >
+                {reads.catalogLoading
+                  ? 'Loading pairings…'
+                  : 'Refresh pairings'}
+              </Button>
             </section>
           </div>
           <LaunchSection
@@ -479,6 +509,10 @@ export default function Home() {
             errors={errors}
             destinations={active}
             onChange={updateDestination}
+            catalog={reads.catalog}
+            tickerCheck={reads.check}
+            checking={reads.checking}
+            now={reads.now}
           />
         </form>
         <footer className="workspace-footer">
