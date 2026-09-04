@@ -19,6 +19,7 @@ import {
   type Destination,
 } from './launch-model.ts';
 import { LONGBOW_PAIRS } from './longbow-markets.ts';
+import { O1_ROBINHOOD_PAIRS } from './o1-markets.ts';
 
 const draft = {
   name: 'Moon Department',
@@ -243,13 +244,18 @@ await test('Robinhood is the default chain with all three launchpads available',
 await test('paused Base selection preserves the current Robinhood draft', () => {
   const before = destinations().map((pad) => ({ ...pad, selected: true }));
   before[1].route = 'rwa';
-  before[1].pairId = 'sample-aapl';
+  const pair = O1_ROBINHOOD_PAIRS.find((pair) => pair.symbol === 'AAPL')!;
+  before[1].pairId = pair.id;
   const after = selectChain(before, 8453);
   assert.equal(isWebviewChain(8453), false);
   assert.equal(isWebviewChain(4663), true);
   assert.deepEqual(after, before);
   assert.notEqual(after, before);
-  assert.deepEqual(validateDraft(draft, after, 4663), {});
+  assert.deepEqual(validateDraft(draft, after, 4663, {
+    chainId: 4663,
+    expiresAt: performance.now() + 1000,
+    pads: { o1: { status: 'ready', pairs: [pair] } },
+  }), {});
 });
 
 await test('stale Base destinations fail validation with or without a chain filter', () => {

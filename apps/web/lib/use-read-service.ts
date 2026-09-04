@@ -153,7 +153,6 @@ export function useReadService(
       catalogError?.key === catalogRequestKey ? catalogError.message : null,
     now,
     ensureCatalog,
-    refreshCatalog: ensureCatalog,
     check: check?.key === key ? check.data : null,
     checking: pendingKey === key,
     checkError: checkError?.key === key ? checkError.message : null,

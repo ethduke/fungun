@@ -18,7 +18,6 @@ import {
 } from '@/components/ui/select';
 import {
   LONG_PAIRS,
-  SAMPLE_PAIRS,
   launchpadName,
   type Destination,
   type PairId,
@@ -26,6 +25,7 @@ import {
 import type { CatalogPad } from '@/lib/read-service';
 import { FEE_INFO_REVIEWED, launchpadFeeInfo } from '@/lib/launchpad-fees';
 import { LONGBOW_PAIRS } from '@/lib/longbow-markets';
+import { savedO1Pairs } from '@/lib/o1-markets';
 import './launchpad-card.css';
 
 export function LaunchpadCard({
@@ -45,14 +45,14 @@ export function LaunchpadCard({
   const o1 = pad.id === 'o1';
   const title = launchpadName(pad.id);
   const live = o1 && catalog?.status === 'ready';
-  const sample = o1 && !live;
+  const saved = o1 && !live;
   const pairs = long
     ? LONG_PAIRS
     : pad.id === 'longbow'
       ? LONGBOW_PAIRS
       : live
         ? catalog.pairs
-        : SAMPLE_PAIRS;
+        : savedO1Pairs(pad.chainId);
   const selectedPair = pairs.find((pair) => pair.id === pad.pairId);
   const feeInfo = launchpadFeeInfo(pad);
   return (
@@ -98,18 +98,17 @@ export function LaunchpadCard({
           >
             <SelectValue>
               {pad.pairId === 'native'
-                ? 'Native / standard'
+                ? 'ETH'
                 : selectedPair
-                  ? `${selectedPair.symbol}${sample ? ' (sample)' : ''}`
+                  ? selectedPair.symbol
                   : 'Choose pairing'}
             </SelectValue>
           </SelectTrigger>
           <SelectContent>
-            {o1 && <SelectItem value="native">Native / standard</SelectItem>}
+            {o1 && <SelectItem value="native">ETH</SelectItem>}
             {pairs.map((pair) => (
               <SelectItem key={pair.id} value={pair.id}>
                 {pair.symbol}
-                {sample ? ' (sample)' : ''}
               </SelectItem>
             ))}
             {live && !pairs.length && (
@@ -117,9 +116,13 @@ export function LaunchpadCard({
                 No RWA pairs available
               </SelectItem>
             )}
-            {sample && (
+            {saved && (
               <SelectItem value="status" disabled>
-                {loading ? 'Loading catalog…' : 'Live catalog unavailable'}
+                {loading
+                  ? 'Checking availability…'
+                  : pairs.length
+                    ? 'Saved catalog · Sep 4, 2026'
+                    : 'Catalog unavailable'}
               </SelectItem>
             )}
           </SelectContent>

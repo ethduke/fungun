@@ -2,6 +2,7 @@ import {
   LONGBOW_PAIRS,
   type LONGBOW_MARKET_TICKERS,
 } from './longbow-markets.ts';
+import { O1_ROBINHOOD_PAIRS } from './o1-markets.ts';
 
 export type PadId = 'long' | 'o1';
 export type LaunchpadId = PadId | 'longbow';
@@ -148,12 +149,6 @@ export const LONG_PAIRS = LONG_MARKET_TICKERS.map((symbol) => ({
   id: `long-${symbol}` as const,
   symbol,
 }));
-export const SAMPLE_PAIRS = [
-  { id: 'sample-nvda', symbol: 'NVDA', label: 'NVIDIA' },
-  { id: 'sample-aapl', symbol: 'AAPL', label: 'Apple' },
-  { id: 'sample-tsla', symbol: 'TSLA', label: 'Tesla' },
-] as const;
-
 export const DEFAULT_DESTINATIONS: Destination[] = [
   {
     id: 'long',
@@ -210,8 +205,8 @@ export function selectChain(destinations: Destination[], chainId: ChainId) {
 
 export function pairingName(id: PairId) {
   return id === 'native'
-    ? 'Native / standard'
-    : ([...LONG_PAIRS, ...LONGBOW_PAIRS, ...SAMPLE_PAIRS].find(
+    ? 'ETH'
+    : ([...LONG_PAIRS, ...LONGBOW_PAIRS, ...O1_ROBINHOOD_PAIRS].find(
         (pair) => pair.id === id,
       )?.symbol ?? 'Unselected');
 }
@@ -257,10 +252,6 @@ export function validateDraft(
         : pad.id === 'longbow'
           ? !LONGBOW_PAIRS.some((pair) => pair.id === pad.pairId)
           : !(
-              SAMPLE_PAIRS.some((pair) => pair.id === pad.pairId) &&
-              catalog?.pads[pad.id]?.status !== 'ready'
-            ) &&
-            !(
               catalog?.chainId === pad.chainId &&
               catalog.expiresAt > now &&
               catalog.pads[pad.id]?.status === 'ready' &&
