@@ -27,6 +27,67 @@ const percent = (value) => {
   const rounded = Number(value.toFixed(1));
   return `${rounded > 0 ? '+' : ''}${rounded.toFixed(1)}%`;
 };
+export function priceServiceStatus(state) {
+  if (state === 'online') return { text: 'Prices online', error: false };
+  if (state === 'no-quotes')
+    return { text: 'Price service online · no verified quotes', error: false };
+  if (state === 'checking') return { text: 'Checking prices…', error: false };
+  if (state === 'unavailable')
+    return { text: 'Prices unavailable · retrying', error: true };
+  return { text: 'Prices awaiting first quote', error: false };
+}
+const pricePool = /^0x[\da-f]{64}$/i;
+const priceAddress = /^0x[\da-f]{40}$/i;
+export function validatedPriceResponse(body, requests) {
+  if (
+    !body ||
+    !Array.isArray(body.prices) ||
+    body.prices.length > requests.length ||
+    !Number.isFinite(body.serverTime) ||
+    body.serverTime <= 0
+  )
+    return null;
+  const expected = new Set(
+    requests.map(
+      ({ pool, token }) =>
+        `${String(pool).toLowerCase()}:${String(token).toLowerCase()}`,
+    ),
+  );
+  const seen = new Set();
+  const prices = [];
+  for (const sample of body.prices) {
+    const pool =
+      typeof sample?.pool === 'string' ? sample.pool.toLowerCase() : '';
+    const token =
+      typeof sample?.token === 'string' ? sample.token.toLowerCase() : '';
+    const quote =
+      typeof sample?.quote === 'string' ? sample.quote.toLowerCase() : '';
+    const source =
+      typeof sample?.source === 'string' ? sample.source.toLowerCase() : '';
+    const key = `${pool}:${token}`;
+    if (
+      !pricePool.test(pool) ||
+      !priceAddress.test(token) ||
+      !priceAddress.test(quote) ||
+      !priceAddress.test(source) ||
+      !expected.has(key) ||
+      seen.has(key) ||
+      !Number.isFinite(sample.value) ||
+      sample.value <= 0 ||
+      !Number.isFinite(sample.observedAt) ||
+      sample.observedAt <= 0 ||
+      sample.observedAt > body.serverTime
+    )
+      return null;
+    seen.add(key);
+    prices.push({ ...sample, pool, token, quote, source });
+  }
+  return {
+    prices,
+    serverTime: body.serverTime,
+    state: prices.length ? 'online' : 'no-quotes',
+  };
+}
 const chain = (row) => Number(row.chain_id ?? 4663);
 const token = (row) => String(row.meme || row.token || '');
 const rowKey = (row) => `${chain(row)}:${row.pool || token(row)}`;
@@ -208,28 +269,29 @@ function card(row) {
 }
 
 const styles = `
-  :host{display:block;color:var(--feed-text,#223a2c);font:12px/1.4 Arial,Helvetica,sans-serif}
+  :host{display:block;color:var(--feed-text,#223a2c);font:14px/1.4 var(--font-site,'Quicksand',sans-serif)}
   *{box-sizing:border-box}section{border:1px solid var(--feed-border);border-radius:16px;background:var(--feed-bg);overflow:hidden}
   .top{padding:14px 16px;border-bottom:1px solid var(--feed-border)}.heading,.metadata,.identity,.totals{display:flex;align-items:center;justify-content:space-between;gap:10px}
-  h2,h3,p{margin:0}h2{font-size:14px}.status{font-size:11px;color:var(--feed-muted)}.status[data-error=true]{color:#92520e}
-  .popular{display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-top:10px}.popular-label{font-size:11px;letter-spacing:.08em;font-weight:750;color:var(--feed-muted)}
-  .popular a{padding:5px 9px;border-radius:6px;border:1px solid var(--feed-border);background:var(--feed-panel);overflow-wrap:anywhere}.popular small{font-size:12px;color:var(--feed-muted);margin-left:6px}
+  .statuses{display:flex;align-items:center;justify-content:flex-end;gap:8px;flex-wrap:wrap}.price-status{font-size:13px;color:var(--feed-muted)}.price-status[data-error=true]{color:#92520e}
+  h2,h3,p{margin:0}h2{font-size: 16px}.status{font-size: 13px;color:var(--feed-muted)}.status[data-error=true]{color:#92520e}
+  .popular{display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-top:10px}.popular-label{font-size: 13px;letter-spacing:.08em;font-weight:750;color:var(--feed-muted)}
+  .popular a{padding:5px 9px;border-radius:6px;border:1px solid var(--feed-border);background:var(--feed-panel);overflow-wrap:anywhere}.popular small{font-size: 14px;color:var(--feed-muted);margin-left:6px}
   .inflow{display:flex;align-items:center;gap:8px;margin-top:7px;min-width:0}.inflow>.popular-label{flex-shrink:0}
-  .inflow-tokens{display:flex;align-items:center;gap:6px;min-width:0;overflow-x:auto;padding:3px;white-space:nowrap;scrollbar-width:thin}.inflow-tokens a{display:inline-flex;align-items:center;gap:5px;flex-shrink:0;padding:4px 7px;border:1px solid var(--feed-border);border-radius:5px;background:var(--feed-panel);font-size:11px;font-weight:600}.inflow-ticker{max-width:110px;overflow:hidden;text-overflow:ellipsis}.price-change{font-variant-numeric:tabular-nums;color:var(--feed-muted)}.price-change[data-direction=up]{color:#268044}.price-change[data-direction=down]{color:#b13b33}.price-change[data-stale=true]{color:var(--feed-muted)}.inflow-tokens .empty{padding:4px 0;font-size:11px}
+  .inflow-tokens{display:flex;align-items:center;gap:6px;min-width:0;overflow-x:auto;padding:3px;white-space:nowrap;scrollbar-width:thin}.inflow-tokens a{display:inline-flex;align-items:center;gap:5px;flex-shrink:0;padding:4px 7px;border:1px solid var(--feed-border);border-radius:5px;background:var(--feed-panel);font-size: 13px;font-weight:600}.inflow-ticker{max-width:110px;overflow:hidden;text-overflow:ellipsis}.price-change{font-variant-numeric:tabular-nums;color:var(--feed-muted)}.price-change[data-direction=up]{color:#268044}.price-change[data-direction=down]{color:#b13b33}.price-change[data-stale=true]{color:var(--feed-muted)}.inflow-tokens .empty{padding:4px 0;font-size: 13px}
   .columns{display:grid;grid-template-columns:1fr 1fr;gap:1px;background:var(--feed-border)}.lane{min-width:0;background:var(--feed-bg);padding:10px}
-  h3{font-size:12px;letter-spacing:.1em;margin:0 4px 8px}h3 span{font-weight:400;color:var(--feed-muted);letter-spacing:0}
+  h3{font-size: 14px;letter-spacing:.1em;margin:0 4px 8px}h3 span{font-weight:400;color:var(--feed-muted);letter-spacing:0}
   .list{max-height:320px;overflow:auto;scrollbar-gutter:stable;display:flex;flex-direction:column;gap:8px;overscroll-behavior:contain}
   article{background:var(--feed-panel);padding:10px;border:1px solid var(--feed-border);border-radius:8px;min-width:0}
-  .metadata{align-items:center;color:var(--feed-muted);margin-bottom:6px;overflow-wrap:anywhere}.metadata>.launchpad{display:inline-flex;align-items:center;gap:6px;font-size:12px;font-weight:700;color:var(--feed-text)}
+  .metadata{align-items:center;color:var(--feed-muted);margin-bottom:6px;overflow-wrap:anywhere}.metadata>.launchpad{display:inline-flex;align-items:center;gap:6px;font-size: 14px;font-weight:700;color:var(--feed-text)}
   .launchpad-icon{display:grid;place-items:center;width:22px;height:22px;flex-shrink:0;border-radius:6px;color:#2f5034;background:#e6efcf}.launchpad-icon svg{width:16px;height:16px}
-  .copy-button{flex-shrink:0;border:1px solid var(--feed-border);border-radius:4px;background:var(--feed-panel);color:var(--feed-text);font:600 11px/1 Arial,Helvetica,sans-serif;padding:6px 9px;cursor:pointer}.copy-button:hover{background:var(--feed-bg)}.copy-button:disabled{opacity:.5;cursor:not-allowed}
-  .flow{margin-bottom:7px}.identity{justify-content:flex-start;gap:7px}.identity strong{font-size:13px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.quote{flex-shrink:0;font-size:11px;color:var(--feed-accent)}
+  .copy-button{flex-shrink:0;border:1px solid var(--feed-border);border-radius:4px;background:var(--feed-panel);color:var(--feed-text);font:600 13px/1 var(--font-site,'Quicksand',sans-serif);padding:6px 9px;cursor:pointer}.copy-button:hover{background:var(--feed-bg)}.copy-button:disabled{opacity:.5;cursor:not-allowed}
+  .flow{margin-bottom:7px}.identity{justify-content:flex-start;gap:7px}.identity strong{font-size: 15px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.quote{flex-shrink:0;font-size: 13px;color:var(--feed-accent)}
   a{color:var(--feed-accent);text-decoration:none}a:hover{text-decoration:underline}a:focus-visible,button:focus-visible,.ladder:focus-visible,.list:focus-visible{outline:2px solid var(--feed-accent);outline-offset:3px}
-  .address{font-size:11px;color:var(--feed-muted);margin:2px 0 0;overflow-wrap:anywhere}.metric-title{font-size:11px;color:var(--feed-muted);margin-bottom:4px}
+  .address{font-size: 13px;color:var(--feed-muted);margin:2px 0 0;overflow-wrap:anywhere}.metric-title{font-size: 13px;color:var(--feed-muted);margin-bottom:4px}
   .ladder{display:grid;grid-template-columns:repeat(11,minmax(44px,1fr));gap:3px;overflow-x:auto;padding:2px;scrollbar-width:thin}
-  .bin{border:1px solid var(--feed-border);border-radius:4px;text-align:center;padding:4px 2px;font:10px/1.25 ui-monospace,monospace;min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
-  .pending{border-style:dashed;color:var(--feed-muted)}.current{outline:1px solid var(--feed-accent);outline-offset:0}.totals{font-size:10px;color:var(--feed-muted);margin-top:6px}.totals b{font-weight:500;color:var(--feed-text)}
-  .empty{color:var(--feed-muted);padding:12px 4px;font-size:12px}
+  .bin{border:1px solid var(--feed-border);border-radius:4px;text-align:center;padding:4px 2px;font:12px/1.25 var(--font-site,'Quicksand',sans-serif);min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .pending{border-style:dashed;color:var(--feed-muted)}.current{outline:1px solid var(--feed-accent);outline-offset:0}.totals{font-size: 12px;color:var(--feed-muted);margin-top:6px}.totals b{font-size: 1rem;font-weight:500;color:var(--feed-text);white-space:nowrap}
+  .empty{color:var(--feed-muted);padding:12px 4px;font-size: 14px}
   @media(max-width:760px){.columns{grid-template-columns:1fr}.top{padding:15px}.heading{align-items:flex-start;flex-direction:column;gap:4px}.list{max-height:280px}.inflow{align-items:stretch;flex-direction:column;gap:3px}}
 `;
 
@@ -241,12 +303,13 @@ if (
     constructor() {
       super();
       this.attachShadow({ mode: 'open' });
-      this.shadowRoot.innerHTML = `<style>${styles}</style><section aria-label="Tracked market feed"><div class="top"><div class="heading"><h2>Market feed</h2><span class="status" role="status" aria-live="polite">Connecting…</span></div><div class="popular"></div><div class="inflow"><span class="popular-label">&gt;10ETH INFL:</span><nav class="inflow-tokens" aria-label="Tokens over 10 ETH total inflow, oldest first"></nav></div></div><div class="columns"><div class="lane"><h3>ETH <span class="count-eth"></span></h3><div class="list" data-kind="eth" tabindex="0" role="region" aria-label="Tracked ETH pairs"></div></div><div class="lane"><h3>SHARES <span class="count-shares"></span></h3><div class="list" data-kind="shares" tabindex="0" role="region" aria-label="Tracked SHARES pairs"></div></div></div></section>`;
+      this.shadowRoot.innerHTML = `<style>${styles}</style><section aria-label="Tracked market feed"><div class="top"><div class="heading"><h2>Market feed</h2><div class="statuses"><span class="status" role="status" aria-live="polite">Connecting…</span><span class="price-status" role="status" aria-live="polite">Prices awaiting first quote</span></div></div><div class="popular"></div><div class="inflow"><span class="popular-label">&gt;10ETH INFL:</span><nav class="inflow-tokens" aria-label="Tokens over 10 ETH total inflow, oldest first"></nav></div></div><div class="columns"><div class="lane"><h3>ETH <span class="count-eth"></span></h3><div class="list" data-kind="eth" tabindex="0" role="region" aria-label="Tracked ETH pairs"></div></div><div class="lane"><h3>SHARES <span class="count-shares"></span></h3><div class="list" data-kind="shares" tabindex="0" role="region" aria-label="Tracked SHARES pairs"></div></div></div></section>`;
       this.rows = [];
       this.inflowQueue = new TrackedInflowQueue();
       this.inflows = [];
       this.priceController = null;
       this.priceRetryAt = 0;
+      this.priceState = 'waiting';
       this.receivedAt = null;
       this.inView = false;
       this.pageHidden = false;
@@ -383,6 +446,9 @@ if (
       const controller = new AbortController();
       this.priceController = controller;
       const timeout = setTimeout(() => controller.abort(), 23_000);
+      const previousPriceState = this.priceState;
+      this.priceState = 'checking';
+      this.render();
       let prices = [];
       let serverTime = null;
       try {
@@ -403,12 +469,16 @@ if (
               performance.now() + Math.min(86_400, Number(retry)) * 1000;
           throw new Error('Prices unavailable');
         }
-        const body = await response.json();
-        if (Number.isFinite(body.serverTime)) serverTime = body.serverTime;
-        if (Array.isArray(body.prices) && body.prices.length <= 10)
-          prices = body.prices;
+        const result = validatedPriceResponse(await response.json(), pools);
+        if (!result) throw new Error('Invalid price response');
+        ({ prices, serverTime } = result);
+        this.priceState = result.state;
       } catch {
         // No raw backend/provider errors or fabricated zero-price returns.
+        this.priceState =
+          controller.signal.aborted && !this.poller.active
+            ? previousPriceState
+            : 'unavailable';
       } finally {
         clearTimeout(timeout);
         if (this.priceController === controller) {
@@ -427,6 +497,10 @@ if (
 
     render() {
       const status = this.shadowRoot.querySelector('.status');
+      const priceStatus = this.shadowRoot.querySelector('.price-status');
+      const priceView = priceServiceStatus(this.priceState);
+      priceStatus.dataset.error = String(priceView.error);
+      priceStatus.textContent = priceView.text;
       status.dataset.error = String(
         Boolean(this.error || this.pauseReason === 'offline'),
       );
@@ -465,7 +539,9 @@ if (
               const change =
                 item.priceChange === null ? '' : percent(item.priceChange);
               const priceHint = item.priceStale
-                ? 'Price update unavailable; last observation retained'
+                ? item.entryPrice === null
+                  ? 'No verified quote received yet'
+                  : 'Price update unavailable; last observation retained'
                 : item.entryPrice === null
                   ? 'Price unavailable'
                   : change

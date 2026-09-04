@@ -21,6 +21,22 @@ test("runtime status distinguishes absent settings, disabled features and unveri
     feature({ O1_API_KEY: "EXAMPLE", READ_UPSTREAMS: "true" }, "long_catalog_subset").status,
     "missing_configuration",
   );
+  assert.deepEqual(feature({}, "tracked_prices"), {
+    id: "tracked_prices",
+    missing: ["ROBINHOOD_RPC"],
+    disabled: ["READ_UPSTREAMS"],
+    status: "missing_configuration",
+  });
+  assert.equal(
+    feature(
+      {
+        ROBINHOOD_RPC: new URL("/rpc", "https://example.invalid").href,
+        READ_UPSTREAMS: "true",
+      },
+      "tracked_prices",
+    ).status,
+    "needs_live_verification",
+  );
 });
 
 test("runtime status never emits provider values or derived contract configuration", () => {

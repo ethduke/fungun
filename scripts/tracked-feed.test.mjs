@@ -2,8 +2,10 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import {
   binCells,
+  priceServiceStatus,
   popularTokens,
   trackedTokenDraft,
+  validatedPriceResponse,
 } from "../apps/web/components/tracked-market-feed.mjs";
 import {
   createTrackedFeedHandler,
@@ -74,6 +76,63 @@ test("COPY uses the token ticker, never its quote symbol or contract address", (
   assert.deepEqual(trackedTokenDraft({ sym: "TOKEN" }), { name: "TOKEN", ticker: "TOKEN" });
   assert.deepEqual(trackedTokenDraft({ name: "Only a name" }), { name: "Only a name", ticker: "" });
   assert.deepEqual(trackedTokenDraft({}), { name: "", ticker: "" });
+});
+
+test("price service status distinguishes waiting, active and unavailable reads", () => {
+  assert.deepEqual(priceServiceStatus("waiting"), {
+    text: "Prices awaiting first quote",
+    error: false,
+  });
+  assert.deepEqual(priceServiceStatus("checking"), {
+    text: "Checking prices…",
+    error: false,
+  });
+  assert.deepEqual(priceServiceStatus("online"), {
+    text: "Prices online",
+    error: false,
+  });
+  assert.deepEqual(priceServiceStatus("no-quotes"), {
+    text: "Price service online · no verified quotes",
+    error: false,
+  });
+  assert.deepEqual(priceServiceStatus("unavailable"), {
+    text: "Prices unavailable · retrying",
+    error: true,
+  });
+});
+
+test("price responses distinguish verified samples, valid empties and malformed success", () => {
+  const request = {
+    pool: `0x${"a".repeat(64)}`,
+    token: address(1),
+    version: "v4",
+  };
+  assert.deepEqual(validatedPriceResponse({ prices: [], serverTime: 200 }, [request]), {
+    prices: [],
+    serverTime: 200,
+    state: "no-quotes",
+  });
+  const sample = {
+    pool: request.pool,
+    token: request.token,
+    value: 1.25,
+    quote: address(2),
+    observedAt: 100,
+    source: address(3),
+  };
+  assert.deepEqual(validatedPriceResponse({ prices: [sample], serverTime: 200 }, [request]), {
+    prices: [sample],
+    serverTime: 200,
+    state: "online",
+  });
+  for (const body of [
+    { prices: [], serverTime: null },
+    { prices: [{ ...sample, pool: `0x${"b".repeat(64)}` }], serverTime: 200 },
+    { prices: [{ ...sample, value: 0 }], serverTime: 200 },
+    { prices: [{ ...sample, observedAt: 201 }], serverTime: 200 },
+    { prices: [sample, sample], serverTime: 200 },
+  ])
+    assert.equal(validatedPriceResponse(body, [request]), null);
 });
 
 test("popularity counts distinct contracts per chain, not pools or high-volume singletons", () => {

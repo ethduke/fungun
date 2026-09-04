@@ -148,7 +148,7 @@ export function describeError(error: unknown, context: ErrorContext): string {
         'The wallet connection did not finish. Open your wallet and try again.',
       disconnect:
         'The wallet could not disconnect. You can remove this site from your wallet’s connected sites.',
-      catalog: 'Pairings could not be loaded. Try refreshing them shortly.',
+      catalog: 'Live pairing availability could not be checked. Reopen the pairing menu to try again.',
       ticker:
         'The ticker could not be checked. Try again shortly; availability is still unknown.',
       fees: 'Fees could not be loaded. Balances are unknown, not zero. Try refreshing shortly.',

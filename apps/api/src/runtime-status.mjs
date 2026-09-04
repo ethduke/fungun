@@ -56,6 +56,7 @@ export function runtimeStatus(env) {
         ],
         reads,
       ),
+      feature("tracked_prices", [rpc], reads),
       feature("o1_indexed_fees", [o1], fees),
       ...["long", "longbow"].flatMap((padId) => [
         feature(`${padId}_locked_pool_fees`, [rpc, lockedFees(padId)], fees),

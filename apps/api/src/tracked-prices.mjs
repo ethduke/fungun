@@ -1,5 +1,5 @@
 import { decodeEventLog, encodeAbiParameters, encodeEventTopics, keccak256, parseAbi } from "viem";
-import { ServiceError } from "./errors.mjs";
+import { safeError, ServiceError } from "./errors.mjs";
 import { FeeRpc, rpcNumber } from "./fee-rpc.mjs";
 import { ReadCache } from "./upstream.mjs";
 
@@ -135,6 +135,7 @@ export class TrackedPrices {
     this.allowed = new Map();
     this.metadata = new Map();
     this.points = new Map();
+    this.failures = new Map();
     this.pending = null;
     this.demands = new Set();
     this.manager = null;
@@ -144,6 +145,34 @@ export class TrackedPrices {
     map.delete(key);
     while (map.size >= 256) map.delete(map.keys().next().value);
     map.set(key, value);
+  }
+
+  rememberFailure(pools, error) {
+    if (error.code === "busy") return;
+    const until = this.now() + Math.max(15_000, error.retryAfter * 1000);
+    for (const item of pools) this.put(this.failures, tupleKey(item), { error, until });
+  }
+
+  failed(pools) {
+    const now = this.now();
+    for (const item of pools) {
+      const key = tupleKey(item);
+      const entry = this.failures.get(key);
+      if (!entry) continue;
+      if (entry.until <= now) {
+        this.failures.delete(key);
+        continue;
+      }
+      return entry.error.status === 429
+        ? new ServiceError(
+            entry.error.code,
+            429,
+            Math.max(1, Math.ceil((entry.until - now) / 1000)),
+            entry.error.retryScope,
+          )
+        : entry.error;
+    }
+    return null;
   }
 
   registry(guard) {
@@ -203,9 +232,6 @@ export class TrackedPrices {
     );
     if (!missing.length) return;
     guard();
-    // Reserve failures too. No pagination, range splitting or immediate retry.
-    for (const id of missing)
-      this.put(this.metadata, `${manager}:${id}`, { key: null, until: now + NEGATIVE_TTL });
     const [logs] = await this.rpc.batch(4663, [
       {
         method: "eth_getLogs",
@@ -221,10 +247,22 @@ export class TrackedPrices {
     ]);
     if (!Array.isArray(logs) || logs.length > missing.length)
       throw new ServiceError("price_metadata_unavailable");
+    const verified = new Map();
+    for (const log of logs) {
+      const id = log?.topics?.[1]?.toLowerCase();
+      if (!missing.includes(id) || verified.has(id))
+        throw new ServiceError("price_metadata_unavailable");
+      const key = verifiedPoolKey(log, manager, id);
+      if (!key) throw new ServiceError("price_metadata_unavailable");
+      verified.set(id, key);
+    }
+    const observedAt = this.now();
     for (const id of missing) {
-      const matching = logs.filter((log) => log?.topics?.[1]?.toLowerCase() === id);
-      const key = matching.length === 1 ? verifiedPoolKey(matching[0], manager, id) : null;
-      if (key) this.put(this.metadata, `${manager}:${id}`, { key, until: this.now() + DAY });
+      const key = verified.get(id) ?? null;
+      this.put(this.metadata, `${manager}:${id}`, {
+        key,
+        until: observedAt + (key ? DAY : NEGATIVE_TTL),
+      });
     }
   }
 
@@ -247,13 +285,6 @@ export class TrackedPrices {
         (this.points.get(`${manager}:${tupleKey(item)}`)?.until ?? 0) <= this.now(),
     );
     if (!due.length) return manager;
-    for (const item of due) {
-      const key = `${manager}:${tupleKey(item)}`;
-      this.put(this.points, key, {
-        point: this.points.get(key)?.point ?? null,
-        until: this.now() + INTERVAL,
-      });
-    }
     await this.sources.get(`verified:${manager}`, DAY, async () => {
       guard();
       const [chain, code] = await this.rpc.batch(4663, [
@@ -277,22 +308,32 @@ export class TrackedPrices {
       const key = this.metadata.get(`${manager}:${item.pool}`)?.key;
       return key && [key.currency0, key.currency1].includes(item.token);
     });
-    if (!priced.length) return manager;
-    const ids = [...new Set(priced.map((item) => item.pool))];
-    guard();
-    const [words] = await this.rpc.calls(4663, [
-      { address: manager, abi, functionName: "extsload", args: [ids.map(poolStateSlot)] },
-    ]);
-    if (!Array.isArray(words) || words.length !== ids.length)
-      throw new ServiceError("invalid_response");
     const observedAt = this.now();
-    for (const item of priced) {
-      const key = this.metadata.get(`${manager}:${item.pool}`).key;
-      const price = poolPrice(words[ids.indexOf(item.pool)], key, item.token);
-      if (!price) continue;
-      const point = { pool: item.pool, token: item.token, ...price, observedAt, source: manager };
+    const points = new Map(due.map((item) => [tupleKey(item), null]));
+    if (priced.length) {
+      const ids = [...new Set(priced.map((item) => item.pool))];
+      guard();
+      const [words] = await this.rpc.calls(4663, [
+        { address: manager, abi, functionName: "extsload", args: [ids.map(poolStateSlot)] },
+      ]);
+      if (!Array.isArray(words) || words.length !== ids.length)
+        throw new ServiceError("invalid_response");
+      for (const item of priced) {
+        const key = this.metadata.get(`${manager}:${item.pool}`).key;
+        const price = poolPrice(words[ids.indexOf(item.pool)], key, item.token);
+        if (!price) throw new ServiceError("invalid_response");
+        points.set(tupleKey(item), {
+          pool: item.pool,
+          token: item.token,
+          ...price,
+          observedAt,
+          source: manager,
+        });
+      }
+    }
+    for (const item of due) {
       this.put(this.points, `${manager}:${tupleKey(item)}`, {
-        point,
+        point: points.get(tupleKey(item)),
         until: observedAt + INTERVAL,
       });
     }
@@ -318,9 +359,12 @@ export class TrackedPrices {
   async list(input, { shouldContinue = () => true } = {}) {
     const deadline = performance.now() + 20_000;
     const { pools } = validatePriceInput(input);
-    if (!this.config.readsEnabled || !this.config.rpcUrl) return { prices: [] };
+    if (!this.config.readsEnabled) throw new ServiceError("reads_disabled");
+    if (!this.config.rpcUrl) throw new ServiceError("not_configured");
     const cached = this.cached(pools);
     if (cached) return cached;
+    const priorFailure = this.failed(pools);
+    if (priorFailure) throw priorFailure;
     if (!shouldContinue() || this.demands.size >= 16) throw new ServiceError("busy", 429, 120);
     this.demands.add(shouldContinue);
     try {
@@ -338,10 +382,16 @@ export class TrackedPrices {
         }
         const shared = this.cached(pools);
         if (shared) return shared;
+        const sharedFailure = this.failed(pools);
+        if (sharedFailure) throw sharedFailure;
       }
       // Wait for at most one refresh; different batches do not form a work queue.
       if (this.pending || !shouldContinue()) throw new ServiceError("busy", 429, 120);
-      this.pending = this.refresh(pools, deadline);
+      this.pending = this.refresh(pools, deadline).catch((error) => {
+        const safe = safeError(error);
+        this.rememberFailure(pools, safe);
+        throw safe;
+      });
       let manager;
       try {
         manager = await this.pending;

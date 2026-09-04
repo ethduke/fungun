@@ -78,6 +78,7 @@ function fixture() {
     rows: pools.map((item) => item.row),
     word: word(),
     logsFail: false,
+    omitLogs: false,
     wrongChain: false,
     methods: [],
     market: [],
@@ -103,9 +104,11 @@ function fixture() {
           assert.equal(filter.address, manager);
           assert.equal(filter.fromBlock, "0x0");
           assert.equal(filter.toBlock, "latest");
-          result = pools
-            .filter((item) => filter.topics[1].includes(item.input.pool))
-            .map((item) => item.log);
+          result = state.omitLogs
+            ? []
+            : pools
+                .filter((item) => filter.topics[1].includes(item.input.pool))
+                .map((item) => item.log);
         } else if (call.method === "eth_call") {
           assert.equal(call.params[0].to, manager);
           const decoded = decodeFunctionData({ abi, data: call.params[0].data });
@@ -212,27 +215,80 @@ test("client-selected unknown, subthreshold or stable tokens cannot trigger RPC"
   assert.deepEqual(state.methods, []);
 });
 
-test("metadata failure is negatively cached without log-range splitting or frequent retries", async () => {
+test("metadata transport failures cannot become cached empty successes", async () => {
   const { prices, state, pools, advance } = fixture();
   state.logsFail = true;
   const input = { pools: [pools[0].input] };
-  await assert.rejects(prices.list(input));
-  for (let n = 0; n < 5; n++) {
-    advance(120000);
-    assert.deepEqual(await prices.list(input), { prices: [] });
-  }
+  await assert.rejects(prices.list(input), { code: "unavailable", status: 503 });
+  assert.equal(prices.metadata.size, 0);
+  assert.equal(prices.points.size, 0);
+  await assert.rejects(prices.list(input), { code: "unavailable", status: 503 });
+  assert.equal(state.methods.filter((method) => method === "eth_getLogs").length, 1);
+  advance(15000);
+  state.logsFail = false;
+  assert.equal((await prices.list(input)).prices.length, 1);
+});
+
+test("concurrent viewers share an explicit refresh failure without retrying it", async () => {
+  const { prices, state, pools } = fixture();
+  state.logsFail = true;
+  const input = { pools: [pools[0].input] };
+  const results = await Promise.allSettled(
+    Array.from({ length: 12 }, () => prices.list(input)),
+  );
+  assert.ok(
+    results.every(
+      (result) =>
+        result.status === "rejected" &&
+        result.reason.code === "unavailable" &&
+        result.reason.status === 503,
+    ),
+  );
+  assert.equal(state.methods.filter((method) => method === "eth_getLogs").length, 1);
+  assert.equal(prices.metadata.size, 0);
+  assert.equal(prices.points.size, 0);
+});
+
+test("a successful metadata lookup can cache a legitimate empty price set", async () => {
+  const { prices, state, pools, advance } = fixture();
+  state.omitLogs = true;
+  const input = { pools: [pools[0].input] };
+  assert.deepEqual(await prices.list(input), { prices: [] });
+  advance(120000);
+  assert.deepEqual(await prices.list(input), { prices: [] });
   assert.equal(state.methods.filter((method) => method === "eth_getLogs").length, 1);
   assert.equal(state.methods.filter((method) => method === "eth_call").length, 0);
 });
 
-test("wrong chain and disabled upstream reads cannot produce prices", async () => {
+test("malformed metadata and invalid pool state remain explicit failures", async () => {
+  const malformed = fixture();
+  malformed.pools[0].log.removed = true;
+  await assert.rejects(
+    malformed.prices.list({ pools: [malformed.pools[0].input] }),
+    { code: "price_metadata_unavailable", status: 503 },
+  );
+  assert.equal(malformed.prices.metadata.size, 0);
+  assert.equal(malformed.prices.points.size, 0);
+
+  const invalid = fixture();
+  invalid.state.word = word(0n);
+  const input = { pools: [invalid.pools[0].input] };
+  await assert.rejects(invalid.prices.list(input), { code: "invalid_response", status: 503 });
+  await assert.rejects(invalid.prices.list(input), { code: "invalid_response", status: 503 });
+  assert.equal(invalid.state.methods.filter((method) => method === "eth_call").length, 1);
+  assert.equal(invalid.prices.points.size, 0);
+});
+
+test("wrong chain and unavailable price configuration fail explicitly", async () => {
   const { prices, state, pools, upstream } = fixture();
   const input = { pools: [pools[0].input] };
   state.wrongChain = true;
   await assert.rejects(prices.list(input), { code: "contract_unverified" });
   assert.deepEqual(state.methods, ["eth_chainId", "eth_getCode"]);
   const disabled = new TrackedPrices({ readsEnabled: false }, upstream);
-  assert.deepEqual(await disabled.list(input), { prices: [] });
+  await assert.rejects(disabled.list(input), { code: "reads_disabled", status: 503 });
+  const missingRpc = new TrackedPrices({ readsEnabled: true, rpcUrl: "" }, upstream);
+  await assert.rejects(missingRpc.list(input), { code: "not_configured", status: 503 });
   assert.deepEqual(state.methods, ["eth_chainId", "eth_getCode"]);
 });
 

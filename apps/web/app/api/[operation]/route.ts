@@ -15,8 +15,22 @@ export async function POST(
     'cache-control': 'no-store',
     'x-content-type-options': 'nosniff',
   };
-  const unavailable = () =>
-    Response.json({ error: 'unavailable' }, { status: 503, headers });
+  const unavailable = (retryAfter = '5') =>
+    Response.json(
+      { error: 'read_service_unavailable' },
+      {
+        status: 503,
+        headers: { ...headers, 'retry-after': retryAfter },
+      },
+    );
+  const timedOut = (retryAfter = '5') =>
+    Response.json(
+      { error: 'timeout' },
+      {
+        status: 504,
+        headers: { ...headers, 'retry-after': retryAfter },
+      },
+    );
   if (!operations.has(operation))
     return Response.json({ error: 'not_found' }, { status: 404, headers });
   const origin = process.env.APP_ORIGIN;
@@ -102,6 +116,14 @@ export async function POST(
     output.set('content-type', 'application/json');
     const retry = response.headers.get('retry-after');
     if (retry && /^\d{1,5}$/.test(retry)) output.set('retry-after', retry);
+    if (response.status === 502) {
+      await response.body?.cancel();
+      return unavailable(retry && /^\d{1,5}$/.test(retry) ? retry : undefined);
+    }
+    if (response.status === 504) {
+      await response.body?.cancel();
+      return timedOut(retry && /^\d{1,5}$/.test(retry) ? retry : undefined);
+    }
     if (response.headers.get('x-fungun-retry-scope') === 'operation')
       output.set('x-fungun-retry-scope', 'operation');
     return new Response(response.body, {

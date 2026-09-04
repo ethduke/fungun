@@ -137,6 +137,71 @@ await test('proxy cancels an unfinished body before contacting the backend', asy
   }
 });
 
+await test('proxy normalizes opaque gateway failures without erasing timeout semantics', async () => {
+  const previousOrigin = process.env.APP_ORIGIN;
+  const previousBackend = process.env.READ_SERVICE_ORIGIN;
+  const originalFetch = globalThis.fetch;
+  const origin = 'https://app.example.invalid';
+  const request = () =>
+    new Request(`${origin}/api/tracked-prices`, {
+      method: 'POST',
+      headers: {
+        origin,
+        'content-type': 'application/json',
+        'x-fungun-intent': 'tracked-prices',
+      },
+      body: JSON.stringify({
+        pools: [
+          {
+            pool: `0x${'1'.repeat(64)}`,
+            token: `0x${'2'.repeat(40)}`,
+            version: 'v4',
+          },
+        ],
+      }),
+    });
+  const params = Promise.resolve({ operation: 'tracked-prices' });
+  try {
+    process.env.APP_ORIGIN = origin;
+    process.env.READ_SERVICE_ORIGIN = 'https://backend.example.invalid';
+    globalThis.fetch = async () =>
+      Response.json(
+        { error: 'opaque_gateway_failure' },
+        { status: 502, headers: { 'retry-after': '17' } },
+      );
+    let response = await POST(request(), { params });
+    assert.equal(response.status, 503);
+    assert.equal(response.headers.get('retry-after'), '17');
+    assert.deepEqual(await response.json(), {
+      error: 'read_service_unavailable',
+    });
+    globalThis.fetch = async () =>
+      Response.json(
+        { error: 'opaque_gateway_timeout' },
+        { status: 504, headers: { 'retry-after': '19' } },
+      );
+    response = await POST(request(), { params });
+    assert.equal(response.status, 504);
+    assert.equal(response.headers.get('retry-after'), '19');
+    assert.deepEqual(await response.json(), { error: 'timeout' });
+    globalThis.fetch = async () => {
+      throw new TypeError('synthetic transport failure');
+    };
+    response = await POST(request(), { params });
+    assert.equal(response.status, 503);
+    assert.equal(response.headers.get('retry-after'), '5');
+    assert.deepEqual(await response.json(), {
+      error: 'read_service_unavailable',
+    });
+  } finally {
+    globalThis.fetch = originalFetch;
+    if (previousOrigin === undefined) delete process.env.APP_ORIGIN;
+    else process.env.APP_ORIGIN = previousOrigin;
+    if (previousBackend === undefined) delete process.env.READ_SERVICE_ORIGIN;
+    else process.env.READ_SERVICE_ORIGIN = previousBackend;
+  }
+});
+
 await test('fee and claim preparation use fixed backend routes without forwarded credentials', async () => {
   const previousOrigin = process.env.APP_ORIGIN;
   const previousBackend = process.env.READ_SERVICE_ORIGIN;
