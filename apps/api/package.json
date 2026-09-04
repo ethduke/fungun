@@ -3,7 +3,7 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "start": "node --env-file-if-exists=../../.env src/server.mjs",
+    "start": "node ../../scripts/start-api.mjs",
     "test": "node --test src/*.test.mjs"
   },
   "dependencies": {
