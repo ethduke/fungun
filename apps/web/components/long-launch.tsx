@@ -92,7 +92,10 @@ export function LongLaunch({ enabled, ready, pairId, name, ticker, description, 
         usd: { microUsdPerEth: wei(checked.usd.microUsdPerEth), sourceLabel: checked.usd.sourceLabel,
           quotedAt: observed, expiresAt: Math.min(checked.deadline, observed + 60000 - usdAge) } });
       await launch(checked, context);
-    } catch (e) { setError(e instanceof AssetError ? assetErrorText(e) : launchMessage(e)); setCooldown(true); }
+    } catch (e) {
+      setError(e instanceof AssetError ? assetErrorText(e) : launchMessage(e));
+      setCooldown(e instanceof AssetError ? e.retryAfter > 0 : e instanceof Error && ['busy', 'rate_limited'].includes(e.message));
+    }
     finally { flight.current = false; setBusy(''); }
   }
   async function launch(launchPlan: LongPlan, context: string) {

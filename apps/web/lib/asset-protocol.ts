@@ -89,11 +89,11 @@ const messages: Record<string, string> = {
   asset_wallet_pending:
     'Finish the open wallet request, then try again. Nothing was published.',
   asset_context_changed:
-    'The wallet, image or coin details changed. Prepare a new preview.',
+    'Coin details or wallet changed. Click Launch coin again.',
   asset_approval_expired:
-    'This preview expired. Prepare it again before approving.',
+    'Artwork preparation expired. Click Launch coin again.',
   invalid_asset_approval:
-    'The wallet approval could not be verified. Nothing new was published.',
+    'Artwork could not be verified. Please try again.',
   asset_rejected: 'You declined the wallet approval. Nothing was published.',
   asset_busy: 'An image request is already running. Please wait.',
   rate_limited: 'Too many requests. Please wait before trying again.',
@@ -114,9 +114,9 @@ const messages: Record<string, string> = {
   asset_integrity_failed:
     'Stored files could not be verified. Contact support before publishing again.',
   asset_publication_uncertain:
-    'Publication could not be confirmed. Check its status; do not publish again.',
+    'Artwork is still being checked. Click Launch coin again in a minute.',
   ipfs_approval_pending:
-    'Finish or let the current image approval expire before preparing another one.',
+    'Previous artwork is pending. Wait a few minutes and try again.',
   ipfs_publication_disabled:
     'IPFS publication is not available yet. Your image has not been uploaded.',
   ipfs_configuration:
