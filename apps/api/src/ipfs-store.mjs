@@ -1,5 +1,5 @@
 import { createHmac, randomBytes } from "node:crypto";
-import { closeSync, existsSync, lstatSync, mkdirSync, openSync, readFileSync, realpathSync, statfsSync } from "node:fs";
+import { closeSync, existsSync, lstatSync, mkdirSync, openSync, readFileSync, realpathSync, statfsSync, unlinkSync } from "node:fs";
 import { join } from "node:path";
 import { isAddress, recoverMessageAddress, zeroAddress } from "viem";
 import { Budget } from "./budget.mjs";
@@ -129,7 +129,13 @@ export class IpfsStore {
       catch { throw new ServiceError("invalid_asset_approval", 400); }
       if (signer.toLowerCase() !== wallet.toLowerCase()) throw new ServiceError("invalid_asset_approval", 400);
       row = this.get(id);
-      if (row.state === "reserved" || row.state === "published") return this.result(row);
+      if (row.state === "published") return this.result(row);
+      if (row.state === "reserved") {
+        for (const [kind, object] of [["image", bundle.image], ["metadata", bundle.metadata]])
+          writeOnce(this.directory, `${id}.${kind}`, object.bytes);
+        this.staged(id);
+        return this.result(this.get(id));
+      }
       if (row.state !== "pending" || row.expires < this.clock()) throw new ServiceError("asset_approval_expired", 409);
       const disk = statfsSync(this.root);
       if (disk.bavail * disk.bsize < maximumBytes + bundle.totalBytes * 2) throw new ServiceError("asset_storage_full", 507);
@@ -170,9 +176,10 @@ export class IpfsStore {
       ...this.links(row), ipfs: this.ipfs(row), launchReady: false };
     if (row.state === "published") return { ...base, status: "published" };
     const states = Object.fromEntries(this.objects(row.id).map((object) => [object.kind, object.state]));
-    return { ...base, status: "processing", progress: { image: states.image, metadata: states.metadata } };
+    return { ...base, status: "processing", progress: { image: states.image, metadata: states.metadata },
+      ...(row.error ? { issue: "verification_delayed", retryAt: row.next_check } : {}) };
   }
-  pending() { return this.db.prepare("SELECT * FROM ipfs_publications WHERE state='reserved' AND next_check<=? ORDER BY created LIMIT 30").all(this.clock()); }
+  pending() { return this.db.prepare("SELECT * FROM ipfs_publications WHERE state IN ('reserved','published') AND next_check<=? ORDER BY next_check,created LIMIT 30").all(this.clock()); }
   async bundle(row) {
     const image = readExact(join(this.directory, `${row.id}.image`), row.image_size);
     const bundle = await prepareLongIpfsAssets(image, JSON.parse(row.draft));
@@ -181,7 +188,11 @@ export class IpfsStore {
       throw new ServiceError("asset_integrity_failed");
     return bundle;
   }
-  defer(id) { this.db.prepare("UPDATE ipfs_publications SET next_check=? WHERE id=? AND state='reserved'").run(this.clock() + 60000, id); }
+  defer(id) { this.db.prepare("UPDATE ipfs_publications SET next_check=? WHERE id=? AND state IN ('reserved','published')").run(this.clock() + 60000, id); }
+  failed(id) {
+    this.db.prepare(`UPDATE ipfs_publications SET error='verification_delayed',attempts=attempts+1,
+      next_check=? WHERE id=? AND state='reserved'`).run(this.clock() + 60000, id);
+  }
   staged(id) { this.db.prepare("UPDATE ipfs_objects SET state='ready' WHERE publication_id=? AND state='staging'").run(id); }
   begin(id, kind) {
     return this.db.prepare("UPDATE ipfs_objects SET state='sending' WHERE publication_id=? AND kind=? AND state='ready'").run(id, kind).changes === 1;
@@ -195,6 +206,15 @@ export class IpfsStore {
   complete(id) {
     this.db.prepare(`UPDATE ipfs_publications SET state='published' WHERE id=? AND state='reserved'
       AND (SELECT COUNT(*) FROM ipfs_objects WHERE publication_id=? AND state='verified')=2`).run(id, id);
+    this.cleanup(id);
+  }
+  cleanup(id) {
+    if (this.get(id)?.state !== "published") return;
+    for (const kind of ["image", "metadata"])
+      try { unlinkSync(join(this.directory, `${id}.${kind}`)); }
+      catch (error) { if (error.code !== "ENOENT") { this.defer(id); return; } }
+    syncDirectory(this.directory);
+    this.db.prepare("UPDATE ipfs_publications SET approved=NULL,next_check=? WHERE id=? AND state='published'").run(Number.MAX_SAFE_INTEGER, id);
   }
   close() { this.budget.close(); }
 }

@@ -31,7 +31,7 @@ const storageKey = 'fungun.asset-publication.v1';
 const recoveryEvent = 'fungun:asset-recovery';
 export function assetRecoverySnapshot() {
   try {
-    return sessionStorage.getItem(storageKey) ?? '';
+    return localStorage.getItem(storageKey) ?? '';
   } catch {
     return 'unavailable';
   }
@@ -230,7 +230,6 @@ export async function publishAsset(
     );
     const result = raw && typeof raw === 'object' && 'status' in raw && raw.status === 'processing'
       ? validateProcessingAsset(raw, approval) : validatePublishedAsset(raw, approval);
-    if (result.status === 'published') clearAssetRecovery(storage, recovery);
     return result;
   } catch (error) {
     throw new AssetError(
@@ -277,6 +276,6 @@ export async function checkAssetStatus(
       : raw && typeof raw === 'object' && 'status' in raw && raw.status === 'processing'
         ? validateProcessingAsset(raw, recovery)
         : validatePublishedAsset(raw, recovery);
-  if (result.status !== 'processing') clearAssetRecovery(storage, recovery);
+  if (result.status === 'expired') clearAssetRecovery(storage, recovery);
   return result;
 }

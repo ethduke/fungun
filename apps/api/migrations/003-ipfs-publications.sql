@@ -6,7 +6,8 @@ CREATE TABLE ipfs_publications (
   image_size INTEGER NOT NULL, metadata_size INTEGER NOT NULL,
   created INTEGER NOT NULL, expires INTEGER NOT NULL, approved INTEGER,
   state TEXT NOT NULL CHECK(state IN ('pending','reserved','published','expired')),
-  next_check INTEGER NOT NULL DEFAULT 0
+  next_check INTEGER NOT NULL DEFAULT 0, attempts INTEGER NOT NULL DEFAULT 0,
+  error TEXT
 );
 CREATE UNIQUE INDEX idx_ipfs_active_owner ON ipfs_publications(owner)
   WHERE state IN ('pending','reserved');

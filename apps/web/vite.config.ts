@@ -59,6 +59,8 @@ export default defineConfig(async ({ command }) => {
                     'ASSET_SERVICE_ORIGIN',
                     'ASSET_PUBLIC_ORIGIN',
                     'ASSET_UPLOADS',
+                    'ASSET_STORAGE',
+                    'PINATA_GATEWAY',
                     'IMAGE_USDG_ADDRESS',
                   ]
                     .filter((name) => typeof process.env[name] === 'string')

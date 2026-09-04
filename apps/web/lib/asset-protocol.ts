@@ -41,6 +41,8 @@ export type ProcessingAsset = Pick<
   launchReady: false;
   ipfs: AssetIpfs;
   progress: { image: 'staging' | 'ready' | 'sending' | 'pinned' | 'verified'; metadata: 'staging' | 'ready' | 'sending' | 'pinned' | 'verified' };
+  issue?: 'verification_delayed';
+  retryAt?: number;
 };
 export type ExpiredAsset = Pick<
   AssetApproval,
@@ -404,12 +406,14 @@ export function validatePublishedAsset(
 
 export function validateProcessingAsset(raw: unknown, expected: AssetApproval | (Partial<AssetApproval> & { ipfs?: AssetIpfs })): ProcessingAsset {
   const states = ['staging', 'ready', 'sending', 'pinned', 'verified'];
-  if (!expected.ipfs || !objectFields(raw, ['id','imageHash','metadataHash','imageUrl','metadataUrl','ipfs','launchReady','status','progress'])
+  const delayed = !!raw && typeof raw === 'object' && 'issue' in raw;
+  if (!expected.ipfs || !objectFields(raw, ['id','imageHash','metadataHash','imageUrl','metadataUrl','ipfs','launchReady','status','progress', ...(delayed ? ['issue','retryAt'] : [])])
     || raw.status !== 'processing' || raw.launchReady !== false
     || ['id','imageHash','metadataHash','imageUrl','metadataUrl'].some((field) => raw[field] !== expected[field as keyof typeof expected])
     || JSON.stringify(raw.ipfs) !== JSON.stringify(expected.ipfs)
     || !objectFields(raw.progress, ['image','metadata'])
-    || !states.includes(String(raw.progress.image)) || !states.includes(String(raw.progress.metadata)))
+    || !states.includes(String(raw.progress.image)) || !states.includes(String(raw.progress.metadata))
+    || (delayed && (raw.issue !== 'verification_delayed' || !Number.isSafeInteger(raw.retryAt))))
     throw new AssetError('invalid_asset_response');
   return raw as ProcessingAsset;
 }

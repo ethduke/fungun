@@ -6,6 +6,7 @@ export function createIpfsWorker(store, publisher, { enabled = false, intervalMs
       if (closed) break;
       store.defer(row.id);
       try {
+        if (row.state === "published") { store.cleanup(row.id); continue; }
         const bundle = await store.bundle(row);
         store.staged(row.id);
         for (const kind of ["image", "metadata"]) {
@@ -35,6 +36,7 @@ export function createIpfsWorker(store, publisher, { enabled = false, intervalMs
         if (!closed) store.complete(row.id);
       } catch {
         // Retain reservations and any uncertain POST; the next pass only reconciles it.
+        store.failed(row.id);
       }
     }
   }

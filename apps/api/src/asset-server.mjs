@@ -32,6 +32,7 @@ try {
     uploadsEnabled,
   };
   const legacyStore = new AssetStore(config);
+  if (process.env.ASSET_STORAGE && process.env.ASSET_STORAGE !== "ipfs") throw new Error();
   const ipfsSelected = process.env.ASSET_STORAGE === "ipfs";
   const ipfsPath = join(config.root, "ipfs.sqlite");
   const ipfsStore = ipfsSelected || existsSync(ipfsPath) ? new IpfsStore({

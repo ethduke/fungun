@@ -1,6 +1,9 @@
 import { createAssetProxy } from '../../../../lib/asset-proxy';
 
 const proxy = createAssetProxy(() => ({
+  ...(process.env.ASSET_STORAGE && process.env.ASSET_STORAGE !== 'ipfs'
+    ? (() => { throw new Error('Invalid asset storage mode'); })()
+    : {}),
   appOrigin: process.env.APP_ORIGIN,
   serviceOrigin: process.env.ASSET_SERVICE_ORIGIN,
   publicOrigin:

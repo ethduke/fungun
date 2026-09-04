@@ -138,7 +138,7 @@ test("asset webview prepares canonical bytes, signs once and publishes through b
   assert.equal(result.id, approval.id);
   assert.equal(result.status, "published");
   assert.equal(result.launchReady, false);
-  assert.equal(records.size, 0);
+  assert.equal(records.size, 1);
   assert.deepEqual(providerCalls, [
     "eth_accounts",
     "eth_chainId",
@@ -190,7 +190,7 @@ test("lost publication response recovers through status without a second signatu
     },
   );
   assert.equal(result.status, "published");
-  assert.equal(readAssetRecovery(storage, origin), null);
+  assert.equal(readAssetRecovery(storage, origin).id, approval.id);
   assert.equal(
     store.db.prepare("SELECT COUNT(*) AS n FROM asset_challenges WHERE state = 'published'").get()
       .n,

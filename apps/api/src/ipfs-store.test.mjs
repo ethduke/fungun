@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { mkdtempSync, realpathSync, rmSync, readFileSync, readdirSync, writeFileSync } from "node:fs";
+import { mkdtempSync, realpathSync, rmSync, readFileSync, readdirSync, writeFileSync, unlinkSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import sharp from "sharp";
@@ -59,6 +59,8 @@ test("IPFS reservation survives restart, binds exact content, and stores no wall
   const result = f.store.status(approval);
   assert.equal(result.status, "published");
   assert.equal(result.launchReady, false);
+  assert.equal(f.store.get(approval.id).approved, null);
+  assert.deepEqual(readdirSync(join(f.config.root, "ipfs-staging")), []);
   assert.equal(f.calls.filter(([method]) => method === "POST").length, 2);
   const count = f.calls.length;
   assert.deepEqual(await f.store.accept(approval), result);
@@ -70,6 +72,17 @@ test("IPFS reservation survives restart, binds exact content, and stores no wall
     assert.equal(bytes.includes(Buffer.from(approval.signature)), false);
     assert.equal(bytes.includes(Buffer.from(f.account.address.toLowerCase())), false);
   }
+});
+
+test("an authenticated repeat repairs a crash during private staging", async (t) => {
+  const f = await ipfsFixture(t), approval = await f.approval();
+  await f.store.accept(approval);
+  unlinkSync(join(f.config.root, "ipfs-staging", `${approval.id}.image`));
+  f.store.db.prepare("UPDATE ipfs_objects SET state='staging' WHERE publication_id=?").run(approval.id);
+  f.reopen();
+  assert.equal((await f.store.accept(approval)).status, "processing");
+  const worker = f.worker(); worker.kick(); await worker.idle();
+  assert.equal(f.store.status(approval).status, "published");
 });
 
 test("lost acknowledgment recovers by CID without repeating the image upload", async (t) => {

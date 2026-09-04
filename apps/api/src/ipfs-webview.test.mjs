@@ -63,7 +63,7 @@ test("webview verifies IPFS CIDs, signs once, tracks progress and resumes withou
   worker.kick(); await worker.idle();
   const published = await checkAssetStatus(recovery, account.address, storage, client);
   assert.equal(published.status, "published");
-  assert.equal(readAssetRecovery(storage, origin), null);
+  assert.equal(readAssetRecovery(storage, origin).id, approval.id);
   assert.equal(calls.filter(([method]) => method === "POST").length, 2);
   assert.deepEqual(providerCalls, ["eth_accounts", "eth_chainId", "personal_sign", "eth_accounts", "eth_chainId"]);
 });

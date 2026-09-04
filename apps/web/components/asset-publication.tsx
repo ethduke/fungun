@@ -29,6 +29,7 @@ import {
   recoveryFor,
   assetRecoverySnapshot,
   subscribeAssetRecovery,
+  clearAssetRecovery,
 } from '@/lib/asset-client';
 import './asset-publication.css';
 
@@ -48,7 +49,7 @@ export function AssetPublication({
   enabled: boolean;
 }) {
   const account = useConnectedAccount();
-  const { hydrated, published: cachedPublication, cachePublication } = useDraftCache();
+  const { hydrated, cacheState, published: cachedPublication, cachePublication } = useDraftCache();
   const context = JSON.stringify([
     name,
     ticker,
@@ -92,6 +93,10 @@ export function AssetPublication({
   }, [savedRecovery]);
   const recovery = recoveryState.ticket;
   const recoveryBlocked = recoveryState.blocked;
+  useEffect(() => {
+    if (recovery && cachedPublication?.id === recovery.id && cacheState === 'saved')
+      clearAssetRecovery(localStorage, recovery);
+  }, [recovery, cachedPublication, cacheState]);
   const [published, setPublished] = useState<{
     result: PublishedAsset;
     context?: string;
@@ -232,7 +237,7 @@ export function AssetPublication({
         active.approval,
         signature,
         ticket,
-        sessionStorage,
+        localStorage,
         isCurrent,
       );
       if (mounted.current) {
@@ -267,10 +272,11 @@ export function AssetPublication({
       const result = await checkAssetStatus(
         recovery,
         account.address,
-        sessionStorage,
+        localStorage,
       );
       if (mounted.current) {
         if (result?.status === 'expired') {
+          clearAssetRecovery(localStorage, recovery);
           setPublished(null);
           setPreview(null);
           setRecoveryNotice(
@@ -282,6 +288,8 @@ export function AssetPublication({
         } else if (result) {
           setProgress(null);
           setPublished({ result });
+          try { await cachePublication(result); }
+          catch { setRecoveryNotice('Artwork published, but its link could not be saved in this browser.'); }
           setPreview(null);
         } else
           setError(
@@ -324,6 +332,7 @@ export function AssetPublication({
           {progress && (
             <output>
               Image: {progressLabel(progress.progress.image)} · Metadata: {progressLabel(progress.progress.metadata)}
+              {progress.issue ? ' · Verification is delayed; check again in a minute.' : ''}
             </output>
           )}
           <p>
