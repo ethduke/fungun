@@ -1,7 +1,7 @@
 # Fungun agent guide
 
-Status: local preview with optional guarded fee reads and wallet claims. No live launch
-or paid image generation is implemented. Provider reads default to disabled; the public
+Status: composer with optional guarded fee reads, wallet claims and paid image generation.
+Launch transactions are not enabled. USDG/x402 image generation requires configured runtime services. Provider reads default to disabled; the public
 market feed updates automatically without provider credentials.
 Start with [llms.txt](/llms.txt) for the site overview.
 
@@ -12,14 +12,15 @@ Start with [llms.txt](/llms.txt) for the site overview.
    name is entered. Names allow 1–50 characters; tickers allow 1–11 without
    whitespace. Long and Longbow require uppercase letters only.
 3. Upload PNG, JPEG, WebP or GIF artwork, at most 2 MiB and 4096 × 4096 pixels.
-   Images stay in local memory. The Grok/x402 flow is only a preview: it neither
-   generates an image nor charges a payment.
+   Drafts and picture bytes are saved in this browser. The Grok tab offers a USDG
+   quote, a one-time wallet authorization, and a recoverable image job when configured.
+   Never sign another authorization to recover an unresolved image request.
 4. Select Long, O1 and/or Longbow on Robinhood. Long uses a static list of 56
    market tickers; Longbow uses its 194-entry stock/RWA dropdown registry,
    with the SKYHY label corrected to SKHY. Both use permanent metadata.
-   O1 offers standard or RWA pairing and an optional metadata-update setting.
-   Configured backends load O1's catalog for each chain. O1 fallback samples are
-   labeled and are not live eligibility data.
+   O1 offers ETH and 194 Robinhood RWA pairings, plus optional metadata updates.
+   Current live results replace the saved catalog. The saved list is dated
+   4 September 2026 and does not establish current launch eligibility.
 5. Read the inline launch section. Draft validation does not confirm ticker
    availability, token eligibility, costs or launch readiness. Check ticker is an
    explicit read: Long reports only its reservation state; O1 stays unverified.
@@ -34,8 +35,9 @@ wait and refresh rather than blindly raising gas limits. Follow the displayed
 retry delay after a failed check. Never repeat a possibly submitted transaction
 without checking wallet activity first.
 
-The app retains the draft and image in memory across Launch/FEE navigation;
-refreshing or closing the page clears them. No app state is persisted to disk.
+The app retains draft fields, image bytes and matching published metadata in
+IndexedDB across navigation and reloads. Payment recovery is saved separately;
+use the existing request status before starting another paid generation.
 Wallet connection is optional for drafting and starts only after a user click.
 Rabby, MetaMask and compatible injected wallets are supported; WalletConnect QR
 is not configured. The wallet extension may make its own network requests.
@@ -144,8 +146,9 @@ Repeated refreshes cannot produce data that is not configured or implemented.
 
 ## Read-service usage
 
-The UI loads the selected chain's catalog and exposes explicit Refresh pairings
-and Check ticker controls. Do not loop these actions. Catalogs and reservation
+The UI loads the selected chain's catalog and rechecks expired availability when
+the O1 pairing menu opens. There is no Refresh pairings button. Check ticker is
+explicit. Do not repeatedly open the menu or loop ticker checks. Catalogs and reservation
 results are cached, concurrent requests are shared, and quotas survive backend
 restarts. Honor 429 and Retry-After; a failed or expired check means unknown.
 

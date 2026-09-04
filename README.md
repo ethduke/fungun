@@ -8,10 +8,12 @@ npm run setup
 npm run dev
 ```
 
-In a second terminal, run `npm run dev:api` (Node 24.4+). External reads default
-to disabled; see [read-service setup](docs/read-service.md) for runtime configuration.
-Separate worktrees can use distinct local web and API ports with matching
-`APP_ORIGIN`, `READ_SERVICE_PORT` and `READ_SERVICE_ORIGIN` settings.
+`npm run dev` starts the read service first, waits for its health check, then starts
+the web app; either process stopping shuts down the other. Use `npm run dev:web`
+and `npm run dev:api` only when debugging the services separately (Node 24.4+).
+External reads default to disabled; see [read-service setup](docs/read-service.md)
+for runtime configuration. Separate worktrees can use distinct local web and API
+ports with matching `APP_ORIGIN` and `READ_SERVICE_PORT` settings.
 
 Open http://127.0.0.1:3000. See [development notes](docs/development.md) for
 working controls, deliberate limitations, tests and the Fly backend boundary.

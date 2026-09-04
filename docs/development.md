@@ -11,8 +11,10 @@ npm run dev
 
 Open http://127.0.0.1:3000 in a browser. Use a browser with Rabby or MetaMask
 installed to test wallet connection; embedded browsers may have no injected wallet.
-Run `npm run dev:api` in a second terminal for the read service. See
-[read-service setup and limits](read-service.md); external reads default to disabled.
+The development launcher waits for the read service before starting the web app
+and stops both services together. `npm run dev:web` and `npm run dev:api` remain
+available for isolated debugging. See [read-service setup and limits](read-service.md);
+external reads default to disabled.
 
 ## Working controls
 
@@ -59,7 +61,7 @@ Run `npm run dev:api` in a second terminal for the read service. See
   jumps to the coin details immediately. It clears old artwork and invalidates
   pending uploads so another token's image cannot carry over. The current public
   source supplies no token image or metadata URL; artwork must be uploaded separately.
-- Upload/drop a PNG, JPEG, WebP or GIF, preview and remove it. Files stay in memory.
+- Upload/drop a PNG, JPEG, WebP or GIF, preview and remove it. Picture bytes are cached in IndexedDB with the draft.
 - Enter name, ticker and optional description; review per-launchpad validation.
 - Ticker edits auto-fill the coin name unless a custom name has been entered.
 - Robinhood offers Long, O1 and Longbow. Base is temporarily paused in the
@@ -69,16 +71,21 @@ Run `npm run dev:api` in a second terminal for the read service. See
   Longbow uses its 194-entry dropdown registry snapshot from 2 September,
   checked on 4 September, with SKYHY corrected to the verified symbol SKHY.
   Only ticker choices are bundled; runtime addresses stay out of source control.
-  O1 loads a per-chain catalog when the backend is configured; otherwise samples
-  remain labeled. O1 refresh is explicit; no periodic background calls.
+  O1 offers ETH and a complete saved 194-entry Robinhood RWA catalog, verified
+  4 September 2026. Live results replace the saved list; opening an expired
+  menu checks availability again. No refresh button or periodic background calls.
 - Check Long ticker reservations on click; O1 availability remains unverified.
   Longbow has no ticker adapter; its ID is excluded from ticker requests. Its
   separate fee adapter supports reviewed locked pools on Robinhood.
+- Longbow's fee row shows the default LongLauncher route's 95% creator / 5%
+  Doppler LP-fee split. Its details distinguish separate hook fees, the 1% launch
+  supply allocation, and alternate routes. Sources: [default launch route](https://longbow.gg/launch?route=long)
+  and [published fee constants](https://longbow.gg/ref_constants.js), checked 4 September 2026.
 - The inline launch section updates coin details, destinations and draft validation as you edit.
 - Image checks show an inline loading state; O1's metadata-update toggle stays in the launch section.
-- Open the Grok/x402 flow preview; no image generation or payment occurs.
+- Review a Grok/x402 USDG quote, authorize one image in the wallet, and recover its saved result. Requires [image runtime setup](image-generation.md).
   The [server-side memecoin prompt scaffold](image-generation.md) prepares one square
-  image with ticker/name context; it is not connected to paid generation yet.
+  image with ticker/name context through the configured paid generation flow.
 - Explicitly connect/disconnect a discovered EIP-6963 wallet using wagmi/viem.
 - Open FEES from the header: one balance card and Claim all action per launchpad.
 - FEE shows fees only for the connected wallet; while disconnected, it shows “Connect your wallet to show fees.” without making fee lookups.
@@ -88,8 +95,8 @@ Fee reads and wallet claims are implemented behind runtime configuration; see
 never fabricated zero balances. Lookup addresses are sent to the fee backend and
 providers, not stored in browser storage or added to the browser URL. Wallet connection stays mounted
 when navigating between Launch and FEE; switching accounts or disconnecting clears displayed fees.
-The launch draft and uploaded image also survive navigation in layout-owned memory;
-refreshing or closing the page clears them. Nothing is persisted to disk.
+The launch draft and image survive navigation and reloads through IndexedDB.
+Published metadata is bound to the exact draft; payment recovery is stored separately.
 
 O1 fee positions are shared escrow balances by payout
 asset, not per-token lifetime revenue. O1 wallet-index pages are resumable, and
@@ -105,8 +112,9 @@ are pool-wide, not the caller's payout; confirmed payouts require `Release` even
 
 ## Deliberately disabled
 
-No server signing, launch transactions, paid generation, live launch quotes, block
-subscriptions, arbitrary RPC proxy, or server upload endpoint is implemented.
+No server signing, launch transactions, live launch quotes, block subscriptions,
+or arbitrary RPC proxy is implemented. Asset publication and USDG/x402 image jobs
+are available behind their runtime configuration flags.
 Configured fee adapters can read balances and prepare explicitly approved wallet
 claims; the browser never automatically signs, submits or retries a claim.
 The read service implements guarded catalogs and Long reservation checks, off

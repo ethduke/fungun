@@ -7,10 +7,13 @@ pending. No provider credentials were copied from the reference project.
 
 ## Local setup
 
-Use Node 24.4 or newer. Run `npm run setup`, then `npm run dev` and
-`npm run dev:api` in separate terminals. The webview remains at
-http://127.0.0.1:3000; its development proxy forwards `/api/catalog` and
-`/api/ticker`, `/api/fees` and `/api/claim-prepare` to the local service on port 8787. The public market feed's
+Use Node 24.4 or newer. Run `npm run setup`, then `npm run dev`. The launcher
+starts the local read service, waits for `/healthz`, starts the web app, and stops
+both if either exits. `npm run dev:web` and `npm run dev:api` are retained for
+isolated debugging. The webview remains at http://127.0.0.1:3000; its development
+proxy forwards `/api/catalog`, `/api/ticker`, `/api/fees`, `/api/claim-prepare` and
+`/api/tracked-prices` to the local service on port 8787. An unavailable local
+service produces a retryable JSON 503 rather than an opaque proxy 502. The public market feed's
 `GET /api/tracked-feed` route runs in the web server. SQLite runtime files live in ignored
 `apps/api/local/`; never delete them to reset a spent quota.
 
@@ -30,10 +33,11 @@ Leave the committed
 - `APP_ORIGIN`: exact web origin; defaults to the local URL above.
 - `READ_SERVICE_PORT`: local API listening port, default 8787. Local ports must be
   integers from 1024 to 65535; production keeps port 8787.
-- `READ_SERVICE_ORIGIN`: web server's API destination. For an isolated worktree,
-  choose a different web port, set `APP_ORIGIN` to that exact loopback HTTP origin,
-  and match `READ_SERVICE_ORIGIN` to the API's `READ_SERVICE_PORT`. Keep the shared
-  `BUDGET_DB_PATH` when the worktrees use the same providers so quotas persist.
+- `READ_SERVICE_ORIGIN`: deployed web server's canonical HTTPS API destination;
+  local development does not use it. For an isolated worktree, choose a different
+  web port, set `APP_ORIGIN` to that exact loopback HTTP origin, and choose a distinct
+  `READ_SERVICE_PORT`. Keep the shared `BUDGET_DB_PATH` when the worktrees use the
+  same providers so quotas persist.
 
 Run `npm run runtime:status` to list missing variable names and disabled features
 without printing their values. It performs no network calls or file writes.
@@ -41,6 +45,9 @@ without printing their values. It performs no network calls or file writes.
 contract identities, API scopes or balances have been verified. A zero exit code
 only means the report was produced; it is not a deployment or execution gate.
 An empty optional `FEE_CONTRACTS_JSON` is treated as no configured fee contracts.
+The `tracked_prices` row requires both `READ_UPSTREAMS=true` and a configured
+`ROBINHOOD_RPC`; its endpoint returns 503 while either requirement is unavailable,
+never a successful empty-price response.
 
 ## Local verification completed
 
@@ -93,8 +100,11 @@ and each selectable RWA's creation-enabled suite. Paused or unsupported creation
 is unavailable, not an empty successful catalog. These are provider-reported read
 checks, not independent contract verification or launch authorization.
 Missing configuration or upstream failure means unavailable, never an empty success.
-An actual valid empty catalog is represented separately. Preview sample pairs remain
-labeled and cannot stand in for a fetched live pair.
+An actual valid empty catalog is represented separately. The complete 194-entry
+Robinhood snapshot replaces preview samples and remains browsable when reads are
+unavailable or expired. Its saved date is shown in the menu; it cannot stand in
+for fresh eligibility. Opening an expired menu checks again without a refresh
+button or background retries. See [the full pair list](o1-pairings.md).
 
 Long checks only its reservation registry, not global ticker uniqueness. Code and
 `eth_call` are read at the same explicit block; the chain is checked and runtime
@@ -216,8 +226,9 @@ switches; see [fee coverage, configuration and safety](fee-claims.md). The backe
 
 Remaining work: live adapter verification with operator-supplied runtime configuration;
 noncustodial launch transaction preparation,
-simulation and explicit wallet approval; image storage; separately authorized
-x402 payment/generation jobs. Launch transaction preparation remains unavailable.
+simulation and explicit wallet approval. Image storage and x402 image jobs now
+run in the separate asset service; see [image generation](image-generation.md).
+Launch transaction preparation remains unavailable.
 
 The O1 snapshot checks and catalog weight follow the official
 [configuration schema](https://docs.o1.exchange/launchpad/public-api/reference/meta/get-api-configuration)

@@ -5,12 +5,14 @@ claims belong in the connected user's wallet. Keep signing material in a separat
 wallet environment, not this project's `.env`; the launcher ignores it but does
 not remove or modify your local file.
 
-`npm run dev:api` parses the ignored root `.env` in a small launcher and passes
-only the API's named configuration to a separate service process. Unknown names,
-private keys, seed phrases, Telegram credentials, public build variables and
-unused image-provider credentials are not forwarded. Existing shell configuration
-takes precedence. Only selected operating-system settings come from the shell,
-never the local file. The launcher does not print values or pass them as arguments.
+`npm run dev` parses the ignored root `.env`, passes only the API's named
+configuration to the read-service process, waits for it, then starts the web app
+without those provider settings. `npm run dev:api` uses the same API allowlist when
+the service is debugged separately. Unknown names, private keys, seed phrases,
+Telegram credentials, public build variables and unused image-provider credentials
+are not forwarded to the API. Existing shell configuration takes precedence. Only
+selected operating-system settings come from the shell, never the local file. The
+launchers do not print values or pass them as arguments.
 
 This protects the normal local API startup path, not every process on the machine.
 The launcher briefly holds the parsed file in memory; it is not a secure wallet.

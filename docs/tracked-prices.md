@@ -23,13 +23,17 @@ The existing public inflow feed still makes no RPC calls. The separate same-orig
 `POST /v1/tracked-prices`. It accepts only `{ pools: [{ pool, token, version }] }`,
 with one to ten unique V4 tuples. It uses the existing `READ_UPSTREAMS=true`
 opt-in and server-only `ROBINHOOD_RPC` from the ignored environment. Start or
-restart `npm run dev:api` after updating the server.
+restart `npm run dev` after updating the server (`npm run dev:api` remains an
+isolated debugging command). Disabled or missing price-read configuration returns
+a retryable 503, rather than a successful response containing an empty price list.
 
 The browser checks price deadlines on existing feed snapshots, without another
 timer. New entries request a baseline; existing entries are due at least 120
 seconds after the preceding completed attempt. Hidden/offscreen/offline feeds
 pause price work. Abort and failure paths preserve deadlines; provider
 `Retry-After` is honored. Missing V3 support never triggers a speculative lookup.
+The feed header reports price-service availability separately, so market-feed
+success cannot conceal a failed pricing request.
 
 The server admits only nonstable tuples observed over 10 ETH-equivalent in the
 fixed public monitor. A 256-entry, 24-hour allowlist supports retained FIFO tokens
@@ -40,8 +44,12 @@ reuse the admission cache and do not fetch the public monitor again.
 The server confirms chain ID and code at the registry's Robinhood PoolManager.
 An exact-address Initialize query uses only the requested pool IDs as indexed
 topics. Unique nonremoved events must reproduce the PoolKey hash and contain the
-tracked token. Metadata is cached for 24 hours, with a 30-minute failure cooldown.
-There is no log-range splitting, pagination or automatic scan retry.
+tracked token. Verified metadata is cached for 24 hours. A successful lookup that
+confirms no matching Initialize event is cached for 30 minutes; transport or
+validation failures are never converted into a cached empty result.
+Operational failures are rethrown during a short bounded cooldown so concurrent
+viewers cannot turn one failed refresh into repeated provider calls. There is no
+log-range splitting, pagination or automatic scan retry.
 
 One `extsload(bytes32[])` call reads all due V4 pools together. Per-pool timestamps
 and two-minute caches are shared across viewers, including reordered and
