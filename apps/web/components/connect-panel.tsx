@@ -65,12 +65,13 @@ const watchClaim = async (
   onError: (error: unknown) => void,
 ) =>
   watchWalletClaim(await walletProvider(), positionId, { isCurrent, onError });
-const ensureClaimChain = async (
+const ensureChain = async (
   address: string,
   chainId: number,
   isCurrent: () => boolean,
 ) =>
   ensureWalletClaimChain(await walletProvider(), address, chainId, isCurrent);
+const ensureClaimChain = ensureChain;
 const signAsset = async (approval: AssetApproval, isCurrent: () => boolean) =>
   signWalletAsset(await walletProvider(), approval, isCurrent);
 const signImage = async (quote: ImageQuote, input: ImageOperation, isCurrent: () => boolean) =>
@@ -96,6 +97,7 @@ function ConnectionControl({
         ? {
             address,
             chainId: connection.chainId,
+            ensureChain,
             sendClaim,
             watchClaim,
             ensureClaimChain,

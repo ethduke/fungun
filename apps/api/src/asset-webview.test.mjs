@@ -26,10 +26,91 @@ import {
   checkAssetStatus,
 } from "../../web/lib/asset-client.ts";
 import { signWalletAsset } from "../../web/lib/asset-wallet.ts";
+import {
+  ASSET_CHAIN_ID,
+  assetAccountReady,
+  ensureAssetChain,
+} from "../../web/lib/asset-chain.ts";
+import { ensureClaimChain } from "../../web/lib/claim-wallet.ts";
+import { AppError } from "../../web/lib/user-error.ts";
 
 const origin = "https://web.example.com";
 const assetOrigin = "https://assets.example.com";
 const draft = { name: "Moon", ticker: "MOON", description: "A simple coin." };
+
+test("asset activation switches to Robinhood before publication can continue", async () => {
+  const owner = privateKeyToAccount(generatePrivateKey()).address;
+  let chainId = 1;
+  const methods = [];
+  const provider = {
+    async request({ method, params }) {
+      methods.push(method);
+      if (method === "eth_accounts") return [owner];
+      if (method === "eth_chainId") return `0x${chainId.toString(16)}`;
+      if (method === "wallet_switchEthereumChain") {
+        assert.deepEqual(params, [{ chainId: "0x1237" }]);
+        chainId = ASSET_CHAIN_ID;
+        return null;
+      }
+      assert.fail("Unexpected wallet or RPC operation");
+    },
+  };
+  const account = {
+    address: owner,
+    chainId: 1,
+    signAsset: async () => assert.fail("No signature expected"),
+    ensureChain: (address, target, current) =>
+      ensureClaimChain(provider, address, target, current),
+  };
+  assert.equal(assetAccountReady(account), true);
+  await ensureAssetChain(account, () => true);
+  assert.deepEqual(methods, [
+    "eth_accounts",
+    "eth_chainId",
+    "wallet_switchEthereumChain",
+    "eth_accounts",
+    "eth_chainId",
+  ]);
+});
+
+test("asset activation skips an existing chain and redacts wallet failures", async () => {
+  const owner = privateKeyToAccount(generatePrivateKey()).address;
+  let calls = 0;
+  const ready = {
+    address: owner,
+    chainId: ASSET_CHAIN_ID,
+    signAsset: async () => assert.fail("No signature expected"),
+    ensureChain: async () => {
+      calls++;
+    },
+  };
+  await ensureAssetChain(ready, () => true);
+  assert.equal(calls, 0);
+  for (const [failure, code] of [
+    [{ code: 4001 }, "asset_chain_rejected"],
+    [{ cause: { code: -32002 } }, "asset_wallet_pending"],
+    [new AppError("wrong_account"), "asset_context_changed"],
+  ])
+    await assert.rejects(
+      ensureAssetChain(
+        { ...ready, chainId: 1, ensureChain: async () => { throw failure; } },
+        () => true,
+      ),
+      { code },
+    );
+  assert.match(
+    assetErrorText(new AssetError("asset_chain_rejected")),
+    /declined the Robinhood Chain switch/i,
+  );
+  assert.match(
+    assetErrorText(new AssetError("asset_wallet_pending")),
+    /finish the open wallet request/i,
+  );
+  assert.match(
+    assetErrorText(new AssetError("asset_chain_unsupported")),
+    /Rabby or MetaMask/i,
+  );
+});
 async function setup(t) {
   const root = realpathSync(mkdtempSync(join(tmpdir(), "fungun-asset-webview-")));
   initializeAssetStore(root);

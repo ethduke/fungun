@@ -10,6 +10,11 @@ export type ConnectedAccount = {
   openWallet?: () => void;
   address?: string;
   chainId?: number;
+  ensureChain?: (
+    address: string,
+    chainId: number,
+    isCurrent: () => boolean,
+  ) => Promise<void>;
   ensureClaimChain?: (
     address: string,
     chainId: number,

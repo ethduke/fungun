@@ -79,7 +79,14 @@ const messages: Record<string, string> = {
   asset_uploads_disabled:
     'Publication is not enabled yet. Your image has not been published.',
   disconnected: 'Connect your wallet first.',
-  wrong_chain: 'Switch your wallet to Robinhood Chain first.',
+  wrong_chain:
+    'Your wallet stayed on another network. Switch to Robinhood Chain and try again.',
+  asset_chain_rejected:
+    'You declined the Robinhood Chain switch. Nothing was published.',
+  asset_chain_unsupported:
+    'This wallet could not switch to Robinhood Chain. Add it manually or use Rabby or MetaMask.',
+  asset_wallet_pending:
+    'Finish the open wallet request, then try again. Nothing was published.',
   asset_context_changed:
     'The wallet, image or coin details changed. Prepare a new preview.',
   asset_approval_expired:

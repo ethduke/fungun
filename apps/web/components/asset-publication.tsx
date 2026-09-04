@@ -31,6 +31,11 @@ import {
   subscribeAssetRecovery,
   clearAssetRecovery,
 } from '@/lib/asset-client';
+import {
+  ASSET_CHAIN_ID,
+  assetAccountReady,
+  ensureAssetChain,
+} from '@/lib/asset-chain';
 import './asset-publication.css';
 
 export function AssetPublication({
@@ -58,7 +63,6 @@ export function AssetPublication({
     imagePending,
     enabled,
     account.address,
-    account.chainId,
   ]);
   const current = useRef(context);
   useLayoutEffect(() => {
@@ -151,9 +155,20 @@ export function AssetPublication({
     enabled &&
     !!image &&
     !imagePending &&
-    !!account.address &&
-    account.chainId === 4663 &&
-    !!account.signAsset;
+    assetAccountReady(account);
+  async function ensureRobinhood(revision: string) {
+    const isCurrent = () =>
+      mounted.current && current.current === revision;
+    if (account.chainId !== ASSET_CHAIN_ID)
+      setBusy('Switching to Robinhood Chain…');
+    try {
+      await ensureAssetChain(account, isCurrent);
+      return true;
+    } catch (value) {
+      if (mounted.current) failure(value);
+      return false;
+    }
+  }
   async function prepare() {
     if (
       inFlight.current ||
@@ -165,13 +180,14 @@ export function AssetPublication({
     )
       return;
     inFlight.current = true;
-    setBusy('Checking image…');
     setError('');
     setRecoveryNotice('');
     setPreview(null);
     setPublished(null);
     const revision = context;
     try {
+      if (!(await ensureRobinhood(revision))) return;
+      setBusy('Checking image…');
       const draft = assetDraft({ name, ticker, description });
       if (
         !image.url.startsWith(`blob:${location.origin}/`) ||
@@ -229,6 +245,8 @@ export function AssetPublication({
     const isCurrent = () =>
       mounted.current && current.current === active.context;
     try {
+      if (!(await ensureRobinhood(active.context))) return;
+      setBusy('Approve in your wallet…');
       const ticket = await recoveryFor(active.approval);
       const signature = await account.signAsset(active.approval, isCurrent);
       if (!isCurrent()) throw new AssetError('asset_context_changed');
@@ -401,8 +419,8 @@ export function AssetPublication({
               ? 'Select Long to prepare its launch artwork.'
               : !account.address
                 ? 'Connect your wallet to prepare the image.'
-                : account.chainId !== 4663
-                  ? 'Switch your wallet to Robinhood Chain.'
+                : account.chainId !== ASSET_CHAIN_ID
+                  ? 'Your wallet will ask to switch to Robinhood Chain.'
                   : 'Upload for validation, then review before publishing.'}
           </p>
           <Button
