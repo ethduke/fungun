@@ -46,7 +46,8 @@ const encode = (value) => Buffer.from(JSON.stringify(value)).toString("base64");
 const decodeHeader = (response, header) =>
   JSON.parse(Buffer.from(response.headers.get(header), "base64"));
 
-test("image runtime requires a valid maximum dynamic USDG price", () => {
+test("image runtime requires a valid price cap and private facilitator token", () => {
+  const facilitatorCredential = Buffer.alloc(64, 0x74).toString();
   const env = {
     APP_ORIGIN: origin,
     IMAGE_GENERATION: "true",
@@ -55,12 +56,19 @@ test("image runtime requires a valid maximum dynamic USDG price", () => {
     IMAGE_MAX_PRICE_USDG_BASE_UNITS: config.maxAmount,
     OPENROUTER_KEY: "EXAMPLE",
     X402_FACILITATOR_URL: "https://payments.example",
+    ["X402_FACILITATOR_BEARER_TOKEN"]: facilitatorCredential,
     ROBINHOOD_RPC: "https://rpc.example",
   };
   assert.deepEqual(readImageConfig(env), config);
   for (const maxAmount of [undefined, "", "0", "040000", "10000001", "1.1"]) {
     assert.throws(
       () => readImageConfig({ ...env, IMAGE_MAX_PRICE_USDG_BASE_UNITS: maxAmount }),
+      { code: "image_service_not_configured" },
+    );
+  }
+  for (const bearerToken of [undefined, "", "too-short", `${"t".repeat(32)}\n`]) {
+    assert.throws(
+      () => readImageConfig({ ...env, X402_FACILITATOR_BEARER_TOKEN: bearerToken }),
       { code: "image_service_not_configured" },
     );
   }
@@ -242,7 +250,10 @@ test("unpaid request returns a USDG x402 quote and never verifies, generates, or
   assert.equal(terms.asset, USDG_ADDRESS);
   assert.equal(terms.amount, quotedAmount);
   assert.equal(terms.payTo, config.payTo);
+  assert.equal(terms.maxTimeoutSeconds, 300);
+  assert.equal(terms.extra.expiresAt - terms.extra.issuedAt, 300_000);
   assert.equal(terms.extra.assetTransferMethod, "eip3009");
+  assert.equal(terms.extra.paymentFlow, "authorization");
   assert.equal(job.product, GROK_IMAGE_PRODUCT);
   assert.equal(job.state, "awaiting_payment");
   const status = await f.get(input.requestId);
@@ -689,7 +700,7 @@ test("an expired unused authorization recovers as not charged and cannot start g
   const f = fixture(t);
   const input = operation();
   const proof = await signedProof(await quote(f, input));
-  f.advance(600001);
+  f.advance(300001);
   const status = await (await f.get(input.requestId)).json();
   assert.equal(status.status, "failed");
   assert.equal(status.payment.status, "not_charged");

@@ -295,3 +295,14 @@ test("asset runtime excludes RPC, wallet, signing and model credentials", () => 
     },
   );
 });
+
+test("asset runtime forwards only the named private facilitator credential", () => {
+  const facilitatorCredential = Buffer.alloc(64, 0x74).toString();
+  assert.deepEqual(
+    assetEnvironment({
+      ["X402_FACILITATOR_BEARER_TOKEN"]: facilitatorCredential,
+      AUTHORIZATION: "EXAMPLE",
+    }),
+    { ["X402_FACILITATOR_BEARER_TOKEN"]: facilitatorCredential },
+  );
+});

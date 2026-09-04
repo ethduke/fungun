@@ -24,6 +24,7 @@ service or browser bundle, with these runtime values:
 | `IMAGE_USDG_ADDRESS`               | Canonical USDG contract from the official Robinhood registry  |
 | `IMAGE_MAX_PRICE_USDG_BASE_UNITS`  | Required live-price ceiling, using six USDG decimals           |
 | `X402_FACILITATOR_URL`             | HTTPS facilitator supporting v2 exact / Robinhood / EIP-3009  |
+| `X402_FACILITATOR_BEARER_TOKEN`    | Server-only credential shared with the private facilitator     |
 | `ROBINHOOD_RPC`                    | Server-only HTTPS RPC for settlement reconciliation            |
 | `ASSET_DECODER_ORIGIN`             | Existing isolated image decoder                               |
 
@@ -60,11 +61,12 @@ Use `node scripts/start-assets.mjs` to launch the configured service. Startup
 refuses missing/uninitialized job storage when generation is enabled. Recovery of
 completed results remains available when new generation is disabled.
 
-[Primer's official facilitator documentation](https://docs.primer.systems/facilitator.html)
-lists a public option at `https://x402.primer.systems`; its `/supported` endpoint
-advertised the required Robinhood EIP-3009 route when checked on 4 September 2026.
-It is an operator-selected dependency, not an implicit default. Recheck support
-and service terms before activation.
+Production uses the repository's dedicated private facilitator described in
+[`apps/facilitator/README.md`](../apps/facilitator/README.md). It is pinned to the
+official x402 Foundation `@x402/core` and `@x402/evm` v2.25.0 packages. Its public
+Fly HTTPS edge requires a server-only bearer token and accepts only this image
+service's canonical USDG, recipient, amount ceiling, and five-minute EIP-3009
+authorization. The generic SDK's Permit2 and v1 paths are not registered.
 
 ## Provider and payment details
 

@@ -28,6 +28,8 @@ export function readImageConfig(env = process.env) {
       BigInt(maxAmount) > 10000000n ||
       !env.OPENROUTER_KEY ||
       !env.X402_FACILITATOR_URL ||
+      typeof env.X402_FACILITATOR_BEARER_TOKEN !== "string" ||
+      !/^[\x21-\x7e]{32,256}$/.test(env.X402_FACILITATOR_BEARER_TOKEN) ||
       !env.ROBINHOOD_RPC)
   )
     throw new ServiceError("image_service_not_configured");

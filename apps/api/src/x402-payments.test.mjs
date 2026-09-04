@@ -8,13 +8,14 @@ const payer = `0x${"12".repeat(20)}`;
 const recipient = `0x${"34".repeat(20)}`;
 const nonce = `0x${"56".repeat(32)}`;
 const transaction = `0x${"78".repeat(32)}`;
+const facilitatorCredential = Buffer.alloc(64, 0x74).toString();
 const requirements = {
   scheme: "exact",
   network: "eip155:4663",
   asset: USDG_ADDRESS,
   amount: "250000",
   payTo: recipient,
-  maxTimeoutSeconds: 600,
+  maxTimeoutSeconds: 300,
   extra: {
     name: "Global Dollar",
     version: "1",
@@ -23,7 +24,7 @@ const requirements = {
     payer,
     nonce,
     issuedAt: 1700000060000,
-    expiresAt: 1700000600000,
+    expiresAt: 1700000360000,
   },
 };
 const payload = {
@@ -36,7 +37,7 @@ const payload = {
       to: recipient,
       value: "250000",
       validAfter: "1700000000",
-      validBefore: "1700000600",
+      validBefore: "1700000360",
       nonce,
     },
   },
@@ -46,6 +47,7 @@ function fixture(results) {
   const payments = createImagePayments({
     asset: USDG_ADDRESS,
     facilitatorUrl: "https://payments.example/x402/",
+    bearerToken: facilitatorCredential,
     fetcher: async (url, options) => {
       calls.push({ url, ...options });
       const value = results.shift();
@@ -65,7 +67,25 @@ test("requires a configured HTTPS facilitator and prevents URL credentials or qu
     "https://payments.example?key=secret",
   ]) {
     assert.throws(
-      () => createImagePayments({ facilitatorUrl, asset: USDG_ADDRESS }),
+      () =>
+        createImagePayments({
+          facilitatorUrl,
+          asset: USDG_ADDRESS,
+          bearerToken: facilitatorCredential,
+        }),
+      (error) => error.code === "image_payments_not_configured",
+    );
+  }
+});
+test("requires a strong server-side facilitator bearer token", () => {
+  for (const token of [undefined, "", "too-short", `valid-length${"x".repeat(24)}\n`]) {
+    assert.throws(
+      () =>
+        createImagePayments({
+          facilitatorUrl: "https://payments.example",
+          asset: USDG_ADDRESS,
+          bearerToken: token,
+        }),
       (error) => error.code === "image_payments_not_configured",
     );
   }
@@ -92,6 +112,7 @@ test("capability gate requires v2 exact on Robinhood and eip3009 if declared", a
   ]);
   assert.equal((await payments.ready()).network, "eip155:4663");
   assert.equal(calls[0].url, "https://payments.example/x402/supported");
+  assert.equal(calls[0].headers.Authorization, `Bearer ${facilitatorCredential}`);
 });
 test("verify sends standard facilitator payload only to configured URL and checks payer", async () => {
   const { payments, calls } = fixture([{ isValid: true, payer }]);
@@ -105,6 +126,7 @@ test("verify sends standard facilitator payload only to configured URL and check
     paymentRequirements: requirements,
   });
   assert.equal(calls[0].redirect, "error");
+  assert.equal(calls[0].headers.Authorization, `Bearer ${facilitatorCredential}`);
   const wrong = fixture([{ isValid: true, payer: recipient }]);
   await assert.rejects(
     wrong.payments.verify(payload, requirements),
@@ -117,7 +139,7 @@ test("authorization payer, amount, destination, nonce, validity and quote tamper
     ["to", payer],
     ["value", "1"],
     ["nonce", transaction],
-    ["validBefore", "1700000601"],
+    ["validBefore", "1700000361"],
     ["validAfter", "0"],
   ]) {
     const p = structuredClone(payload);
@@ -194,6 +216,13 @@ test("ambiguous settlement preserves hash and never retries or issues new author
     {
       success: false,
       errorReason: "settlement_pending",
+      transaction: "",
+      network: "eip155:4663",
+      payer,
+    },
+    {
+      success: false,
+      errorReason: "settlement_pending",
       transaction,
       network: "eip155:4663",
       payer,
@@ -208,7 +237,7 @@ test("ambiguous settlement preserves hash and never retries or issues new author
         !error.message.includes("secret") &&
         (value instanceof Error ||
           value instanceof Response ||
-          error.transactionHash === transaction),
+          error.transactionHash === value.transaction),
     );
     assert.equal(calls.length, 1);
   }

@@ -17,6 +17,7 @@ const names = [
   "ROBINHOOD_RPC",
   "OPENROUTER_KEY",
   "X402_FACILITATOR_URL",
+  "X402_FACILITATOR_BEARER_TOKEN",
 ];
 
 export function assetEnvironment(inherited = {}, local = {}) {

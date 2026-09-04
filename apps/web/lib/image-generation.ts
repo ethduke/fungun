@@ -9,6 +9,7 @@ import {
 
 export const IMAGE_PRODUCT =
   'openrouter-grok-image-2.0-square-1k-low-memecoin-v1';
+export const IMAGE_PAYMENT_TIMEOUT_SECONDS = 300;
 export type ImageOperation = {
   requestId: string;
   wallet: string;
@@ -29,6 +30,7 @@ export type ImageTerms = {
     symbol: 'USDG';
     decimals: 6;
     assetTransferMethod: 'eip3009';
+    paymentFlow: 'authorization';
     payer: string;
     requestId: string;
     inputHash: string;
@@ -331,7 +333,7 @@ export function validateImageQuote(
     !/^[1-9][0-9]{0,7}$/.test(terms.amount) ||
     BigInt(terms.amount) > 10000000n ||
     !address(terms.payTo) ||
-    terms.maxTimeoutSeconds !== 600 ||
+    terms.maxTimeoutSeconds !== IMAGE_PAYMENT_TIMEOUT_SECONDS ||
     !fields(
       terms.extra,
       [
@@ -340,6 +342,7 @@ export function validateImageQuote(
         'symbol',
         'decimals',
         'assetTransferMethod',
+        'paymentFlow',
         'payer',
         'requestId',
         'inputHash',
@@ -362,6 +365,7 @@ export function validateImageQuote(
     extra.symbol !== 'USDG' ||
     extra.decimals !== 6 ||
     extra.assetTransferMethod !== 'eip3009' ||
+    extra.paymentFlow !== 'authorization' ||
     extra.payer !== input.wallet ||
     extra.requestId !== input.requestId ||
     !hash(extra.inputHash) ||
@@ -373,7 +377,8 @@ export function validateImageQuote(
     extra.issuedAt < 60000 ||
     typeof extra.expiresAt !== 'number' ||
     !Number.isSafeInteger(extra.expiresAt) ||
-    extra.expiresAt - extra.issuedAt !== 600000
+    extra.expiresAt - extra.issuedAt !==
+      IMAGE_PAYMENT_TIMEOUT_SECONDS * 1000
   )
     return invalid();
   return raw as ImageQuote;

@@ -148,7 +148,7 @@ async function readJsonLimited(response) {
 /**
  * Uses only the operator-configured HTTPS facilitator. No default provider,
  * URL from request data, redirects, secret logging, or automatic POST retries.
- * API bearerToken is optional and server-side only. Pass only trusted config.
+ * The bearer token is required and server-side only. Pass only trusted config.
  */
 export function createImagePayments({
   facilitatorUrl,
@@ -170,7 +170,8 @@ export function createImagePayments({
       !Number.isSafeInteger(timeoutMs) ||
       timeoutMs < 1 ||
       timeoutMs > 120_000 ||
-      (bearerToken !== undefined && (typeof bearerToken !== "string" || /[\r\n]/.test(bearerToken)))
+      typeof bearerToken !== "string" ||
+      !/^[\x21-\x7e]{32,256}$/.test(bearerToken)
     )
       throw new Error();
   } catch {
@@ -190,7 +191,7 @@ export function createImagePayments({
         headers: {
           Accept: "application/json",
           ...(body === undefined ? {} : { "Content-Type": "application/json" }),
-          ...(bearerToken ? { ["Authorization"]: `Bearer ${bearerToken}` } : {}),
+          ["Authorization"]: `Bearer ${bearerToken}`,
         },
         ...(body === undefined ? {} : { body: JSON.stringify(body) }),
       });

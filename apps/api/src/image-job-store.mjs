@@ -12,6 +12,8 @@ import { DatabaseSync } from "node:sqlite";
 import { basename, dirname, join } from "node:path";
 import { ServiceError } from "./errors.mjs";
 
+export const IMAGE_PAYMENT_TIMEOUT_SECONDS = 300;
+
 const hash = (value) => createHash("sha256").update(value).digest("hex");
 const schema = `
   PRAGMA journal_mode=WAL;
@@ -127,16 +129,17 @@ export class ImageJobStore {
       .get().n;
     if (reserved + 2097152 > 256 * 1024 * 1024) throw new ServiceError("image_storage_full", 507);
     const createdAt = this.now();
-    const expiresAt = createdAt + 600_000;
+    const expiresAt = createdAt + IMAGE_PAYMENT_TIMEOUT_SECONDS * 1000;
     const requirements = {
       scheme: "exact",
       network: "eip155:4663",
       asset: config.asset,
       amount: config.amount,
       payTo: config.payTo,
-      maxTimeoutSeconds: 600,
+      maxTimeoutSeconds: IMAGE_PAYMENT_TIMEOUT_SECONDS,
       extra: {
         assetTransferMethod: "eip3009",
+        paymentFlow: "authorization",
         name: config.domainName,
         version: config.domainVersion,
         symbol: "USDG",

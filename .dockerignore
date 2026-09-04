@@ -15,6 +15,12 @@
 !apps/decoder/Dockerfile
 !apps/decoder/package.json
 !apps/decoder/package-lock.json
+!apps/facilitator/
+!apps/facilitator/src/
+!apps/facilitator/src/*.mjs
+!apps/facilitator/Dockerfile
+!apps/facilitator/package.json
+!apps/facilitator/package-lock.json
 !apps/web/
 !apps/web/app/
 !apps/web/app/**
