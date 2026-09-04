@@ -62,6 +62,39 @@ test('permits empty and unmistakable placeholders, environment lookups and regex
   assert.deepEqual(scan('.env.example', ['XAI_API_KEY', '='].join('')), []);
 });
 
+test('blank environment values never consume the following line', () => {
+  const lines = ['XAI_API_KEY', 'O1_API_KEY', 'RPC_HTTP_URL'].map((key) => `${key}=`);
+  for (const newline of ['\n', '\r\n']) assert.deepEqual(scan('.env.example', lines.join(newline)), []);
+  const populated = [...lines, ['PASSWORD', '123456'].join('=')].join('\n');
+  assert.ok(scan('.env.example', populated).includes('non-placeholder-credential-assignment'));
+});
+
+test('exempts only semver dependency metadata in package manifests and locks', () => {
+  const key = ['cookie', 'signature'].join('-');
+  for (const version of ['1.0.7', '^1.0.7', '~1.0.7', '1.0.7-beta.1']) {
+    const manifest = JSON.stringify({ dependencies: { [key]: version } });
+    assert.deepEqual(scan('apps/web/package.json', manifest), []);
+    assert.deepEqual(scan('package-lock.json', JSON.stringify({ packages: { 'node_modules/example': { dependencies: { [key]: version } } } })), []);
+    assert.ok(scan('config.json', manifest).includes('non-placeholder-credential-assignment'));
+  }
+  const unsafe = JSON.stringify({ dependencies: { [key]: 'synthetic-value' } });
+  assert.ok(scan('package.json', unsafe).includes('non-placeholder-credential-assignment'));
+  const unrelated = JSON.stringify({ [key]: '1.0.7', dependencies: { [key]: '1.0.7' } });
+  assert.ok(scan('package-lock.json', unrelated).includes('non-placeholder-credential-assignment'));
+  const duplicate = `{"dependencies":{${JSON.stringify(key)}:"synthetic-value",${JSON.stringify(key)}:"1.0.7"}}`;
+  assert.ok(scan('package.json', duplicate).includes('non-placeholder-credential-assignment'));
+});
+
+test('credentials and numeric passwords remain blocked in lockfiles', () => {
+  const key = ['pass', 'word'].join('');
+  for (const value of ['123456', 123456, 0]) {
+    assert.ok(scan('package-lock.json', JSON.stringify({ [key]: value })).includes('non-placeholder-credential-assignment'));
+    assert.ok(scan('package-lock.json', JSON.stringify({ dependencies: { [key]: value } })).includes('non-placeholder-credential-assignment'));
+  }
+  assert.ok(scan('package-lock.json', credential()).includes('non-placeholder-credential-assignment'));
+  assert.ok(scan('package.json', JSON.stringify({ [['RPC', 'HTTP', 'URL'].join('_')]: 'synthetic-value' })).includes('non-placeholder-credential-assignment'));
+});
+
 test('rejects provider tokens, key material and authenticated URLs', () => {
   for (const token of [['sk', '-', 'x'.repeat(32)].join(''), ['xai', '-', 'x'.repeat(32)].join(''), ['ghp', '_', 'a'.repeat(36)].join('')]) {
     assert.ok(scan('config.txt', token).includes('provider-credential-token'));
@@ -101,6 +134,15 @@ test('checks binary paths and file sizes from the index', (t) => {
   repo.write('large.bin', Buffer.alloc(1024 * 1024 + 1));
   repo.git('add', '.');
   assert.deepEqual(new Set(scanRepository(repo.cwd).findings.map((finding) => finding.rule)), new Set(['forbidden-sensitive-or-generated-path', 'file-size-limit']));
+});
+
+test('identical staged blobs are analyzed with their actual paths', (t) => {
+  const repo = repository(t);
+  const content = JSON.stringify({ dependencies: { [['cookie', 'signature'].join('-')]: '^1.0.7' } });
+  repo.write('a/package-lock.json', content);
+  repo.write('b/config.json', content);
+  repo.git('add', '.');
+  assert.deepEqual(scanRepository(repo.cwd).findings, [{ path: 'b/config.json', rule: 'non-placeholder-credential-assignment' }]);
 });
 
 test('CLI reports filenames and rules without credential contents', (t) => {
