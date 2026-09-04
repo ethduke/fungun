@@ -17,11 +17,18 @@ Run `npm run dev:api` in a second terminal for the read service. See
 ## Working controls
 
 - The top market feed shows the source's Robinhood ETH and SHARES pairs together,
-  fetched through same-origin `GET /api/tracked-feed` approximately every four
-  seconds. It uses the public `https://rh-monitor.fly.dev/api` source without
-  credentials. Each lane preserves source order and scrolls through all returned
+  fetched through same-origin `GET /api/tracked-feed` four seconds after each
+  completed request while visible and online. Polling pauses when the tab is hidden,
+  the feed is offscreen, the browser is offline, or the component disconnects.
+  It uses the public `https://rh-monitor.fly.dev/api` source without credentials
+  and makes no calls to `ROBINHOOD_RPC`. A four-second server cache and shared
+  in-flight request serve all viewers in each process/Worker isolate. Failures back
+  off from four to sixty seconds and honor longer `Retry-After` delays, capped at
+  five minutes. Visibility changes preserve the next retry deadline.
+  Each lane preserves source order and scrolls through all returned
   pairs. Reconnecting retains the last successful rows; an empty successful
-  response clears them. The receipt time is not a per-token valuation timestamp.
+  response clears them. Cached responses retain the original receipt time; it is
+  not a per-token valuation timestamp.
 - Popularity groups count similarly named distinct contracts in this selected
   feed, deduplicated by chain and token and ranked by count then inflow. They
   refresh on every response. Other chains are excluded from this tracker.

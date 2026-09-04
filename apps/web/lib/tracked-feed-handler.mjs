@@ -1,3 +1,9 @@
+import {
+  FEED_INTERVAL_MS,
+  feedRetryMs,
+  retryAfterMs,
+} from './tracked-feed-policy.mjs';
+
 const UPSTREAM = 'https://rh-monitor.fly.dev/api';
 const fields = [
   'pool',
@@ -52,36 +58,84 @@ export function projectTrackedPayload(payload) {
   };
 }
 
-// Mount this server-side at GET /api/tracked-feed in the destination framework.
-export async function handleTrackedFeed(request) {
-  if (request.method !== 'GET')
-    return new Response(JSON.stringify({ error: 'Method not allowed' }), {
-      status: 405,
-      headers: { ...headers, Allow: 'GET' },
-    });
-  const controller = new AbortController();
-  const abort = () => controller.abort();
-  request.signal.addEventListener('abort', abort, { once: true });
-  if (request.signal.aborted) abort();
-  const timeout = setTimeout(() => controller.abort(), 8000);
-  try {
-    const upstream = await fetch(UPSTREAM, {
-      cache: 'no-store',
-      signal: controller.signal,
-      headers: { Accept: 'application/json' },
-    });
-    if (!upstream.ok) throw new Error('Feed unavailable');
-    return new Response(
-      JSON.stringify(projectTrackedPayload(await upstream.json())),
-      { headers },
-    );
-  } catch {
+export function createTrackedFeedHandler({
+  fetcher = (url, options) => fetch(url, options),
+  now = () => performance.now(),
+} = {}) {
+  // Shared only within this server process / Worker isolate, never per URL/user.
+  let snapshot = null;
+  let pending = null;
+  let failures = 0;
+  let retryAt = 0;
+
+  async function refresh() {
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 8000);
+    let retryAfter = 0;
+    try {
+      const upstream = await fetcher(UPSTREAM, {
+        cache: 'no-store',
+        // Workers support manual/follow; reject 3xx below without following them.
+        redirect: 'manual',
+        signal: controller.signal,
+        headers: { Accept: 'application/json' },
+      });
+      retryAfter = retryAfterMs(upstream.headers.get('retry-after'));
+      if (!upstream.ok) {
+        await upstream.body?.cancel();
+        throw new Error('Feed unavailable');
+      }
+      const body = JSON.stringify(projectTrackedPayload(await upstream.json()));
+      snapshot = { body, expiresAt: now() + FEED_INTERVAL_MS };
+      failures = 0;
+      retryAt = 0;
+      return body;
+    } catch {
+      failures = Math.min(failures + 1, 5);
+      retryAt = now() + feedRetryMs(failures, retryAfter);
+      return null;
+    } finally {
+      clearTimeout(timeout);
+    }
+  }
+
+  function unavailable() {
     return new Response(
       JSON.stringify({ error: 'Feed temporarily unavailable' }),
-      { status: 502, headers },
+      {
+        status: 502,
+        headers: {
+          ...headers,
+          'Retry-After': String(
+            Math.max(1, Math.ceil((retryAt - now()) / 1000)),
+          ),
+        },
+      },
     );
-  } finally {
-    clearTimeout(timeout);
-    request.signal.removeEventListener('abort', abort);
   }
+
+  return async function handle(request) {
+    if (request.method !== 'GET')
+      return new Response(JSON.stringify({ error: 'Method not allowed' }), {
+        status: 405,
+        headers: { ...headers, Allow: 'GET' },
+      });
+    if (request.signal.aborted)
+      return new Response(null, { status: 499, headers });
+    if (snapshot && now() < snapshot.expiresAt)
+      return new Response(snapshot.body, { headers });
+    if (now() < retryAt) return unavailable();
+    // Finish an already-started, bounded refresh even if one viewer leaves.
+    // Its result serves the remaining viewers and prevents cancel/retry churn.
+    pending ??= refresh().finally(() => {
+      pending = null;
+    });
+    const body = await pending;
+    if (request.signal.aborted)
+      return new Response(null, { status: 499, headers });
+    return body === null ? unavailable() : new Response(body, { headers });
+  };
 }
+
+// Demand-driven singleton: no timer or upstream request without a GET.
+export const handleTrackedFeed = createTrackedFeedHandler();

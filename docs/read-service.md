@@ -58,6 +58,17 @@ All results are advisory and can change before a transaction.
 
 ## Cost and abuse bounds
 
+- The public market feed is independent of the RPC service: it makes zero calls
+  to `ROBINHOOD_RPC`, including when copying a token into the launch form. Its
+  web route caches each successful snapshot for four seconds and coalesces
+  concurrent refreshes per server process/Worker isolate. There is no background
+  server polling. An already-started refresh may finish after its viewers leave;
+  it has an eight-second timeout and is registered with the Worker request lifetime.
+  Failed refreshes share a four-to-sixty-second exponential cooldown, honoring
+  longer upstream `Retry-After` values up to five minutes. Browser requests wait
+  four seconds after completion, pause while hidden/offscreen/offline/disconnected,
+  and retain retry deadlines across pauses. These bounds are not a distributed
+  quota across isolates and do not control the public source's internal RPC usage.
 - One shared catalog per chain, cached five minutes, with concurrent reads coalesced.
 - Ticker responses cached 15 seconds; no automatic polling/retries. Failed reads back
   off at least 15 seconds. Chain checks cache five minutes; block reads five seconds;

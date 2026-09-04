@@ -5,7 +5,10 @@ import {
   popularTokens,
   trackedTokenDraft,
 } from "../apps/web/components/tracked-market-feed.mjs";
-import { handleTrackedFeed, projectTrackedPayload } from "../apps/web/lib/tracked-feed-handler.mjs";
+import {
+  createTrackedFeedHandler,
+  projectTrackedPayload,
+} from "../apps/web/lib/tracked-feed-handler.mjs";
 
 const address = (n) => `0x${n.toString(16).padStart(40, "0")}`;
 const row = (n, overrides = {}) => ({
@@ -141,74 +144,171 @@ test("eleven chronological cells distinguish observed zero, missing and future v
   }
 });
 
-test("handler uses only the fixed public source and never forwards browser credentials", async (t) => {
-  t.mock.method(globalThis, "fetch", async (url, options) => {
-    assert.equal(url, "https://rh-monitor.fly.dev/api");
-    assert.equal(options.cache, "no-store");
-    assert.deepEqual(options.headers, { Accept: "application/json" });
-    assert.equal(options.signal instanceof AbortSignal, true);
-    return Response.json({ pools: [row(1)] });
+const request = (options) => new Request("https://app.example.invalid/api/tracked-feed", options);
+const deferred = () => Promise.withResolvers();
+
+test("handler uses only the fixed public source and never forwards browser credentials", async () => {
+  let calls = 0;
+  const handle = createTrackedFeedHandler({
+    fetcher: async (url, options) => {
+      calls++;
+      assert.equal(url, "https://rh-monitor.fly.dev/api");
+      assert.equal(options.cache, "no-store");
+      assert.equal(options.redirect, "manual");
+      assert.deepEqual(options.headers, { Accept: "application/json" });
+      assert.equal(options.signal instanceof AbortSignal, true);
+      return Response.json({ pools: [row(1)] });
+    },
   });
-  const response = await handleTrackedFeed(
-    new Request("https://app.example.invalid/api/tracked-feed", {
-      headers: { cookie: "session=EXAMPLE", authorization: "EXAMPLE" },
-    }),
+  const response = await handle(
+    request({ headers: { cookie: "session=EXAMPLE", authorization: "EXAMPLE" } }),
   );
   assert.equal(response.status, 200);
   assert.equal(response.headers.get("cache-control"), "no-store");
   assert.equal((await response.json()).pools.length, 1);
-  const rejected = await handleTrackedFeed(
-    new Request("https://app.example.invalid/api/tracked-feed", { method: "POST" }),
-  );
+  const rejected = await handle(request({ method: "POST" }));
   assert.equal(rejected.status, 405);
   assert.equal(rejected.headers.get("allow"), "GET");
-  assert.equal(fetch.mock.callCount(), 1);
+  assert.equal(calls, 1);
 });
 
-test("handler returns a generic retryable failure, then recovers on a valid response", async (t) => {
-  let next;
-  t.mock.method(globalThis, "fetch", async () => {
-    if (next instanceof Error) throw next;
-    return next;
+test("100 viewers share one upstream refresh and cache, including at expiry", async () => {
+  let time = 0,
+    calls = 0,
+    source = deferred();
+  const handle = createTrackedFeedHandler({
+    now: () => time,
+    fetcher: () => {
+      calls++;
+      return source.promise;
+    },
   });
-  for (next of [
-    new Error("private upstream detail"),
-    new Response("bad", { status: 503 }),
-    Response.json({ wrong: [] }),
-  ]) {
-    const response = await handleTrackedFeed(
-      new Request("https://app.example.invalid/api/tracked-feed"),
-    );
+  assert.equal(calls, 0, "no background refresh");
+  const pending = Array.from({ length: 100 }, () => handle(request()));
+  assert.equal(calls, 1);
+  time = 2000; // Cache lifetime starts after a slow source finishes.
+  source.resolve(Response.json({ pools: [row(1)] }));
+  const bodies = await Promise.all((await Promise.all(pending)).map((response) => response.text()));
+  assert.equal(new Set(bodies).size, 1, "each caller can consume its own body");
+  time = 5999;
+  const cached = await handle(request());
+  assert.equal(await cached.text(), bodies[0], "cache retains the original receipt timestamp");
+  assert.equal(calls, 1);
+  time = 6000;
+  source = deferred();
+  const refreshes = Array.from({ length: 100 }, () => handle(request()));
+  assert.equal(calls, 2);
+  source.resolve(Response.json({ pools: [] }));
+  for (const response of await Promise.all(refreshes))
+    assert.deepEqual((await response.json()).pools, []);
+  time = 1_000_000;
+  assert.equal(calls, 2, "expiry alone does not fetch");
+});
+
+test("failure cooldown prevents request storms, uses generic errors, and resets on recovery", async () => {
+  let time = 0,
+    calls = 0,
+    next = new Error("private upstream detail");
+  const handle = createTrackedFeedHandler({
+    now: () => time,
+    fetcher: async () => {
+      calls++;
+      if (next instanceof Error) throw next;
+      return next;
+    },
+  });
+  for (const [index, delay] of [4000, 8000, 16000, 32000, 60000, 60000].entries()) {
+    if (index === 1) next = new Response("bad", { status: 503 });
+    if (index === 2)
+      next = new Response(null, {
+        status: 302,
+        headers: { location: "https://other.example.invalid" },
+      });
+    if (index > 2) next = Response.json({ wrong: [] });
+    const response = await handle(request());
     assert.equal(response.status, 502);
     assert.deepEqual(await response.json(), { error: "Feed temporarily unavailable" });
+    assert.equal(response.headers.get("retry-after"), String(delay / 1000));
+    const callsBefore = calls;
+    time += delay - 1;
+    await Promise.all(Array.from({ length: 100 }, () => handle(request())));
+    assert.equal(calls, callsBefore, "cooldown blocks all viewers");
+    time++;
   }
   next = Response.json({ pools: [] });
-  const response = await handleTrackedFeed(
-    new Request("https://app.example.invalid/api/tracked-feed"),
-  );
-  assert.equal(response.status, 200);
-  assert.deepEqual((await response.json()).pools, []);
+  assert.equal((await handle(request())).status, 200);
+  time += 4000;
+  next = new Error("failure after recovery");
+  assert.equal((await handle(request())).headers.get("retry-after"), "4");
 });
 
-test("handler bounds stalled requests and propagates cancellation", async (t) => {
+test("upstream Retry-After is shared across viewers", async () => {
+  let time = 0,
+    calls = 0;
+  const handle = createTrackedFeedHandler({
+    now: () => time,
+    fetcher: async () => {
+      calls++;
+      return new Response(null, { status: 429, headers: { "Retry-After": "120" } });
+    },
+  });
+  assert.equal((await handle(request())).headers.get("retry-after"), "120");
+  time = 119_000;
+  assert.equal((await handle(request())).headers.get("retry-after"), "1");
+  assert.equal(calls, 1);
+  time = 120_000;
+  await handle(request());
+  assert.equal(calls, 2);
+});
+
+test("one viewer leaving cannot abort a shared refresh or cause cancel/retry churn", async () => {
+  const source = deferred();
+  let calls = 0,
+    upstreamSignal;
+  const handle = createTrackedFeedHandler({
+    fetcher: (_url, { signal }) => {
+      calls++;
+      upstreamSignal = signal;
+      return source.promise;
+    },
+  });
+  const controller = new AbortController();
+  const first = handle(request({ signal: controller.signal }));
+  const second = handle(request());
+  controller.abort();
+  assert.equal(upstreamSignal.aborted, false);
+  source.resolve(Response.json({ pools: [row(1)] }));
+  assert.equal((await first).status, 499);
+  assert.equal((await second).status, 200);
+  assert.equal((await handle(request())).status, 200);
+  assert.equal(calls, 1);
+  assert.equal((await handle(request({ signal: controller.signal }))).status, 499);
+  assert.equal(calls, 1);
+});
+
+test("already aborted viewers cannot start an upstream request", async () => {
+  const handle = createTrackedFeedHandler({ fetcher: () => assert.fail("unexpected fetch") });
+  assert.equal((await handle(request({ signal: AbortSignal.abort() }))).status, 499);
+  assert.equal((await handle(request({ method: "POST" }))).status, 405);
+});
+
+test("handler bounds stalled upstream requests and enters cooldown", async (t) => {
   t.mock.timers.enable({ apis: ["setTimeout"] });
-  t.mock.method(
-    globalThis,
-    "fetch",
-    (_url, { signal }) =>
-      new Promise((_resolve, reject) => {
+  let calls = 0;
+  const handle = createTrackedFeedHandler({
+    now: () => 0,
+    fetcher: (_url, { signal }) => {
+      calls++;
+      return new Promise((_resolve, reject) => {
         signal.addEventListener("abort", () => reject(new DOMException("Aborted", "AbortError")), {
           once: true,
         });
-      }),
-  );
-  const pending = handleTrackedFeed(new Request("https://app.example.invalid/api/tracked-feed"));
+      });
+    },
+  });
+  const pending = handle(request());
   t.mock.timers.tick(8000);
   assert.equal((await pending).status, 502);
-  const controller = new AbortController();
-  const cancelled = handleTrackedFeed(
-    new Request("https://app.example.invalid/api/tracked-feed", { signal: controller.signal }),
-  );
-  controller.abort();
-  assert.equal((await cancelled).status, 502);
+  assert.equal((await handle(request())).status, 502);
+  assert.equal(calls, 1);
 });

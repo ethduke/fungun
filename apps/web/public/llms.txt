@@ -10,8 +10,10 @@ An unavailable balance is unknown, not zero. A reservation check is not proof
 of global ticker uniqueness or launch readiness.
 
 The launch page also shows a Robinhood market feed, with ETH and SHARES together.
-It updates automatically through same-origin `/api/tracked-feed`, independently
-of the optional read service. Popularity counts similarly named distinct token
+It updates through same-origin `/api/tracked-feed` only while visible and online,
+with shared server caching, request coalescing and failure backoff. It uses no
+configured RPC calls and is independent of the optional read service.
+Popularity counts similarly named distinct token
 contracts in the source's selected tracked cohort, not social trends.
 COPY fills the launch form with the selected token's name and ticker. The feed
 does not supply artwork; choose an image separately.

@@ -1,3 +1,5 @@
+import { TrackedFeedPoller } from '../lib/tracked-feed-poller.mjs';
+
 const finite = (value) =>
   (typeof value === 'number' ||
     (typeof value === 'string' && value.trim() !== '')) &&
@@ -235,7 +237,53 @@ if (
       this.shadowRoot.innerHTML = `<style>${styles}</style><section aria-label="Tracked market feed"><div class="top"><div class="heading"><h2>Market feed</h2><span class="status" role="status" aria-live="polite">Connecting…</span></div><div class="popular"></div></div><div class="columns"><div class="lane"><h3>ETH <span class="count-eth"></span></h3><div class="list" data-kind="eth" tabindex="0" role="region" aria-label="Tracked ETH pairs"></div></div><div class="lane"><h3>SHARES <span class="count-shares"></span></h3><div class="list" data-kind="shares" tabindex="0" role="region" aria-label="Tracked SHARES pairs"></div></div></div></section>`;
       this.rows = [];
       this.receivedAt = null;
-      this.generation = 0;
+      this.inView = false;
+      this.pageHidden = false;
+      this.pauseReason = null;
+      this.poller = new TrackedFeedPoller({
+        getUrl: () => {
+          const url = new URL(
+            this.getAttribute('src') || '/api/tracked-feed',
+            location.href,
+          );
+          if (url.origin !== location.origin)
+            throw new Error('Use a same-origin feed endpoint');
+          return url;
+        },
+        onSnapshot: (snapshot) => {
+          const seen = new Set();
+          this.rows = snapshot.pools.filter((row) => {
+            if (
+              !row ||
+              chain(row) !== 4663 ||
+              !['eth', 'shares'].includes(row.quote_kind)
+            )
+              return false;
+            const key = rowKey(row);
+            if (seen.has(key)) return false;
+            seen.add(key);
+            return true;
+          });
+          // Shared responses keep the relay's receipt time, including cache hits.
+          const received = Date.parse(snapshot.fetched_at);
+          this.receivedAt = Number.isFinite(received) ? received : Date.now();
+          this.error = false;
+          this.render();
+        },
+        onError: () => {
+          this.error = true;
+          this.render();
+        },
+      });
+      this.syncActivity = () => this.updateActivity();
+      this.onPageHide = () => {
+        this.pageHidden = true;
+        this.updateActivity();
+      };
+      this.onPageShow = () => {
+        this.pageHidden = false;
+        this.updateActivity();
+      };
       this.nodes = new Map();
       this.shadowRoot.addEventListener('click', (event) => {
         const button =
@@ -258,84 +306,69 @@ if (
     }
 
     connectedCallback() {
-      this.running = true;
-      this.generation++;
-      void this.refresh(this.generation);
+      this.pageHidden = false;
+      this.inView = false;
+      document.addEventListener('visibilitychange', this.syncActivity);
+      window.addEventListener('online', this.syncActivity);
+      window.addEventListener('offline', this.syncActivity);
+      window.addEventListener('pagehide', this.onPageHide);
+      window.addEventListener('pageshow', this.onPageShow);
+      if (typeof IntersectionObserver !== 'undefined') {
+        const observer = new IntersectionObserver((entries) => {
+          if (this.observer !== observer || !entries.length) return;
+          this.inView = entries[entries.length - 1].isIntersecting;
+          this.updateActivity();
+        });
+        this.observer = observer;
+        observer.observe(this);
+      } else this.inView = true;
+      this.updateActivity();
     }
 
     disconnectedCallback() {
-      this.running = false;
-      this.generation++;
-      clearTimeout(this.timer);
-      this.controller?.abort();
+      this.observer?.disconnect();
+      this.observer = null;
+      document.removeEventListener('visibilitychange', this.syncActivity);
+      window.removeEventListener('online', this.syncActivity);
+      window.removeEventListener('offline', this.syncActivity);
+      window.removeEventListener('pagehide', this.onPageHide);
+      window.removeEventListener('pageshow', this.onPageShow);
+      this.poller.setActive(false);
     }
 
-    async refresh(generation) {
-      if (!this.running || generation !== this.generation) return;
-      const controller = new AbortController();
-      this.controller = controller;
-      const deadline = setTimeout(() => controller.abort(), 10000);
-      const started = Date.now();
-      try {
-        const url = new URL(
-          this.getAttribute('src') || '/api/tracked-feed',
-          location.href,
-        );
-        if (url.origin !== location.origin)
-          throw new Error('Use a same-origin feed endpoint');
-        const response = await fetch(url, {
-          cache: 'no-store',
-          signal: controller.signal,
-        });
-        if (!response.ok) throw new Error('Feed unavailable');
-        const snapshot = await response.json();
-        if (!Array.isArray(snapshot.pools))
-          throw new Error('Invalid feed response');
-        if (!this.running || generation !== this.generation) return;
-        const seen = new Set();
-        this.rows = snapshot.pools.filter((row) => {
-          if (
-            !row ||
-            chain(row) !== 4663 ||
-            !['eth', 'shares'].includes(row.quote_kind)
-          )
-            return false;
-          const key = rowKey(row);
-          if (seen.has(key)) return false;
-          seen.add(key);
-          return true;
-        });
-        this.receivedAt = Date.now();
-        this.error = false;
-        this.render();
-      } catch {
-        if (!this.running || generation !== this.generation) return;
-        this.error = true;
-        this.render();
-      } finally {
-        clearTimeout(deadline);
-        if (this.running && generation === this.generation) {
-          this.timer = setTimeout(
-            () => this.refresh(generation),
-            Math.max(0, 4000 - (Date.now() - started)),
-          );
-        }
-      }
+    updateActivity() {
+      const reason =
+        document.hidden || this.pageHidden
+          ? 'hidden'
+          : navigator.onLine === false
+            ? 'offline'
+            : !this.inView
+              ? 'offscreen'
+              : null;
+      const active = this.isConnected && !reason;
+      if (reason === this.pauseReason && active === this.poller.active) return;
+      this.pauseReason = reason;
+      this.poller.setActive(active);
+      this.render();
     }
 
     render() {
       const status = this.shadowRoot.querySelector('.status');
-      status.dataset.error = String(Boolean(this.error));
+      status.dataset.error = String(
+        Boolean(this.error || this.pauseReason === 'offline'),
+      );
       const timestamp = this.receivedAt
         ? new Date(this.receivedAt).toLocaleTimeString()
         : null;
-      status.textContent = this.error
-        ? timestamp
-          ? `Reconnecting · last received ${timestamp}`
-          : 'Feed unavailable · retrying'
-        : timestamp
-          ? `Auto-updating · received ${timestamp}`
-          : 'Connecting…';
+      status.textContent = this.pauseReason
+        ? `${this.pauseReason === 'offline' ? 'Offline · waiting for connection' : 'Paused · feed not visible'}${timestamp ? ` · last received ${timestamp}` : ''}`
+        : this.error
+          ? timestamp
+            ? `Reconnecting · last received ${timestamp}`
+            : 'Feed unavailable · retrying'
+          : timestamp
+            ? `Auto-updating · received ${timestamp}`
+            : 'Connecting…';
       const hits = popularTokens(this.rows);
       const popular = this.shadowRoot.querySelector('.popular');
       const popularHTML = `<span class="popular-label">${hits.length > 1 ? 'POPULAR TOKENS' : 'POPULAR TOKEN'}</span>${hits.length ? hits.map((hit) => `<a href="https://x.com/search?q=${encodeURIComponent(hit.name)}&src=typed_query" target="_blank" rel="noopener noreferrer">${esc(hit.name)} ↗<small>${hit.count} similar tracked tokens</small></a>`).join('') : '<span class="empty">No repeated token names yet</span>'}`;
@@ -401,7 +434,8 @@ if (
           if (list.children[i] !== node) {
             const focused = this.shadowRoot.activeElement;
             list.insertBefore(node, list.children[i] || null);
-            if (focused && node.contains(focused)) focused.focus({ preventScroll: true });
+            if (focused && node.contains(focused))
+              focused.focus({ preventScroll: true });
           }
         });
         if (!rows.length) {

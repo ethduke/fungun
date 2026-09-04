@@ -48,10 +48,13 @@ payout asset with a launchpad breakdown, not by ticker alone.
 ## Market feed
 
 The top of the launch page shows ETH and SHARES from a selected Robinhood cohort.
-Same-origin `GET /api/tracked-feed` forwards the public source with no credentials.
-The feed refreshes approximately every four seconds and retries interruptions,
-retaining the last successful rows with a reconnect status. Receipt time confirms
-a response; it is not a per-token valuation timestamp. Other chains are excluded.
+Same-origin `GET /api/tracked-feed` reads the public source with no credentials
+or calls to the configured RPC. It refreshes four seconds after each completed
+request while visible and online, pausing when hidden, offscreen or disconnected.
+Each server process/Worker isolate shares a four-second cache and one in-flight
+refresh. Interruptions use exponential backoff and honor `Retry-After`, retaining
+the last successful rows with a reconnect status. Cached responses preserve their
+receipt time; it is not a per-token valuation timestamp. Other chains are excluded.
 Popularity counts similarly named distinct contracts by
 chain, ranked by count then inflow, with links to X search. It makes no claim
 about social trends or complete market coverage. This feed cannot trade or sign.
