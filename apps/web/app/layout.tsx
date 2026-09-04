@@ -6,7 +6,7 @@ export const metadata: Metadata = {
   title: 'Fungun — Launch a coin',
   icons: { icon: '/favicon.svg' },
   description:
-    'Create a coin and choose Long, O1, or both. Noncustodial launch composer.',
+    'Create a coin on Robinhood Chain with Long, O1, or Longbow. Noncustodial launch composer.',
 };
 
 export default function RootLayout({

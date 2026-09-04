@@ -6,7 +6,6 @@ const MAX_FEE_RAW = (BigInt(1) << BigInt(256)) - BigInt(1);
 export const FEE_SOURCES = [
   { padId: 'long', chainId: 4663 },
   { padId: 'o1', chainId: 4663 },
-  { padId: 'o1', chainId: 8453 },
 ] as const;
 
 export interface FeeBalance {

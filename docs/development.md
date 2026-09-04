@@ -62,11 +62,17 @@ Run `npm run dev:api` in a second terminal for the read service. See
 - Upload/drop a PNG, JPEG, WebP or GIF, preview and remove it. Files stay in memory.
 - Enter name, ticker and optional description; review per-launchpad validation.
 - Ticker edits auto-fill the coin name unless a custom name has been entered.
-- Choose one chain: Robinhood (default) offers Long and O1; Base offers O1.
-- Select launchpads and pairings. Changing chains clears incompatible selections.
-- Load per-chain Long/O1 catalogs when the backend is configured; otherwise samples
-  remain labeled. Refresh is explicit; no periodic background calls.
+- Robinhood offers Long, O1 and Longbow. Base is temporarily paused in the
+  selector, draft validation, wallet configuration and fee lookup sources.
+- Select launchpads and pairings; Longbow starts unselected.
+- Long uses a static list of 56 market tickers supplied on 4 September 2026.
+  Longbow uses its 194-entry dropdown registry snapshot from 2 September,
+  checked on 4 September, with SKYHY corrected to the verified symbol SKHY.
+  Only ticker choices are bundled; runtime addresses stay out of source control.
+  O1 loads a per-chain catalog when the backend is configured; otherwise samples
+  remain labeled. O1 refresh is explicit; no periodic background calls.
 - Check Long ticker reservations on click; O1 availability remains unverified.
+  Longbow has no ticker or fee adapter; its ID never enters those API requests.
 - The inline launch section updates coin details, destinations and draft validation as you edit.
 - Image checks show an inline loading state; O1's metadata-update toggle stays in the launch section.
 - Open the Grok/x402 flow preview; no image generation or payment occurs.

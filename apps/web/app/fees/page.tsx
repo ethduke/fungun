@@ -350,8 +350,8 @@ export default function Fees() {
       {address && (
         <p className="fee-claim-notice">
           Long covers configured locked pools only, not hook payouts. O1 lists
-          up to 25 positions per network; verified Base escrows support live
-          reads and claims. Shared escrow fees are not attributed to individual
+          up to 25 Robinhood positions. Base is paused, and Longbow fee lookup
+          is not connected. Shared escrow fees are not attributed to individual
           launches.
         </p>
       )}

@@ -57,8 +57,8 @@ await test('catalog is validated and live pair IDs belong to the exact chain and
       chainId: 4663,
       expiresAt: Date.now() + 60_000,
       pads: {
-        o1: { status: 'ready', pairs: [] },
-        long: { status: 'ready', pairs: [{ id, symbol: 'MOON' }] },
+        o1: { status: 'ready', pairs: [{ id, symbol: 'MOON' }] },
+        long: { status: 'ready', pairs: [] },
       },
     },
     4663,
@@ -69,7 +69,14 @@ await test('catalog is validated and live pair IDs belong to the exact chain and
     description: '',
     hasImage: true,
   };
-  const pads = [{ ...DEFAULT_DESTINATIONS[0], pairId: id }];
+  const pads = [
+    {
+      ...DEFAULT_DESTINATIONS[1],
+      selected: true,
+      route: 'rwa' as const,
+      pairId: id,
+    },
+  ];
   assert.deepEqual(validateDraft(draft, pads, 4663, catalog), {});
   assert.ok(
     validateDraft(draft, pads, 4663, { ...catalog, expiresAt: 0 }).destinations,
@@ -79,7 +86,8 @@ await test('catalog is validated and live pair IDs belong to the exact chain and
       .destinations,
   );
   assert.ok(
-    validateDraft(draft, DEFAULT_DESTINATIONS, 4663, catalog).destinations,
+    validateDraft(draft, [{ ...pads[0], pairId: 'sample-nvda' }], 4663, catalog)
+      .destinations,
   );
   assert.throws(() => parseCatalog({ ...catalog, chainId: 8453 }, 4663));
   assert.throws(() => parseCatalog({ ...catalog, pads: {} }, 4663));

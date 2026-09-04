@@ -9,6 +9,7 @@ import { Skeleton } from '@/components/ui/skeleton';
 import {
   chainName,
   draftStatus,
+  launchpadName,
   pairingName,
   type Destination,
   type ChainId,
@@ -143,16 +144,18 @@ export function LaunchSection({
           {destinations.map((pad) => (
             <div key={pad.id} className="launch-destination">
               <div>
-                <strong>{pad.id === 'long' ? 'Long' : 'O1'}</strong>
+                <strong>{launchpadName(pad.id)}</strong>
                 <span>{chainName(pad.chainId)}</span>
               </div>
               <dl>
                 <div>
                   <dt>Pairing</dt>
                   <dd>
-                    {catalog?.pads[pad.id]?.pairs.find(
-                      (pair) => pair.id === pad.pairId,
-                    )?.symbol ?? pairingName(pad.pairId)}
+                    {(pad.id === 'longbow'
+                      ? undefined
+                      : catalog?.pads[pad.id]?.pairs.find(
+                          (pair) => pair.id === pad.pairId,
+                        )?.symbol) ?? pairingName(pad.pairId)}
                     {pad.pairId.startsWith('sample-') ? ' · sample' : ''}
                   </dd>
                 </div>
@@ -222,9 +225,11 @@ export function LaunchSection({
                 <div>
                   <dt>Ticker</dt>
                   <dd>
-                    {checking
-                      ? 'Checking…'
-                      : tickerLabel(tickerCheck?.results[pad.id], now)}
+                    {pad.id === 'longbow'
+                      ? 'Not supported yet'
+                      : checking
+                        ? 'Checking…'
+                        : tickerLabel(tickerCheck?.results[pad.id], now)}
                   </dd>
                 </div>
               </dl>

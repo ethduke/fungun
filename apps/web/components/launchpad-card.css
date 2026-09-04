@@ -1,0 +1,9 @@
+.pad-logo.longbow {
+  color: #344b3f;
+  background: #dfe8e2;
+}
+
+.chain-choice:has([disabled]) {
+  color: #7a8175;
+  cursor: not-allowed;
+}

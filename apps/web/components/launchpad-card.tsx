@@ -1,6 +1,6 @@
 'use client';
 
-import { ArrowUpRight, Info } from 'lucide-react';
+import { ArrowUpRight, Crosshair, Info } from 'lucide-react';
 import { Checkbox } from '@/components/ui/checkbox';
 import {
   Popover,
@@ -17,12 +17,16 @@ import {
   SelectValue,
 } from '@/components/ui/select';
 import {
+  LONG_PAIRS,
   SAMPLE_PAIRS,
+  launchpadName,
   type Destination,
   type PairId,
 } from '@/lib/launch-model';
 import type { CatalogPad } from '@/lib/read-service';
 import { FEE_INFO_REVIEWED, launchpadFeeInfo } from '@/lib/launchpad-fees';
+import { LONGBOW_PAIRS } from '@/lib/longbow-markets';
+import './launchpad-card.css';
 
 export function LaunchpadCard({
   destination: pad,
@@ -36,9 +40,17 @@ export function LaunchpadCard({
   loading?: boolean;
 }) {
   const long = pad.id === 'long';
-  const title = long ? 'Long' : 'O1';
-  const live = catalog?.status === 'ready';
-  const pairs = live ? catalog.pairs : SAMPLE_PAIRS;
+  const o1 = pad.id === 'o1';
+  const title = launchpadName(pad.id);
+  const live = o1 && catalog?.status === 'ready';
+  const sample = o1 && !live;
+  const pairs = long
+    ? LONG_PAIRS
+    : pad.id === 'longbow'
+      ? LONGBOW_PAIRS
+      : live
+        ? catalog.pairs
+        : SAMPLE_PAIRS;
   const selectedPair = pairs.find((pair) => pair.id === pad.pairId);
   const feeInfo = launchpadFeeInfo(pad);
   return (
@@ -50,7 +62,13 @@ export function LaunchpadCard({
           aria-label={`Select ${title}`}
         />
         <span className={`pad-logo ${pad.id}`} aria-hidden="true">
-          {long ? <ArrowUpRight size={22} /> : 'o1'}
+          {long ? (
+            <ArrowUpRight size={22} />
+          ) : o1 ? (
+            'o1'
+          ) : (
+            <Crosshair size={22} />
+          )}
         </span>
         <strong className="pad-title">{title}</strong>
       </label>
@@ -59,7 +77,7 @@ export function LaunchpadCard({
           value={pad.pairId}
           onValueChange={(value) => {
             if (
-              (!long && value === 'native') ||
+              (o1 && value === 'native') ||
               pairs.some((pair) => pair.id === value)
             )
               onChange({
@@ -77,16 +95,16 @@ export function LaunchpadCard({
               {pad.pairId === 'native'
                 ? 'Native / standard'
                 : selectedPair
-                  ? `${selectedPair.symbol}${live ? '' : ' (sample)'}`
+                  ? `${selectedPair.symbol}${sample ? ' (sample)' : ''}`
                   : 'Choose pairing'}
             </SelectValue>
           </SelectTrigger>
           <SelectContent>
-            {!long && <SelectItem value="native">Native / standard</SelectItem>}
+            {o1 && <SelectItem value="native">Native / standard</SelectItem>}
             {pairs.map((pair) => (
               <SelectItem key={pair.id} value={pair.id}>
                 {pair.symbol}
-                {live ? '' : ' (sample)'}
+                {sample ? ' (sample)' : ''}
               </SelectItem>
             ))}
             {live && !pairs.length && (
@@ -94,7 +112,7 @@ export function LaunchpadCard({
                 No RWA pairs available
               </SelectItem>
             )}
-            {!live && (
+            {sample && (
               <SelectItem value="status" disabled>
                 {loading ? 'Loading catalog…' : 'Live catalog unavailable'}
               </SelectItem>

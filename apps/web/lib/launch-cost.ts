@@ -1,4 +1,4 @@
-import type { ChainId, Destination, PadId } from './launch-model';
+import type { ChainId, Destination, LaunchpadId } from './launch-model';
 
 const WEI_PER_ETH = 10n ** 18n;
 const MAX_AMOUNT = (1n << 256n) - 1n;
@@ -29,7 +29,7 @@ export type LaunchCostQuote = {
   quotedAt: number;
   expiresAt: number;
   nativeOnly: boolean;
-  pads: { id: PadId; steps: CostStep[] }[];
+  pads: { id: LaunchpadId; steps: CostStep[] }[];
 };
 
 export type UsdRate = {
@@ -55,7 +55,7 @@ type UnavailableReason =
   | 'invalid'
   | 'token_cost';
 export type LaunchCosts = {
-  pads: Partial<Record<PadId, CostAmounts>>;
+  pads: Partial<Record<LaunchpadId, CostAmounts>>;
   total: CostAmounts | null;
   reason?: UnavailableReason;
 };
@@ -174,7 +174,7 @@ function addCosts(total: CostAmounts, value: CostAmounts) {
 
 export function calculateLaunchCosts(
   quote: LaunchCostQuote | null | undefined,
-  selection: { contextKey: string; chainId: ChainId; pads: PadId[] },
+  selection: { contextKey: string; chainId: ChainId; pads: LaunchpadId[] },
   now: number,
 ): LaunchCosts {
   const unavailable = (reason: UnavailableReason): LaunchCosts => ({
@@ -194,9 +194,9 @@ export function calculateLaunchCosts(
   if (
     ![4663, 8453].includes(quote.chainId) ||
     !Array.isArray(quote.pads) ||
-    quote.pads.length > 2 ||
+    quote.pads.length > 3 ||
     !selection.pads.length ||
-    selection.pads.length > 2 ||
+    selection.pads.length > 3 ||
     quote.pads.some((pad) => !pad || typeof pad !== 'object') ||
     new Set(selection.pads).size !== selection.pads.length ||
     new Set(quote.pads.map((pad) => pad.id)).size !== quote.pads.length
@@ -207,8 +207,8 @@ export function calculateLaunchCosts(
   padLoop: for (const pad of quote.pads) {
     if (
       !selection.pads.includes(pad.id) ||
-      !['long', 'o1'].includes(pad.id) ||
-      (pad.id === 'long' && quote.chainId !== 4663) ||
+      !['long', 'o1', 'longbow'].includes(pad.id) ||
+      (pad.id !== 'o1' && quote.chainId !== 4663) ||
       !Array.isArray(pad.steps) ||
       pad.steps.length > 8 ||
       pad.steps.some((step) => !step || typeof step !== 'object') ||

@@ -37,6 +37,8 @@ import {
   IMAGE_LIMIT,
   imageFileError,
   imageKind,
+  isWebviewChain,
+  readablePads,
   selectChain,
   supportsChain,
   validateDraft,
@@ -66,10 +68,11 @@ export default function Home() {
   const fileInput = useRef<HTMLInputElement>(null);
   const imageSequence = useRef(0);
   const active = destinations.filter((pad) => pad.selected);
+  const readPads = readablePads(active.map((pad) => pad.id));
   const reads = useReadService(
     chainId,
     ticker,
-    active.map((pad) => pad.id),
+    readPads,
   );
   const errors = validateDraft(
     { name, ticker, description, hasImage: !!image },
@@ -188,7 +191,7 @@ export default function Home() {
   }
 
   function updateChain(nextChainId: ChainId) {
-    if (nextChainId === chainId) return;
+    if (nextChainId === chainId || !isWebviewChain(nextChainId)) return;
     setSelection((current) => ({
       chainId: nextChainId,
       destinations: selectChain(current.destinations, nextChainId),
@@ -430,7 +433,8 @@ export default function Home() {
                   disabled={
                     !ticker ||
                     !!errors.ticker ||
-                    !active.length ||
+                    !readPads.length ||
+                    !isWebviewChain(chainId) ||
                     reads.checking
                   }
                   onClick={() => void reads.runCheck()}
@@ -484,7 +488,7 @@ export default function Home() {
                 aria-label="Launch chain"
                 value={String(chainId)}
                 onValueChange={(value) => {
-                  if (value === '4663' || value === '8453')
+                  if (isWebviewChain(Number(value)))
                     updateChain(Number(value) as ChainId);
                 }}
               >
@@ -493,8 +497,8 @@ export default function Home() {
                   Robinhood
                 </label>
                 <label className="chain-choice" htmlFor="chain-base">
-                  <RadioGroupItem id="chain-base" value="8453" />
-                  Base
+                  <RadioGroupItem id="chain-base" value="8453" disabled />
+                  Base (paused)
                 </label>
               </RadioGroup>
               {destinations
@@ -504,7 +508,7 @@ export default function Home() {
                     key={pad.id}
                     destination={pad}
                     onChange={updateDestination}
-                    catalog={reads.catalog?.pads[pad.id]}
+                    catalog={pad.id === 'longbow' ? undefined : reads.catalog?.pads[pad.id]}
                     loading={reads.catalogLoading}
                   />
                 ))}
@@ -520,8 +524,8 @@ export default function Home() {
                 onClick={reads.refreshCatalog}
               >
                 {reads.catalogLoading
-                  ? 'Loading pairings…'
-                  : 'Refresh pairings'}
+                  ? 'Loading O1 pairings…'
+                  : 'Refresh O1 pairings'}
               </Button>
               {reads.catalogError && (
                 <p role="alert" className="notice">
@@ -557,7 +561,7 @@ export default function Home() {
         <footer className="workspace-footer">
           <span>YOUR IDEA. YOUR WALLET. YOUR LAUNCH.</span>
           <span>
-            Long + O1 <span>·</span>Preview — no transactions
+            Long + O1 + Longbow <span>·</span>Preview — no transactions
           </span>
         </footer>
       </main>

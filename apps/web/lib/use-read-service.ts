@@ -2,6 +2,7 @@
 
 import { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import type { ChainId, PadId } from './launch-model';
+import { isWebviewChain } from './launch-model';
 import { describeError } from './user-error';
 import {
   checkTicker,
@@ -40,6 +41,7 @@ export function useReadService(
   const [now, setNow] = useState(() => performance.now());
 
   useEffect(() => {
+    if (!isWebviewChain(chainId)) return;
     let ignore = false;
     void loadCatalog(chainId)
       .then((value) => {
@@ -83,6 +85,7 @@ export function useReadService(
   }, [catalog, check, now]);
 
   async function runCheck() {
+    if (!pads.length || !isWebviewChain(chainId)) return;
     const requestKey = key;
     setPendingKey(requestKey);
     setCheck(null);

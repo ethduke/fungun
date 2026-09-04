@@ -11,9 +11,13 @@ import {
   imageKind,
   selectChain,
   supportsChain,
+  isWebviewChain,
+  pairingName,
+  readablePads,
   validateDraft,
   type Destination,
 } from './launch-model.ts';
+import { LONGBOW_PAIRS } from './longbow-markets.ts';
 
 const draft = {
   name: 'Moon Department',
@@ -121,10 +125,12 @@ await test('pending image replacement takes precedence over an otherwise complet
 });
 
 await test('inline launch status revalidates chain and launchpad selections', () => {
-  const base = selectChain(destinations(), 8453);
+  const base: Destination[] = [
+    { ...DEFAULT_DESTINATIONS[1], selected: true, chainId: 8453 },
+  ];
   assert.equal(
     draftStatus(validateDraft(draft, base, 8453), false),
-    'complete',
+    'incomplete',
   );
   assert.equal(
     draftStatus(validateDraft(draft, base, 4663), false),
@@ -155,7 +161,7 @@ await test('O1 has independent ticker and chain rules', () => {
   const o1: Destination = {
     ...DEFAULT_DESTINATIONS[1],
     selected: true,
-    chainId: 8453,
+    chainId: 4663,
   };
   assert.deepEqual(validateDraft({ ...draft, ticker: 'MOON1' }, [o1]), {});
   assert.ok(validateDraft({ ...draft, ticker: 'MO ON' }, [o1]).ticker);
@@ -189,7 +195,7 @@ await test('multi-launch validates every selected destination', () => {
   assert.ok(validateDraft(draft, pads).destinations);
 });
 
-await test('Robinhood is the default chain with both launchpads available', () => {
+await test('Robinhood is the default chain with all three launchpads available', () => {
   assert.equal(DEFAULT_CHAIN_ID, 4663);
   assert.ok(
     destinations().every((pad) => supportsChain(pad.id, DEFAULT_CHAIN_ID)),
@@ -202,53 +208,84 @@ await test('Robinhood is the default chain with both launchpads available', () =
   );
 });
 
-await test('switching to Base removes Long and resets O1 pairing without mutating the draft', () => {
+await test('paused Base selection preserves the current Robinhood draft', () => {
   const before = destinations().map((pad) => ({ ...pad, selected: true }));
   before[1].route = 'rwa';
   before[1].pairId = 'sample-aapl';
   const after = selectChain(before, 8453);
-  assert.deepEqual(
-    after.filter((pad) => supportsChain(pad.id, 8453)).map((pad) => pad.id),
-    ['o1'],
-  );
-  assert.deepEqual(after[0], { ...before[0], selected: false });
-  assert.deepEqual(after[1], {
-    ...before[1],
-    chainId: 8453,
-    route: 'standard',
-    pairId: 'native',
-  });
-  assert.equal(before[0].selected, true);
-  assert.equal(before[1].chainId, 4663);
-  assert.equal(before[1].pairId, 'sample-aapl');
-  assert.deepEqual(validateDraft(draft, after), {});
+  assert.equal(isWebviewChain(8453), false);
+  assert.equal(isWebviewChain(4663), true);
+  assert.deepEqual(after, before);
+  assert.notEqual(after, before);
+  assert.deepEqual(validateDraft(draft, after, 4663), {});
 });
 
-await test('chain switch selects O1 if needed and never restores hidden Long selection', () => {
-  const base = selectChain(destinations(), 8453);
-  assert.equal(base[0].selected, false);
-  assert.equal(base[1].selected, true);
-  const robinhood = selectChain(base, 4663);
-  assert.equal(robinhood[0].selected, false);
-  assert.equal(robinhood[1].selected, true);
-  assert.equal(robinhood[1].chainId, 4663);
-  assert.deepEqual(validateDraft(draft, robinhood), {});
-});
-
-await test('review rejects selected launchpads across different chains', () => {
-  const mixed = destinations().map((pad) => ({ ...pad, selected: true }));
-  mixed[1].chainId = 8453;
-  assert.equal(
-    validateDraft(draft, mixed).destinations,
-    'Select launchpads on one chain at a time.',
-  );
-});
-
-await test('review rejects a single stale selection that disagrees with the chain filter', () => {
+await test('stale Base destinations fail validation with or without a chain filter', () => {
+  const base: Destination[] = [
+    { ...DEFAULT_DESTINATIONS[1], selected: true, chainId: 8453 },
+  ];
+  for (const chainId of [undefined, 4663, 8453] as const)
+    assert.equal(
+      validateDraft(draft, base, chainId).destinations,
+      'Base is paused. Choose Robinhood Chain.',
+    );
   assert.ok(validateDraft(draft, destinations(), 8453).destinations);
-  const base = selectChain(destinations(), 8453);
-  assert.ok(validateDraft(draft, base, 4663).destinations);
-  assert.deepEqual(validateDraft(draft, base, 8453), {});
+  const recovered = selectChain(base, 4663);
+  assert.equal(recovered[0].chainId, 4663);
+  assert.equal(recovered[0].pairId, 'native');
+  assert.deepEqual(validateDraft(draft, recovered, 4663), {});
+});
+
+await test('Longbow accepts only its registry pairs independently of a live O1 catalog', () => {
+  const longbow = destinations().find((pad) => pad.id === 'longbow')!;
+  const catalog = {
+    chainId: 4663 as const,
+    expiresAt: 1000,
+    pads: { o1: { status: 'ready' as const, pairs: [] } },
+  };
+  for (const symbol of ['AAOI', 'LULU', 'SKHY', 'WEEK', 'ZS']) {
+    const pair = LONGBOW_PAIRS.find((entry) => entry.symbol === symbol)!;
+    assert.equal(pairingName(pair.id), symbol);
+    assert.deepEqual(
+      validateDraft(
+        draft,
+        [{ ...longbow, selected: true, pairId: pair.id }],
+        4663,
+        catalog,
+        10,
+      ),
+      {},
+    );
+  }
+  for (const pairId of [
+    'long-NVDA',
+    'sample-nvda',
+    'native',
+    'longbow-BND',
+    'longbow-SKYHY',
+  ])
+    assert.ok(
+      validateDraft(
+        draft,
+        [{ ...longbow, selected: true, pairId } as Destination],
+        4663,
+      ).destinations,
+    );
+  for (const pad of destinations().filter((entry) => entry.id !== 'longbow'))
+    assert.ok(
+      validateDraft(
+        draft,
+        [{ ...pad, selected: true, route: 'rwa', pairId: 'longbow-NVDA' }],
+        4663,
+      ).destinations,
+    );
+});
+
+await test('Longbow remains outside ticker service requests for every selection combination', () => {
+  assert.deepEqual(readablePads(['longbow']), []);
+  assert.deepEqual(readablePads(['long', 'longbow']), ['long']);
+  assert.deepEqual(readablePads(['o1', 'longbow']), ['o1']);
+  assert.deepEqual(readablePads(['long', 'o1', 'longbow']), ['long', 'o1']);
 });
 
 await test('description has a UTF-8 byte limit', () => {

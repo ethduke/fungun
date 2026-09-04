@@ -26,6 +26,7 @@ export const FEE_INFO_REVIEWED = '2026-09-04';
 export function launchpadFeeInfo(
   destination: Pick<Destination, 'id' | 'chainId' | 'route'>,
 ) {
+  if (destination.id === 'longbow') return undefined;
   if (
     destination.id === 'long' &&
     (destination.chainId !== 4663 || destination.route !== 'rwa')

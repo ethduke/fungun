@@ -138,6 +138,19 @@ await test('known pad amounts may be shown without presenting a partial grand to
   assert.equal(result.pads.long?.totalWei, 200n);
   assert.equal(result.pads.o1, undefined);
 });
+await test('adding Longbow cannot present a total from only Long and O1 quotes', () => {
+  const result = calculateLaunchCosts(
+    quote(),
+    {
+      ...selection,
+      pads: ['long', 'o1', 'longbow'],
+    },
+    150,
+  );
+  assert.equal(result.reason, 'incomplete');
+  assert.equal(result.total, null);
+  assert.equal(result.pads.longbow, undefined);
+});
 await test('unknown, expired, future and overlong quotes cannot be used', () => {
   assert.equal(calculateLaunchCosts(null, selection, 150).reason, 'not_ready');
   for (const now of [99, 200, NaN, Infinity])

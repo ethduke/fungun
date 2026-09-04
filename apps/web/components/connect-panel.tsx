@@ -106,9 +106,9 @@ function ConnectionControl({
                 Network:{' '}
                 {connection.chain?.name ?? `Chain ${connection.chainId}`}
               </p>
-              {connection.chainId !== 4663 && connection.chainId !== 8453 && (
+              {connection.chainId !== 4663 && (
                 <p className="notice">
-                  This network is not supported by the launchpads. Switch
+                  This webview currently supports Robinhood Chain. Switch
                   manually in your wallet when needed.
                 </p>
               )}

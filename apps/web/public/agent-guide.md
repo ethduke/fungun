@@ -7,20 +7,23 @@ Start with [llms.txt](/llms.txt) for the site overview.
 
 ## Prepare a draft
 
-1. Open the [launch composer](/). Choose Robinhood Chain (default) or Base.
+1. Open the [launch composer](/). Robinhood Chain is enabled; Base is paused.
 2. Enter a ticker and coin name. Ticker edits auto-fill the name until a custom
    name is entered. Names allow 1–50 characters; tickers allow 1–11 without
-   whitespace. Long requires uppercase letters only.
+   whitespace. Long and Longbow require uppercase letters only.
 3. Upload PNG, JPEG, WebP or GIF artwork, at most 2 MiB and 4096 × 4096 pixels.
    Images stay in local memory. The Grok/x402 flow is only a preview: it neither
    generates an image nor charges a payment.
-4. Select Long, O1 or both on Robinhood; only O1 is available on Base. Long uses
-   RWA pairing and permanent metadata. O1 offers standard or RWA pairing and an
-   optional metadata-update setting. Configured backends load a separate catalog
-   for each chain. Fallback samples are labeled and are not live eligibility data.
+4. Select Long, O1 and/or Longbow on Robinhood. Long uses a static list of 56
+   market tickers; Longbow uses its 194-entry stock/RWA dropdown registry,
+   with the SKYHY label corrected to SKHY. Both use permanent metadata.
+   O1 offers standard or RWA pairing and an optional metadata-update setting.
+   Configured backends load O1's catalog for each chain. O1 fallback samples are
+   labeled and are not live eligibility data.
 5. Read the inline launch section. Draft validation does not confirm ticker
    availability, token eligibility, costs or launch readiness. Check ticker is an
    explicit read: Long reports only its reservation state; O1 stays unverified.
+   Longbow ticker checking is not connected; it is excluded from read requests.
    Results expire and edits invalidate them. Launch stays disabled.
 
 The launch cost panel separates launchpad fees and complete network fees in ETH,
@@ -45,9 +48,9 @@ validated locally, then sent to the fee backend and relevant providers after a
 failed balances are unknown, never zero. Refresh is explicit and cached.
 
 Long covers up to two configured locked pools; separate hook fees are unknown.
-O1 lists up to 25 indexed positions per chain. Up to four verified current Base
-escrow positions support live balance reads and claims; Robinhood and historical
-O1 variants do not support claims yet. Shared escrow balances are by payout asset,
+O1 lists up to 25 indexed Robinhood positions; O1 Robinhood claims are not connected.
+Base fee lookups are paused, and Longbow fee lookup is not connected.
+Shared escrow balances are by payout asset,
 not individual launched coin; do not merge matching tickers with different addresses.
 
 Claim review rechecks the connected owner, chain, contracts, positive fees, simulation
@@ -130,7 +133,8 @@ Same-origin JSON POSTs use `/api/catalog` with `{ "chainId": 4663 }`, or
 `/api/ticker` with `{ "chainId": 4663, "ticker": "MOON", "pads": ["long", "o1"] }`.
 The `x-fungun-intent` header must match `catalog` or `ticker`. These are bounded
 anonymous read endpoints, not authentication or consent for financial actions.
-Only Robinhood (4663) and Base (8453) are supported; Long is Robinhood-only.
+The webview only requests Robinhood (4663). Base (8453) remains supported by the
+backend but is paused in the webview. Longbow is a draft destination, not an API pad.
 Never send keys, wallet addresses, signatures, images or prompts to these routes.
 Fee lookup uses `/api/fees` with only `address`, `chainId` and `padId`.
 `/api/claim-prepare` takes only `address` and an opaque returned `positionId`;

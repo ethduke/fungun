@@ -11,6 +11,10 @@ await test('every preview chain rejects app RPC without attempting fetch', async
   };
   try {
     const config = createPreviewConfig();
+    assert.deepEqual(
+      config.chains.map((chain) => chain.id),
+      [4663],
+    );
     assert.equal(config.storage, null);
     assert.equal(config._internal.ssr, false);
     assert.equal(config.connectors.length, 0);

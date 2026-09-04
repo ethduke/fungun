@@ -46,7 +46,6 @@ await test('preview fee lookups never request RPC, invent zero balances or enabl
     assert.deepEqual(result.unavailableSources, [
       { padId: 'long', chainId: 4663 },
       { padId: 'o1', chainId: 4663 },
-      { padId: 'o1', chainId: 8453 },
     ]);
   } finally {
     globalThis.fetch = original;

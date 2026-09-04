@@ -1,6 +1,7 @@
 # Fungun
 
-A noncustodial launchpad composer for Long and O1.
+A noncustodial launchpad composer for Long, O1 and Longbow on Robinhood Chain.
+Base is temporarily paused in the webview.
 
 ```sh
 npm run setup
@@ -14,8 +15,9 @@ Open http://127.0.0.1:3000. See [development notes](docs/development.md) for
 working controls, deliberate limitations, tests and the Fly backend boundary.
 
 This milestone is a local webview with a guarded read-service backend. Configured
-adapters can load Long/O1 catalogs and check Long ticker reservations; O1 ticker
-availability stays unverified. Configured fee adapters support bounded live reads
+O1 catalogs load through the read service; Long and Longbow use bundled ticker
+lists (56 and 194 choices). Long ticker reservations can be checked; O1 stays
+unverified and Longbow ticker checking is not connected. Configured fee adapters support bounded live reads
 and explicit wallet claims; see [fee setup and coverage](docs/fee-claims.md).
 Launch transactions and paid image generation remain disabled. Telegram is out of scope.
 

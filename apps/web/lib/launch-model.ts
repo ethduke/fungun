@@ -1,16 +1,24 @@
+import {
+  LONGBOW_PAIRS,
+  type LONGBOW_MARKET_TICKERS,
+} from './longbow-markets.ts';
+
 export type PadId = 'long' | 'o1';
+export type LaunchpadId = PadId | 'longbow';
 export type ChainId = 4663 | 8453;
 export type PairId =
   | 'native'
   | 'sample-nvda'
   | 'sample-aapl'
   | 'sample-tsla'
+  | `long-${(typeof LONG_MARKET_TICKERS)[number]}`
+  | `longbow-${(typeof LONGBOW_MARKET_TICKERS)[number]}`
   | `rwa-${string}`;
 import type { Catalog } from './read-service';
 export type Route = 'rwa' | 'standard';
 
 export interface Destination {
-  id: PadId;
+  id: LaunchpadId;
   selected: boolean;
   chainId: ChainId;
   route: Route;
@@ -48,6 +56,82 @@ export function grokPromptPlaceholder(name: string, ticker: string) {
 export const IMAGE_LIMIT = 2 * 1024 * 1024;
 export const DESCRIPTION_LIMIT = 2000;
 export const DEFAULT_CHAIN_ID: ChainId = 4663;
+// Base remains in the service models but is temporarily paused in the webview.
+export const ENABLED_WEBVIEW_CHAINS: readonly ChainId[] = [4663];
+export function isWebviewChain(chainId: number) {
+  return ENABLED_WEBVIEW_CHAINS.includes(chainId as ChainId);
+}
+
+export function launchpadName(id: LaunchpadId) {
+  return { long: 'Long', o1: 'O1', longbow: 'Longbow' }[id];
+}
+
+export function readablePads(pads: LaunchpadId[]): PadId[] {
+  return pads.filter((pad): pad is PadId => pad === 'long' || pad === 'o1');
+}
+// User-supplied Long market snapshot, 2026-09-04.
+export const LONG_MARKET_TICKERS = [
+  'AAPL',
+  'AI',
+  'AMC',
+  'AMD',
+  'AMZN',
+  'ASML',
+  'BA',
+  'BB',
+  'BE',
+  'CCL',
+  'COIN',
+  'COST',
+  'CRWV',
+  'DELL',
+  'DJT',
+  'ETH',
+  'FIG',
+  'GLD',
+  'GME',
+  'GOOGL',
+  'HIMS',
+  'IBM',
+  'INTC',
+  'LLY',
+  'LULU',
+  'META',
+  'MRNA',
+  'MSFT',
+  'MSTR',
+  'MU',
+  'NET',
+  'NFLX',
+  'NU',
+  'NVDA',
+  'ORCL',
+  'PLTR',
+  'QQQ',
+  'QUBT',
+  'RBLX',
+  'RDDT',
+  'SGOV',
+  'SKHY',
+  'SLV',
+  'SNAP',
+  'SNDK',
+  'SOFI',
+  'SPCX',
+  'SPY',
+  'TSLA',
+  'TSM',
+  'TTWO',
+  'UPS',
+  'USAR',
+  'USDG',
+  'USO',
+  'XLK',
+] as const;
+export const LONG_PAIRS = LONG_MARKET_TICKERS.map((symbol) => ({
+  id: `long-${symbol}` as const,
+  symbol,
+}));
 export const SAMPLE_PAIRS = [
   { id: 'sample-nvda', symbol: 'NVDA', label: 'NVIDIA' },
   { id: 'sample-aapl', symbol: 'AAPL', label: 'Apple' },
@@ -60,7 +144,7 @@ export const DEFAULT_DESTINATIONS: Destination[] = [
     selected: true,
     chainId: 4663,
     route: 'rwa',
-    pairId: 'sample-nvda',
+    pairId: 'long-NVDA',
     editableMetadata: false,
   },
   {
@@ -71,17 +155,26 @@ export const DEFAULT_DESTINATIONS: Destination[] = [
     pairId: 'native',
     editableMetadata: false,
   },
+  {
+    id: 'longbow',
+    selected: false,
+    chainId: 4663,
+    route: 'rwa',
+    pairId: 'longbow-NVDA',
+    editableMetadata: false,
+  },
 ];
 
 export function chainName(id: ChainId) {
   return id === 4663 ? 'Robinhood Chain' : 'Base';
 }
 
-export function supportsChain(id: PadId, chainId: ChainId) {
+export function supportsChain(id: LaunchpadId, chainId: ChainId) {
   return chainId === 4663 || (id === 'o1' && chainId === 8453);
 }
 
 export function selectChain(destinations: Destination[], chainId: ChainId) {
+  if (!isWebviewChain(chainId)) return destinations.map((pad) => ({ ...pad }));
   const next = destinations.map((pad) => {
     if (!supportsChain(pad.id, chainId)) return { ...pad, selected: false };
     if (pad.chainId === chainId) return { ...pad };
@@ -102,7 +195,9 @@ export function selectChain(destinations: Destination[], chainId: ChainId) {
 export function pairingName(id: PairId) {
   return id === 'native'
     ? 'Native / standard'
-    : (SAMPLE_PAIRS.find((pair) => pair.id === id)?.symbol ?? 'Unselected');
+    : ([...LONG_PAIRS, ...LONGBOW_PAIRS, ...SAMPLE_PAIRS].find(
+        (pair) => pair.id === id,
+      )?.symbol ?? 'Unselected');
 }
 
 export function validateDraft(
@@ -123,10 +218,10 @@ export function validateDraft(
   )
     errors.ticker = 'Use 1–11 characters, without spaces.';
   else if (
-    active.some((pad) => pad.id === 'long') &&
+    active.some((pad) => pad.id === 'long' || pad.id === 'longbow') &&
     !/^[A-Z]+$/.test(draft.ticker)
   )
-    errors.ticker = 'Long requires uppercase letters A–Z only.';
+    errors.ticker = 'Long and Longbow require uppercase letters A–Z only.';
   if (new TextEncoder().encode(draft.description).length > DESCRIPTION_LIMIT)
     errors.description = 'Description must be at most 2,000 UTF-8 bytes.';
   if (!draft.hasImage) errors.image = 'Add a coin image to continue.';
@@ -142,30 +237,38 @@ export function validateDraft(
     errors.destinations = 'Choose launchpads available on the selected chain.';
   for (const pad of active) {
     if (
-      pad.id === 'long' &&
+      (pad.id === 'long' || pad.id === 'longbow') &&
       (pad.chainId !== 4663 || pad.route !== 'rwa' || pad.editableMetadata)
     )
-      errors.destinations =
-        'Long requires Robinhood Chain, RWA pairing and immutable metadata.';
+      errors.destinations = `${launchpadName(pad.id)} requires Robinhood Chain, RWA pairing and immutable metadata.`;
     if (pad.chainId !== 4663 && pad.chainId !== 8453)
       errors.destinations = 'Unsupported chain.';
     if (
       pad.route === 'rwa' &&
-      !(
-        SAMPLE_PAIRS.some((pair) => pair.id === pad.pairId) &&
-        catalog?.pads[pad.id]?.status !== 'ready'
-      ) &&
-      !(
-        catalog?.chainId === pad.chainId &&
-        catalog.expiresAt > now &&
-        catalog.pads[pad.id]?.status === 'ready' &&
-        catalog.pads[pad.id]?.pairs.some((pair) => pair.id === pad.pairId)
-      )
+      (pad.id === 'long'
+        ? !LONG_PAIRS.some((pair) => pair.id === pad.pairId)
+        : pad.id === 'longbow'
+          ? !LONGBOW_PAIRS.some((pair) => pair.id === pad.pairId)
+          : !(
+              SAMPLE_PAIRS.some((pair) => pair.id === pad.pairId) &&
+              catalog?.pads[pad.id]?.status !== 'ready'
+            ) &&
+            !(
+              catalog?.chainId === pad.chainId &&
+              catalog.expiresAt > now &&
+              catalog.pads[pad.id]?.status === 'ready' &&
+              catalog.pads[pad.id]?.pairs.some((pair) => pair.id === pad.pairId)
+            ))
     )
       errors.destinations = 'Choose an available RWA pairing.';
     if (pad.route === 'standard' && pad.pairId !== 'native')
       errors.destinations = 'Standard launches require native pairing.';
   }
+  if (
+    (chainId !== undefined && !isWebviewChain(chainId)) ||
+    active.some((pad) => !isWebviewChain(pad.chainId))
+  )
+    errors.destinations = 'Base is paused. Choose Robinhood Chain.';
   return errors;
 }
 
