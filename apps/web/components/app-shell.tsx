@@ -58,10 +58,6 @@ export function AppShell({ children }: { children: ReactNode }) {
             </Link>
           </nav>
           <div className="header-actions">
-            <span className="preview-pill">
-              <span />
-              Local preview
-            </span>
             {walletStarted ? (
               <Suspense
                 fallback={

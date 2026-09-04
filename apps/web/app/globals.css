@@ -157,14 +157,6 @@ a:focus-visible {
   align-items: center;
   gap: 19px;
 }
-.preview-pill {
-  display: flex;
-  align-items: center;
-  gap: 7px;
-  font-size: 15px;
-  color: #69765c;
-}
-.preview-pill > span,
 .small-dot {
   width: 6px;
   height: 6px;
@@ -759,12 +751,26 @@ h2 {
   font-size: 14px;
   letter-spacing: 0.3px;
 }
-.workspace-footer > span:last-child {
-  font-family: var(--font-site);
-  letter-spacing: 0;
+.footer-signature {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  min-width: 0;
 }
-.workspace-footer > span:last-child > span {
-  padding: 0 6px;
+.footer-x {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  min-width: 24px;
+  min-height: 32px;
+  color: #38583c;
+}
+.footer-year {
+  align-self: center;
+  margin-left: auto;
+  flex-shrink: 0;
+  letter-spacing: 0;
 }
 .generate-placeholder {
   min-height: 230px;
@@ -1307,9 +1313,6 @@ h2 {
     padding: 15px 4%;
     min-height: 77px;
   }
-  .preview-pill {
-    display: none;
-  }
   .composer-grid {
     grid-template-columns: 1fr;
   }
@@ -1327,8 +1330,7 @@ h2 {
     margin: 0;
   }
   .workspace-footer {
-    flex-direction: column;
-    gap: 9px;
+    gap: 16px;
   }
   .identity-fields {
     grid-template-columns: 1.2fr 1fr;
