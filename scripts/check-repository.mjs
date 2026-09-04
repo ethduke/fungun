@@ -27,15 +27,59 @@ function placeholder(value) {
 }
 
 function sensitiveKey(key) {
-  return /(?:apikey|privatekey|secret|password|passwd|accesstoken|refreshtoken|authtoken|bearertoken|authorization|mnemonic|seedphrase|signature|rpcurl|rpcendpoint)/i.test(key.replace(/[^a-z0-9]/gi, ''));
+  return /(?:apikey|privatekey|secret|password|passwd|accesstoken|refreshtoken|authtoken|bearertoken|authorization|mnemonic|seedphrase|signature|rpc(?:https?|wss?)?(?:url|endpoint))/i.test(key.replace(/[^a-z0-9]/gi, ''));
 }
 
-function hasCredentialAssignment(text) {
+function withoutDependencyVersions(path, text) {
+  const name = path.split('/').at(-1);
+  if (!['package.json', 'package-lock.json', 'npm-shrinkwrap.json'].includes(name)) return text;
+  try { JSON.parse(text); } catch { return text; }
+  const groups = new Set(['dependencies', 'devDependencies', 'optionalDependencies', 'peerDependencies']);
+  const dependencyMap = (route) => (route.length === 1 && groups.has(route[0]))
+    || (name !== 'package.json' && route.length === 3 && route[0] === 'packages' && groups.has(route[2]));
+  const semver = /^[~^]?(?:0|[1-9]\d*)\.(?:0|[1-9]\d*)\.(?:0|[1-9]\d*)(?:-[0-9A-Za-z.-]+)?(?:\+[0-9A-Za-z.-]+)?$/;
+  const tokens = [...text.matchAll(/"(?:\\.|[^"\\])*"|[{}\[\]:,]|-?(?:0|[1-9]\d*)(?:\.\d+)?(?:[eE][+-]?\d+)?|true|false|null/g)];
+  const spans = [];
+  let index = 0;
+  function walk(route, keyStart) {
+    const token = tokens[index++];
+    if (token[0] === '{') {
+      while (tokens[index][0] !== '}') {
+        const key = tokens[index++];
+        index += 1;
+        walk([...route, JSON.parse(key[0])], key.index);
+        if (tokens[index][0] === ',') index += 1;
+      }
+      index += 1;
+    } else if (token[0] === '[') {
+      let item = 0;
+      while (tokens[index][0] !== ']') {
+        walk([...route, item++]);
+        if (tokens[index][0] === ',') index += 1;
+      }
+      index += 1;
+    } else if (token[0].startsWith('"') && dependencyMap(route.slice(0, -1))
+      && sensitiveKey(String(route.at(-1))) && semver.test(JSON.parse(token[0]))) {
+      spans.push([keyStart, token.index + token[0].length]);
+    }
+  }
+  walk([]);
+  // Mask only parsed dependency entries, preserving duplicate and unrelated keys.
+  for (const [start, end] of spans.reverse()) text = text.slice(0, start) + text.slice(start, end).replace(/[^\r\n]/g, ' ') + text.slice(end);
+  return text;
+}
+
+function hasCredentialAssignment(path, source) {
+  const text = withoutDependencyVersions(path, source);
   const quoted = /(?:["']([A-Za-z_][\w.-]*)["']|\b([A-Za-z_][\w.-]*))\s*[:=]\s*(?:"([^"\r\n]*)"|'([^'\r\n]*)'|`([^`\r\n]*)`)/g;
   for (const match of text.matchAll(quoted)) {
     if (sensitiveKey(match[1] ?? match[2]) && !placeholder(match[3] ?? match[4] ?? match[5])) return true;
   }
-  const environment = /^\s*(?:export\s+)?([A-Z_][A-Z0-9_]*)\s*=\s*([^\s#"'`][^\r\n]*)/gm;
+  const numeric = /(?:["']([A-Za-z_][\w.-]*)["']|\b([A-Za-z_][\w.-]*))\s*[:=]\s*(-?\d+(?:\.\d+)?)(?=[,\s;}])/g;
+  for (const match of text.matchAll(numeric)) {
+    if (sensitiveKey(match[1] ?? match[2])) return true;
+  }
+  const environment = /^[\t ]*(?:export[\t ]+)?([A-Z_][A-Z0-9_]*)[\t ]*=[\t ]*([^\s#"'`][^\r\n]*)/gm;
   for (const match of text.matchAll(environment)) {
     const value = match[2].replace(/\s+#.*$/, '').trim();
     if (sensitiveKey(match[1]) && !placeholder(value)) return true;
@@ -54,7 +98,7 @@ export function analyzeBlob(path, content, size = content.length) {
   if (/\b0x(?:[a-f\d]{40}|[a-f\d]{64}|[a-f\d]{128}|[a-f\d]{130})\b/i.test(text)) rules.add('literal-evm-address-key-or-signature');
   if (/-----BEGIN (?:[A-Z]+ )?PRIVATE KEY-----/.test(text)) rules.add('private-key-material');
   if (/\b(?:sk-(?:proj-)?[A-Za-z0-9_-]{16,}|xai-[A-Za-z0-9_-]{20,}|gh[pousr]_[A-Za-z0-9]{30,}|github_pat_[A-Za-z0-9_]{30,}|AKIA[A-Z0-9]{16})\b/.test(text)) rules.add('provider-credential-token');
-  if (hasCredentialAssignment(text)) rules.add('non-placeholder-credential-assignment');
+  if (hasCredentialAssignment(path, text)) rules.add('non-placeholder-credential-assignment');
   if (/https?:\/\/[^\s/"'<>]+:[^\s/"'<>]+@/i.test(text)
     || /https?:\/\/[^\s"'<>]+[?&](?:api[_-]?key|token|secret|password)=(?!<|\$\{)[A-Za-z0-9_%.-]{8,}/i.test(text)
     || /https?:\/\/[^\s/"'<>]*(?:infura\.io|alchemy\.com)\/v[23]\/[A-Za-z0-9_-]{12,}/i.test(text)) rules.add('credential-bearing-url');
@@ -113,11 +157,12 @@ export function scanRepository(cwd, mode = 'staged') {
       add('file-size-limit');
       continue;
     }
-    if (!contentRules.has(entry.oid)) {
+    const cacheKey = `${entry.oid}\0${entry.path}`;
+    if (!contentRules.has(cacheKey)) {
       const blob = git(cwd, ['cat-file', 'blob', entry.oid]);
-      contentRules.set(entry.oid, analyzeBlob('package-lock.json', blob, size));
+      contentRules.set(cacheKey, analyzeBlob(entry.path, blob, size));
     }
-    for (const rule of contentRules.get(entry.oid)) add(rule);
+    for (const rule of contentRules.get(cacheKey)) add(rule);
   }
   return { files: entries.length, findings: [...findings.values()] };
 }
