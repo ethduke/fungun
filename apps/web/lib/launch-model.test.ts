@@ -5,6 +5,7 @@ import {
   DEFAULT_DESTINATIONS,
   DEFAULT_CHAIN_ID,
   IMAGE_LIMIT,
+  draftStatus,
   imageFileError,
   imageKind,
   selectChain,
@@ -61,6 +62,46 @@ await test('valid Long draft and empty draft requirements', () => {
     'name',
     'ticker',
   ]);
+});
+
+await test('inline launch status follows draft edits without a review snapshot', () => {
+  const status = (changes = {}) =>
+    draftStatus(
+      validateDraft({ ...draft, ...changes }, destinations(), 4663),
+      false,
+    );
+  assert.equal(status(), 'complete');
+  assert.equal(status({ ticker: 'MOON1' }), 'incomplete');
+  assert.equal(status({ name: '' }), 'incomplete');
+  assert.equal(status({ hasImage: false }), 'incomplete');
+  assert.equal(status({ ticker: 'SUN' }), 'complete');
+});
+
+await test('pending image replacement takes precedence over an otherwise complete draft', () => {
+  const errors = validateDraft(draft, destinations(), 4663);
+  assert.equal(draftStatus(errors, true), 'checking');
+  assert.equal(draftStatus({ image: 'Add a coin image.' }, true), 'checking');
+  assert.equal(draftStatus(errors, false), 'complete');
+  assert.equal(
+    draftStatus({ image: 'Add a coin image.' }, false),
+    'incomplete',
+  );
+});
+
+await test('inline launch status revalidates chain and launchpad selections', () => {
+  const base = selectChain(destinations(), 8453);
+  assert.equal(
+    draftStatus(validateDraft(draft, base, 8453), false),
+    'complete',
+  );
+  assert.equal(
+    draftStatus(validateDraft(draft, base, 4663), false),
+    'incomplete',
+  );
+  assert.equal(
+    draftStatus(validateDraft(draft, [], 8453), false),
+    'incomplete',
+  );
 });
 
 await test('name and ticker limits use characters, not bytes', () => {

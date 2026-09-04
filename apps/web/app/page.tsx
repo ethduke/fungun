@@ -8,7 +8,6 @@ import {
   Check,
   ChevronDown,
   ImagePlus,
-  Info,
   LockKeyhole,
   ShieldCheck,
   Sparkles,
@@ -18,7 +17,6 @@ import {
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Textarea } from '@/components/ui/textarea';
-import { Checkbox } from '@/components/ui/checkbox';
 import { RadioGroup, RadioGroupItem } from '@/components/ui/radio-group';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import {
@@ -34,15 +32,14 @@ import {
   DialogTitle,
 } from '@/components/ui/dialog';
 import { LaunchpadCard } from '@/components/launchpad-card';
+import { LaunchSection } from '@/components/launch-section';
 import {
   autofillCoinName,
-  chainName,
   DEFAULT_CHAIN_ID,
   DEFAULT_DESTINATIONS,
   IMAGE_LIMIT,
   imageFileError,
   imageKind,
-  pairingName,
   selectChain,
   supportsChain,
   validateDraft,
@@ -68,9 +65,7 @@ export default function Home() {
   const [imageError, setImageError] = useState('');
   const [imagePending, setImagePending] = useState(false);
   const [dragging, setDragging] = useState(false);
-  const [attempted, setAttempted] = useState(false);
   const [tickerNotice, setTickerNotice] = useState(false);
-  const [reviewOpen, setReviewOpen] = useState(false);
   const [generationOpen, setGenerationOpen] = useState(false);
   const [walletStarted, setWalletStarted] = useState(false);
   const fileInput = useRef<HTMLInputElement>(null);
@@ -177,13 +172,7 @@ export default function Home() {
       chainId: nextChainId,
       destinations: selectChain(current.destinations, nextChainId),
     }));
-    setReviewOpen(false);
     setTickerNotice(false);
-  }
-
-  function review() {
-    setAttempted(true);
-    if (!Object.keys(errors).length && !imagePending) setReviewOpen(true);
   }
 
   return (
@@ -249,13 +238,7 @@ export default function Home() {
             </span>
           </div>
         </div>
-        <form
-          onSubmit={(event) => {
-            event.preventDefault();
-            review();
-          }}
-          noValidate
-        >
+        <form onSubmit={(event) => event.preventDefault()} noValidate>
           <div className="composer-grid">
             <section
               className="composer-panel"
@@ -359,9 +342,9 @@ export default function Home() {
                       </Button>
                     </div>
                   )}
-                  {(imageError || (attempted && errors.image)) && (
+                  {imageError && (
                     <p role="alert" className="field-error">
-                      {imageError || errors.image}
+                      {imageError}
                     </p>
                   )}
                 </TabsContent>
@@ -409,12 +392,12 @@ export default function Home() {
                     autoComplete="off"
                     onChange={(event) => setName(event.target.value)}
                     onBlur={() => setName((value) => value.trim())}
-                    aria-invalid={attempted && !!errors.name}
+                    aria-invalid={!!name && !!errors.name}
                     aria-describedby={
-                      attempted && errors.name ? 'name-error' : undefined
+                      name && errors.name ? 'name-error' : undefined
                     }
                   />
-                  {attempted && errors.name && (
+                  {name && errors.name && (
                     <p id="name-error" className="field-error">
                       {errors.name}
                     </p>
@@ -441,15 +424,13 @@ export default function Home() {
                         setTicker(nextTicker);
                         setTickerNotice(false);
                       }}
-                      aria-invalid={(attempted || !!ticker) && !!errors.ticker}
+                      aria-invalid={!!ticker && !!errors.ticker}
                       aria-describedby={
-                        (attempted || ticker) && errors.ticker
-                          ? 'ticker-error'
-                          : undefined
+                        ticker && errors.ticker ? 'ticker-error' : undefined
                       }
                     />
                   </div>
-                  {(attempted || ticker) && errors.ticker && (
+                  {ticker && errors.ticker && (
                     <p id="ticker-error" className="field-error">
                       {errors.ticker}
                     </p>
@@ -540,41 +521,22 @@ export default function Home() {
                     onChange={updateDestination}
                   />
                 ))}
-              {attempted && errors.destinations && (
+              {errors.destinations && (
                 <p role="alert" className="field-error">
                   {errors.destinations}
                 </p>
               )}
             </section>
           </div>
-          <div className="review-bar">
-            <div>
-              <span className="eyebrow">ESTIMATED TOTAL</span>
-              <div className="total-price">
-                — <span>Deployment + network fees</span>
-              </div>
-            </div>
-            <span className="review-status">
-              {active.length
-                ? `${active.length} separate ${active.length === 1 ? 'deployment' : 'deployments'}`
-                : 'No launchpads selected'}
-              <small>Live quote not connected</small>
-            </span>
-            <Button
-              type="submit"
-              className="review-button"
-              disabled={imagePending}
-            >
-              Review launch
-              <ArrowRight size={18} />
-            </Button>
-          </div>
-          {attempted && Object.keys(errors).length > 0 && (
-            <p role="alert" className="form-error">
-              Add a valid image, name, ticker and launchpad selection to review
-              your draft.
-            </p>
-          )}
+          <LaunchSection
+            name={name}
+            ticker={ticker}
+            image={image}
+            imagePending={imagePending}
+            errors={errors}
+            destinations={active}
+            onChange={updateDestination}
+          />
         </form>
         <footer className="workspace-footer">
           <span>YOUR IDEA. YOUR WALLET. YOUR LAUNCH.</span>
@@ -583,101 +545,6 @@ export default function Home() {
           </span>
         </footer>
       </main>
-      <Dialog open={reviewOpen} onOpenChange={setReviewOpen}>
-        <DialogContent className="app-dialog review-dialog">
-          <DialogHeader>
-            <p className="eyebrow">ONE LAST LOOK</p>
-            <DialogTitle>Review your launch</DialogTitle>
-            <DialogDescription>
-              This is a draft preview, not a transaction. Fees, ticker
-              availability and pair eligibility are not verified.
-            </DialogDescription>
-          </DialogHeader>
-          <div className="review-identity">
-            {image && (
-              <Image
-                unoptimized
-                width={49}
-                height={49}
-                src={image.url}
-                alt="Coin preview"
-              />
-            )}
-            <div>
-              <strong>{name.trim()}</strong>
-              <span>${ticker}</span>
-            </div>
-            <span className="preview-label">Draft</span>
-          </div>
-          <div className="review-destinations">
-            {active.map((pad) => (
-              <div key={pad.id} className="review-destination">
-                <div>
-                  <strong>{pad.id === 'long' ? 'Long' : 'O1'}</strong>
-                  <span>{chainName(pad.chainId)}</span>
-                </div>
-                <dl>
-                  <div>
-                    <dt>Pairing</dt>
-                    <dd>
-                      {pairingName(pad.pairId)}
-                      {pad.route === 'rwa' ? ' · sample' : ''}
-                    </dd>
-                  </div>
-                  <div>
-                    <dt>Metadata</dt>
-                    <dd>
-                      {pad.id === 'o1' ? (
-                        <label
-                          className="metadata-option"
-                          htmlFor="o1-editable-metadata"
-                        >
-                          <Checkbox
-                            id="o1-editable-metadata"
-                            checked={pad.editableMetadata}
-                            onCheckedChange={(editableMetadata) =>
-                              updateDestination({ ...pad, editableMetadata })
-                            }
-                          />
-                          Allow updates
-                        </label>
-                      ) : (
-                        'Immutable'
-                      )}
-                    </dd>
-                  </div>
-                  <div>
-                    <dt>Deployment fee</dt>
-                    <dd>Not quoted</dd>
-                  </div>
-                  <div>
-                    <dt>Network gas</dt>
-                    <dd>Not estimated</dd>
-                  </div>
-                  <div>
-                    <dt>Ticker</dt>
-                    <dd>Not checked</dd>
-                  </div>
-                </dl>
-              </div>
-            ))}
-          </div>
-          {active.length > 1 && (
-            <p className="notice">
-              <Info size={15} />
-              These are separate token deployments sharing your branding. One
-              can succeed while another fails.
-            </p>
-          )}
-          <Button className="disabled-launch" disabled>
-            <LockKeyhole size={16} />
-            Live launch is not enabled
-          </Button>
-          <Button variant="outline" onClick={() => setReviewOpen(false)}>
-            Back to editing
-          </Button>
-        </DialogContent>
-      </Dialog>
       <Dialog open={generationOpen} onOpenChange={setGenerationOpen}>
         <DialogContent className="app-dialog">
           <DialogHeader>

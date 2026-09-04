@@ -20,7 +20,8 @@ installed to test wallet connection; embedded browsers may have no injected wall
 - Choose one chain: Robinhood (default) offers Long and O1; Base offers O1.
 - Select launchpads and pairings. Changing chains clears incompatible selections.
 - Choose clearly labeled sample stock symbols; these are not a live RWA catalog.
-- Review independent deployment rows; O1's metadata-update toggle is in review.
+- The inline launch section updates coin details, destinations and draft validation as you edit.
+- Image checks show an inline loading state; O1's metadata-update toggle stays in the launch section.
 - Open the Grok/x402 flow preview; no image generation or payment occurs.
 - Explicitly connect/disconnect a discovered EIP-6963 wallet using wagmi/viem.
 

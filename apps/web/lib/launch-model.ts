@@ -140,6 +140,14 @@ export function validateDraft(
   return errors;
 }
 
+export function draftStatus(
+  errors: Record<string, string>,
+  imagePending: boolean,
+) {
+  if (imagePending) return 'checking';
+  return Object.keys(errors).length ? 'incomplete' : 'complete';
+}
+
 export function imageKind(bytes: Uint8Array): string | null {
   const starts = (...values: number[]) =>
     values.every((value, i) => bytes[i] === value);
