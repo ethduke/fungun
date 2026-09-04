@@ -8,6 +8,7 @@ import {
   type EIP1193Provider,
   type Hash,
 } from 'viem';
+import { base, robinhood } from 'viem/chains';
 import {
   claimAbi,
   legacyClaimAbi,
@@ -18,6 +19,7 @@ import {
   acknowledgeClaim,
   checkWalletClaim,
   getClaims,
+  ensureClaimChain,
   receiptPayouts,
   sendWalletClaim,
 } from './claim-wallet.ts';
@@ -268,7 +270,9 @@ await test('wallet operations are explicit, never retried, identity-bound and re
   currentChain = 8453;
   await assert.rejects(
     sendWalletClaim(provider, { ...quote(), expiresAt: -1 }),
-    { code: 'quote_expired' },
+    {
+      code: 'quote_expired',
+    },
   );
   assert.equal(sends, 1);
   mode = 'success';
@@ -293,4 +297,250 @@ await test('wallet operations are explicit, never retried, identity-bound and re
     code: 'pending',
   });
   assert.equal(sends, 3);
+});
+
+await test('claim chain selection leaves the matching wallet alone and switches mismatched wallets once', async () => {
+  for (const chain of [robinhood, base]) {
+    for (const startsOnTarget of [true, false]) {
+      let chainId = startsOnTarget ? chain.id : 1;
+      const methods: string[] = [];
+      const provider = {
+        request: async ({
+          method,
+          params,
+        }: {
+          method: string;
+          params?: unknown[];
+        }) => {
+          methods.push(method);
+          if (method === 'eth_accounts') return [owner.toUpperCase()];
+          if (method === 'eth_chainId') return toHex(chainId);
+          assert.equal(method, 'wallet_switchEthereumChain');
+          assert.deepEqual(params, [{ chainId: toHex(chain.id) }]);
+          chainId = chain.id;
+          return null;
+        },
+      } as EIP1193Provider;
+      await ensureClaimChain(provider, owner, chain.id);
+      assert.deepEqual(
+        methods,
+        startsOnTarget
+          ? ['eth_accounts', 'eth_chainId']
+          : [
+              'eth_accounts',
+              'eth_chainId',
+              'wallet_switchEthereumChain',
+              'eth_accounts',
+              'eth_chainId',
+            ],
+      );
+    }
+  }
+});
+
+await test('claim chain selection rejects wrong accounts, unsupported chains and ineffective switches', async () => {
+  let currentOwner = addr('b');
+  const methods: string[] = [];
+  const provider = {
+    request: async ({ method }: { method: string }) => {
+      methods.push(method);
+      if (method === 'eth_accounts') return [currentOwner];
+      if (method === 'eth_chainId') return toHex(1);
+      assert.equal(method, 'wallet_switchEthereumChain');
+      return null;
+    },
+  } as EIP1193Provider;
+  await assert.rejects(ensureClaimChain(provider, owner, 1), {
+    code: 'invalid_request',
+  });
+  assert.deepEqual(methods, []);
+  await assert.rejects(ensureClaimChain(provider, owner, robinhood.id), {
+    code: 'wrong_account',
+  });
+  assert.deepEqual(methods, ['eth_accounts']);
+  methods.length = 0;
+  currentOwner = owner;
+  await assert.rejects(ensureClaimChain(provider, owner, robinhood.id), {
+    code: 'wrong_chain',
+  });
+  assert.deepEqual(methods, [
+    'eth_accounts',
+    'eth_chainId',
+    'wallet_switchEthereumChain',
+    'eth_accounts',
+    'eth_chainId',
+  ]);
+});
+
+await test('claim chain selection propagates wallet rejection without retrying or adding a network', async () => {
+  for (const error of [
+    { code: 4001 },
+    { cause: { code: 4001 } },
+    { code: -32002 },
+    { code: -32603 },
+  ]) {
+    const methods: string[] = [];
+    const provider = {
+      request: async ({ method }: { method: string }) => {
+        methods.push(method);
+        if (method === 'eth_accounts') return [owner];
+        if (method === 'eth_chainId') return toHex(1);
+        assert.equal(method, 'wallet_switchEthereumChain');
+        throw error;
+      },
+    } as EIP1193Provider;
+    await assert.rejects(
+      ensureClaimChain(provider, owner, robinhood.id),
+      (caught) => caught === error,
+    );
+    assert.deepEqual(methods, [
+      'eth_accounts',
+      'eth_chainId',
+      'wallet_switchEthereumChain',
+    ]);
+  }
+});
+
+await test('an unknown claim network is added from the bundled chain metadata then verified', async () => {
+  for (const chain of [robinhood, base]) {
+    for (const addAlsoSwitches of [true, false]) {
+      let chainId = 1;
+      let added = false;
+      const methods: string[] = [];
+      const provider = {
+        request: async ({
+          method,
+          params,
+        }: {
+          method: string;
+          params?: unknown[];
+        }) => {
+          methods.push(method);
+          if (method === 'eth_accounts') return [owner];
+          if (method === 'eth_chainId') return toHex(chainId);
+          if (method === 'wallet_switchEthereumChain') {
+            assert.deepEqual(params, [{ chainId: toHex(chain.id) }]);
+            if (!added) throw { cause: { code: 4902 } };
+            chainId = chain.id;
+            return null;
+          }
+          assert.equal(method, 'wallet_addEthereumChain');
+          assert.deepEqual(params, [
+            {
+              chainId: toHex(chain.id),
+              chainName: chain.name,
+              nativeCurrency: chain.nativeCurrency,
+              rpcUrls: [...chain.rpcUrls.default.http],
+              blockExplorerUrls: [chain.blockExplorers.default.url],
+            },
+          ]);
+          added = true;
+          if (addAlsoSwitches) chainId = chain.id;
+          return null;
+        },
+      } as EIP1193Provider;
+      await ensureClaimChain(provider, owner, chain.id);
+      assert.equal(
+        methods.filter((method) => method === 'wallet_addEthereumChain').length,
+        1,
+      );
+      assert.equal(
+        methods.filter((method) => method === 'wallet_switchEthereumChain')
+          .length,
+        addAlsoSwitches ? 1 : 2,
+      );
+      assert.deepEqual(methods.slice(-2), ['eth_accounts', 'eth_chainId']);
+    }
+  }
+});
+
+await test('claim chain selection stops if the account changes while switching or adding', async () => {
+  for (const changedDuring of ['switch', 'unknown', 'add']) {
+    let currentOwner = owner;
+    const methods: string[] = [];
+    const provider = {
+      request: async ({ method }: { method: string }) => {
+        methods.push(method);
+        if (method === 'eth_accounts') return [currentOwner];
+        if (method === 'eth_chainId') return toHex(1);
+        if (method === 'wallet_switchEthereumChain') {
+          if (changedDuring !== 'add') currentOwner = addr('b');
+          if (changedDuring !== 'switch') throw { code: 4902 };
+          return null;
+        }
+        assert.equal(method, 'wallet_addEthereumChain');
+        currentOwner = addr('b');
+        return null;
+      },
+    } as EIP1193Provider;
+    await assert.rejects(ensureClaimChain(provider, owner, robinhood.id), {
+      code: 'wrong_account',
+    });
+    assert.equal(
+      methods.filter((method) => method === 'wallet_switchEthereumChain')
+        .length,
+      1,
+    );
+    assert.equal(
+      methods.filter((method) => method === 'wallet_addEthereumChain').length,
+      changedDuring === 'add' ? 1 : 0,
+    );
+    assert.equal(methods.at(-1), 'eth_accounts');
+  }
+});
+
+await test('cancelled claim chain selection never issues a subsequent wallet request', async () => {
+  for (const cancelAfterRequest of [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10]) {
+    let current = cancelAfterRequest !== 0;
+    let added = false;
+    let chainId = 1;
+    const methods: string[] = [];
+    const provider = {
+      request: async ({ method }: { method: string }) => {
+        methods.push(method);
+        if (methods.length === cancelAfterRequest) current = false;
+        if (method === 'eth_accounts') return [owner];
+        if (method === 'eth_chainId') return toHex(chainId);
+        if (method === 'wallet_switchEthereumChain') {
+          if (!added) throw { code: 4902 };
+          chainId = robinhood.id;
+          return null;
+        }
+        assert.equal(method, 'wallet_addEthereumChain');
+        added = true;
+        return null;
+      },
+    } as EIP1193Provider;
+    await assert.rejects(
+      ensureClaimChain(provider, owner, robinhood.id, () => current),
+      { code: 'cancelled' },
+    );
+    assert.equal(methods.length, cancelAfterRequest);
+  }
+});
+
+await test('declining an unknown claim network stops after its single add request', async () => {
+  const methods: string[] = [];
+  const rejection = { code: 4001 };
+  const provider = {
+    request: async ({ method }: { method: string }) => {
+      methods.push(method);
+      if (method === 'eth_accounts') return [owner];
+      if (method === 'eth_chainId') return toHex(1);
+      if (method === 'wallet_switchEthereumChain') throw { code: 4902 };
+      assert.equal(method, 'wallet_addEthereumChain');
+      throw rejection;
+    },
+  } as EIP1193Provider;
+  await assert.rejects(
+    ensureClaimChain(provider, owner, robinhood.id),
+    (caught) => caught === rejection,
+  );
+  assert.deepEqual(methods, [
+    'eth_accounts',
+    'eth_chainId',
+    'wallet_switchEthereumChain',
+    'eth_accounts',
+    'wallet_addEthereumChain',
+  ]);
 });

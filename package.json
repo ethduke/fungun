@@ -12,7 +12,7 @@
     "typecheck": "npm --prefix apps/web run typecheck",
     "runtime:status": "node --env-file-if-exists=.env scripts/runtime-status.mjs",
     "verify:catalog:local": "node --experimental-strip-types scripts/verify-local-catalog.mjs",
-    "test": "node --experimental-strip-types --test scripts/*.test.mjs apps/web/lib/launch-model.test.ts apps/web/lib/launch-cost.test.ts apps/web/lib/user-error.test.ts apps/web/lib/preview-web3.test.ts apps/web/lib/fees-model.test.ts apps/web/lib/fee-service.test.ts apps/web/lib/claim-wallet.test.ts apps/web/lib/claim-queue.test.ts apps/web/lib/read-service.test.ts apps/web/lib/read-proxy.test.ts apps/api/src/*.test.mjs",
+    "test": "node --experimental-strip-types --test scripts/*.test.mjs apps/web/lib/launch-model.test.ts apps/web/lib/launch-cost.test.ts apps/web/lib/user-error.test.ts apps/web/lib/preview-web3.test.ts apps/web/lib/fees-model.test.ts apps/web/lib/fee-service.test.ts apps/web/lib/fee-usd.test.ts apps/web/lib/claim-wallet.test.ts apps/web/lib/claim-queue.test.ts apps/web/lib/read-service.test.ts apps/web/lib/read-proxy.test.ts apps/api/src/*.test.mjs",
     "check:staged": "node scripts/check-repository.mjs",
     "check:tracked": "node scripts/check-repository.mjs --tracked",
     "check:history": "node scripts/check-repository.mjs --history"

@@ -3,6 +3,7 @@ import { encodeFunctionData, serializeTransaction, zeroAddress } from "viem";
 import { ServiceError } from "./errors.mjs";
 import { ReadCache } from "./upstream.mjs";
 import { FeeRpc, rpcNumber } from "./fee-rpc.mjs";
+import { FeeUsd } from "./fee-usd.mjs";
 import { discoverLongFeePools } from "./long-fee-discovery.mjs";
 import {
   beneficiaryFees,
@@ -132,6 +133,7 @@ export class Fees {
     this.upstream = upstream;
     this.now = now;
     this.rpc = rpc;
+    this.usd = new FeeUsd(upstream, now);
     this.cache = new ReadCache(now, 64);
     this.preflights = new ReadCache(now, 32);
     this.handles = new Map();
@@ -571,6 +573,7 @@ export class Fees {
       const estimatedWei = gas * gasPrice + l1 + operator;
       const budgetWei = gasLimit * gasPrice + (l1 * 120n + 99n) / 100n + operatorBudget;
       if (rpcNumber(balanceHex) < budgetWei) throw new ServiceError("insufficient_funds", 409);
+      const gasUsd = await this.usd.estimate(estimatedWei);
       return {
         positionId,
         kind: position.kind,
@@ -585,6 +588,7 @@ export class Fees {
         gas: gasLimit.toString(),
         gasPrice: gasPrice.toString(),
         estimatedWei: estimatedWei.toString(),
+        gasUsd,
         budgetWei: budgetWei.toString(),
         l1FeeWei: l1.toString(),
         operatorFeeWei: operator.toString(),

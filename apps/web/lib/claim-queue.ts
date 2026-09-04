@@ -57,8 +57,8 @@ export function queueClaimAttempt(
   return { ...queue, status: 'awaiting', attempt: quote };
 }
 
-// Reconciliation never prepares or sends a transaction. The next item always
-// needs another explicit review and wallet confirmation from the user.
+// Reconciliation never sends a transaction. The next item can be prepared by
+// the page after receipt verification and still needs its own wallet confirmation.
 export function reconcileClaimQueue(
   queue: ClaimQueue,
   activities: ClaimActivity[],

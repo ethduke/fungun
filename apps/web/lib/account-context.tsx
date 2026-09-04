@@ -6,6 +6,7 @@ import type { ClaimQuote } from './fee-service';
 export type ConnectedAccount = {
   address?: string;
   chainId?: number;
+  ensureClaimChain?: (address: string, chainId: number, isCurrent: () => boolean) => Promise<void>;
   sendClaim?: (quote: ClaimQuote) => Promise<string>;
   checkClaim?: (positionId: string) => Promise<void>;
 };

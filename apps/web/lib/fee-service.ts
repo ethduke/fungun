@@ -3,6 +3,7 @@ import type { ChainId, LaunchpadId as PadId } from './launch-model';
 import { supportsChain } from './launch-model.ts';
 import { AppError, retrySeconds } from './user-error.ts';
 import { localExpiry } from './read-service.ts';
+import { parseGasUsd, type GasUsdEstimate } from './fee-usd.ts';
 
 export type FeePayout = {
   asset: string;
@@ -57,6 +58,7 @@ export type ClaimQuote = {
   gas: string;
   gasPrice: string;
   estimatedWei: string;
+  gasUsd?: GasUsdEstimate | null;
   budgetWei: string;
   l1FeeWei: string;
   operatorFeeWei: string;
@@ -144,7 +146,13 @@ async function request(kind: 'fees' | 'claim-prepare', input: object) {
     }
     const value = (await response.json().catch(() => {
       throw new AppError('invalid_response');
-    })) as { error?: string; serverTime: number; expiresAt: number };
+    })) as {
+      error?: string;
+      serverTime: number;
+      expiresAt: number;
+      gasUsd?: unknown;
+      estimatedWei: string;
+    };
     if (!response.ok) {
       const safeCodes = [
         'not_configured',
@@ -168,6 +176,14 @@ async function request(kind: 'fees' | 'claim-prepare', input: object) {
     }
     if (!value || !Number.isFinite(value.serverTime))
       throw new AppError('invalid_response');
+    if (kind === 'claim-prepare')
+      value.gasUsd = parseGasUsd(
+        value.gasUsd,
+        value.estimatedWei,
+        value.serverTime,
+        performance.now(),
+        performance.now() - start,
+      );
     value.expiresAt = localExpiry(
       value.expiresAt,
       value.serverTime,

@@ -135,7 +135,7 @@ await test('does not advance on submitted transactions, unrelated receipts, or o
   );
 });
 
-await test('only a confirmed current payout unlocks a fresh explicit review for the next item', () => {
+await test('only a confirmed current payout unlocks preparation of the next item', () => {
   const second = source('b'.repeat(64));
   const queue = queueClaimAttempt(startClaimQueue([source(), second]), quote());
   const afterFirst = reconcileClaimQueue(queue, [

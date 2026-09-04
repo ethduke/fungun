@@ -17,7 +17,7 @@ import {
 } from './fee-service.ts';
 import { AppError } from './user-error.ts';
 
-function wasRejected(error: unknown) {
+function hasWalletError(error: unknown, code: number, name?: string) {
   const seen = new Set<unknown>();
   let current = error;
   for (
@@ -31,11 +31,78 @@ function wasRejected(error: unknown) {
       name?: unknown;
       cause?: unknown;
     };
-    if (entry.code === 4001 || entry.name === 'UserRejectedRequestError')
-      return true;
+    if (entry.code === code || (name && entry.name === name)) return true;
     current = entry.cause;
   }
   return false;
+}
+
+function wasRejected(error: unknown) {
+  return hasWalletError(error, 4001, 'UserRejectedRequestError');
+}
+
+export async function ensureClaimChain(
+  provider: EIP1193Provider,
+  address: string,
+  chainId: number,
+  isCurrent: () => boolean = () => true,
+): Promise<void> {
+  const chain =
+    chainId === robinhood.id ? robinhood : chainId === base.id ? base : null;
+  if (!chain) throw new AppError('invalid_request');
+  const assertCurrent = () => {
+    if (!isCurrent()) throw new AppError('cancelled');
+  };
+  const request = async <T>(send: () => Promise<T>): Promise<T> => {
+    assertCurrent();
+    const value = await send();
+    assertCurrent();
+    return value;
+  };
+  const checkAccount = async () => {
+    const accounts = await request(() =>
+      provider.request({ method: 'eth_accounts' }),
+    );
+    if (accounts[0]?.toLowerCase() !== address.toLowerCase())
+      throw new AppError('wrong_account');
+  };
+  const readChain = async () =>
+    BigInt(await request(() => provider.request({ method: 'eth_chainId' })));
+  const switchChain = () =>
+    request(() =>
+      provider.request({
+        method: 'wallet_switchEthereumChain',
+        params: [{ chainId: toHex(chain.id) }],
+      }),
+    );
+  await checkAccount();
+  if ((await readChain()) === BigInt(chain.id)) return;
+  try {
+    await switchChain();
+  } catch (error) {
+    assertCurrent();
+    if (wasRejected(error) || !hasWalletError(error, 4902)) throw error;
+    await checkAccount();
+    await request(() =>
+      provider.request({
+        method: 'wallet_addEthereumChain',
+        params: [
+          {
+            chainId: toHex(chain.id),
+            chainName: chain.name,
+            nativeCurrency: chain.nativeCurrency,
+            rpcUrls: [...chain.rpcUrls.default.http],
+            blockExplorerUrls: [chain.blockExplorers.default.url],
+          },
+        ],
+      }),
+    );
+    await checkAccount();
+    if ((await readChain()) !== BigInt(chain.id)) await switchChain();
+  }
+  await checkAccount();
+  if ((await readChain()) !== BigInt(chain.id))
+    throw new AppError('wrong_chain');
 }
 
 export type ClaimActivity = {
@@ -197,7 +264,8 @@ export function receiptPayouts(
       event.args.recipient.toLowerCase() === quote.address.toLowerCase() &&
       (quote.escrowVersion === 'legacy' ||
         ('destination' in event.args &&
-          event.args.destination.toLowerCase() === quote.address.toLowerCase())) &&
+          event.args.destination.toLowerCase() ===
+            quote.address.toLowerCase())) &&
       event.args.currency.toLowerCase() === quote.payouts[0].asset.toLowerCase()
     )
       amounts[0] += event.args.amount;

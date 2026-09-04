@@ -63,14 +63,15 @@ The source cards report coverage. A balance of an ordinary held token does not
 establish a creator-fee entitlement.
 
 Claim review rechecks the connected owner, chain, contracts, positive fees, simulation
-and ETH for gas. It displays a short-lived ETH estimate and warns when gas is high;
-USD is unavailable without a fresh reference price. Only a separate explicit user
+and ETH for gas. Starting a claim requests its wallet network automatically.
+The combined claim panel displays gas in ETH and a Coinbase ETH/USD estimate;
+missing or stale prices do not prevent claims. Only a separate explicit user
 confirmation opens the wallet. No approvals, recipient redirects or native claim
 payments are requested. Do not initiate a financial action without explicit user intent.
 Check receipt is manual and verifies payout events, not merely successful status.
-Claim all queues eligible discovered positions and requires a fresh review and
-explicit wallet confirmation for each transaction. Only a confirmed payout
-unlocks the next review; rejected, failed or uncertain requests stop the queue.
+Claim all queues eligible discovered positions and requires explicit wallet
+confirmation for each transaction, refreshing expired estimates on confirmation.
+Only a confirmed payout prepares the next claim; rejected, failed or uncertain requests stop the queue.
 Never retry an uncertain claim automatically. Check wallet activity before acknowledging
 uncertainty or reloading; the session guard is memory-only and does not span tabs.
 

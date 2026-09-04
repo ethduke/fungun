@@ -28,9 +28,9 @@ discards old work and clears displayed fees.
   across launches; they cannot be labeled as fees owed by an individual launched coin.
   Owning an ERC-20 balance does not itself confer creator or beneficiary fees.
 
-Each launchpad's Claim all queues its eligible discovered positions, with one explicit review
-and wallet confirmation per transaction. A matching receipt payout unlocks the
-next review. Rejected, reverted or uncertain requests stop the queue. Confirmed
+Each launchpad's Claim all queues its eligible discovered positions and prepares
+the first claim. Each transaction requires wallet confirmation. A matching receipt
+payout prepares the next claim. Rejected, reverted or uncertain requests stop the queue. Confirmed
 positions stay excluded until Refresh; changing networks retains the queue,
 while switching accounts or disconnecting clears it. Claim all never promises
 coverage of undiscovered pages, unsupported protocols or separate hook payouts.
@@ -145,20 +145,28 @@ Long and Longbow call only `collectFees(poolId)` directly from the beneficiary w
 uses `claimFor(owner,currency)` for current escrows or `claim(owner,currency)` for
 explicitly configured legacy escrows, each paying that owner. All claims have zero
 native value and no token approval. Review shows gas in ETH, including Base L1/operator
-fees, with a 20% gas-limit buffer and a high-gas warning at 0.01 ETH. USD remains
-explicitly unavailable without a live reference price. Buffers are not price caps.
+fees, with a 20% gas-limit buffer and a high-gas warning at 0.01 ETH. Gas USD uses
+a live Coinbase ETH/USD reference, cached for up to sixty seconds. See
+[gas USD estimates](fee-usd.md) for freshness and quota details. Missing prices
+do not block claims. Buffers are not price caps.
 The wallet can change fees; the user must review its final transaction.
 
 Preflight results are coalesced for ten seconds and expire after twenty seconds.
-Only an explicit Confirm in wallet click can invoke one `eth_sendTransaction`.
-The current account and chain are rechecked. There are no write retries, namespace
-fallbacks, automatic network switches or signature transmission to the backend.
+Starting a claim requests the selected wallet network automatically, before gas
+review. Unsupported networks can be added from the pinned chain metadata. The
+wallet can require its own network approval. Queue and review share one panel.
+Only an explicit Confirm in wallet click can invoke one `eth_sendTransaction`;
+that click refreshes an expired quote before sending. The current account and
+chain are rechecked. There are no write retries, namespace fallbacks or signature
+transmission to the backend.
 Wallet rejection clears the request; ambiguous writes block further claims.
 After checking wallet activity, the user can acknowledge uncertainty, wait thirty
 seconds and prepare again. This acknowledgment never resends a transaction.
 
 Check receipt is manual, at most once per ten seconds through the connected wallet.
-Successful status alone does not prove a payout: Long requires a matching `Release`
+After a verified receipt, the next claim is prepared automatically and still
+requires its own wallet confirmation. Successful status alone does not prove a payout:
+Long and Longbow require a matching `Release`
 event, O1 a matching version-specific `Claimed` event with owner/currency and, for
 current escrows, the owner's destination. Actual receipt
 amounts may differ from the estimate. One inclusion is not guaranteed finality.

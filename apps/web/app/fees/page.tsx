@@ -43,6 +43,7 @@ import {
 import { formatEth, HIGH_NETWORK_FEE_WEI } from '@/lib/launch-cost';
 import { describeError } from '@/lib/user-error';
 import { disabledClaimMessage, unavailableFeeMessage } from '@/lib/fee-status';
+import { formatGasUsd } from '@/lib/fee-usd';
 
 type SourceResult = {
   key: string;
@@ -94,7 +95,6 @@ function ConnectedFees({ address }: { address: string }) {
   const [quote, setQuote] = useState<ClaimQuote | null>(null);
   const [reviewing, setReviewing] = useState<string | null>(null);
   const [claimError, setClaimError] = useState<string | null>(null);
-  const [clock, setClock] = useState(0);
   const [sending, setSending] = useState(false);
   const [checking, setChecking] = useState(false);
   const [queue, setQueue] = useState<ClaimQueue | null>(null);
@@ -138,26 +138,24 @@ function ConnectedFees({ address }: { address: string }) {
         activity.status,
       ),
     );
-  const expired = quote ? clock >= quote.expiresAt : false;
-  const scope = `${address}:${account.address}:${account.chainId}:${refresh}`;
-  const ownerScope = `${address}:${account.address}:${refresh}`;
-  const [observedOwnerScope, setObservedOwnerScope] = useState(ownerScope);
-  if (observedOwnerScope !== ownerScope) {
-    setObservedOwnerScope(ownerScope);
-    setQueue(null);
-    setClaimedIds([]);
-  }
+  const scope = `${address}:${account.address}:${refresh}`;
   const [observedScope, setObservedScope] = useState(scope);
   if (observedScope !== scope) {
     setObservedScope(scope);
+    setQueue(null);
+    setClaimedIds([]);
     setQuote(null);
     setReviewing(null);
     setClaimError(null);
   }
 
   useEffect(() => {
-    reviewSequence.current++;
-  }, [address, account.address, account.chainId, refresh]);
+    const sequence = reviewSequence;
+    sequence.current++;
+    return () => {
+      sequence.current++;
+    };
+  }, [address, account.address, refresh]);
 
   useEffect(() => {
     if (!address) return;
@@ -203,10 +201,14 @@ function ConnectedFees({ address }: { address: string }) {
   }, [address, refresh]);
 
   useEffect(() => {
-    if (!quote) return;
+    if (!quote?.gasUsd) return;
     const timer = setTimeout(
-      () => setClock(performance.now()),
-      Math.max(0, quote.expiresAt - performance.now()) + 5,
+      () => {
+        setQuote((current) =>
+          current === quote ? { ...current, gasUsd: null } : current,
+        );
+      },
+      Math.max(0, quote.gasUsd.expiresAt - localNow()) + 5,
     );
     return () => clearTimeout(timer);
   }, [quote]);
@@ -282,16 +284,33 @@ function ConnectedFees({ address }: { address: string }) {
   }
 
   async function review(source: FeeSource, position: FeePosition) {
-    if (!address || !ownerConnected || locked || reviewing || loadingMore)
+    if (
+      !address ||
+      !ownerConnected ||
+      !account.ensureClaimChain ||
+      sending ||
+      getClaims().some((activity) =>
+        ['wallet', 'submitted', 'uncertain', 'no_payout'].includes(
+          activity.status,
+        ),
+      ) ||
+      reviewing ||
+      loadingMore
+    )
       return;
     const sequence = ++reviewSequence.current;
     setReviewing(position.id);
     setQuote(null);
     setClaimError(null);
     try {
+      await account.ensureClaimChain(
+        address,
+        source.chainId,
+        () => sequence === reviewSequence.current,
+      );
+      if (sequence !== reviewSequence.current) return;
       const prepared = await prepareClaim(address, source, position);
       if (sequence === reviewSequence.current) {
-        setClock(localNow());
         setQuote(prepared);
       }
     } catch (error) {
@@ -304,26 +323,40 @@ function ConnectedFees({ address }: { address: string }) {
 
   async function claim() {
     if (
-      !quote ||
+      !currentQueue ||
+      !queueItem ||
+      currentQueue.status !== 'ready' ||
       !account.sendClaim ||
+      !account.ensureClaimChain ||
       !ownerConnected ||
-      quote.address.toLowerCase() !== address ||
-      account.chainId !== quote.chainId ||
       locked ||
-      localNow() >= quote.expiresAt
+      reviewing
     )
       return;
     setSending(true);
     setClaimError(null);
+    const sequence = ++reviewSequence.current;
     let submittedQueue: ClaimQueue | null = null;
     try {
-      if (currentQueue) {
-        submittedQueue = queueClaimAttempt(currentQueue, quote);
-        setQueue(submittedQueue);
-      }
-      await account.sendClaim(quote);
+      await account.ensureClaimChain(
+        address,
+        queueItem.source.chainId,
+        () => sequence === reviewSequence.current,
+      );
+      if (sequence !== reviewSequence.current) return;
+      // A wallet network prompt may outlive the estimate. Refresh it within the
+      // user's confirmation action, before opening the transaction in the wallet.
+      const prepared =
+        !quote || localNow() >= quote.expiresAt
+          ? await prepareClaim(address, queueItem.source, queueItem.position)
+          : quote;
+      if (sequence !== reviewSequence.current) return;
+      submittedQueue = queueClaimAttempt(currentQueue, prepared);
+      setQueue(submittedQueue);
+      await account.sendClaim(prepared);
       setQuote(null);
     } catch (error) {
+      if (sequence !== reviewSequence.current) return;
       if (submittedQueue)
         setQueue((previous) =>
           previous && previous.attempt === submittedQueue?.attempt
@@ -515,8 +548,9 @@ function ConnectedFees({ address }: { address: string }) {
       {currentQueue && (
         <section
           className="fee-review fee-queue"
-          aria-label="Claim all queue"
+          aria-label="Claim fees"
           aria-live="polite"
+          aria-busy={!!reviewing || sending}
         >
           <div className="fee-queue-heading">
             <h2>
@@ -525,160 +559,59 @@ function ConnectedFees({ address }: { address: string }) {
                 : `Claim ${queueLabel} fees`}
             </h2>
             <span>
-              {currentQueue.index} / {currentQueue.items.length} claims
-              confirmed
+              {currentQueue.index} / {currentQueue.items.length} confirmed
             </span>
           </div>
-          <p>
-            Confirm each transaction in your wallet, then check its receipt to
-            continue.
-          </p>
           {queueItem && (
+            <p className="fee-payout">
+              {(quote?.payouts ?? queueItem.position.payouts)
+                .map(payoutText)
+                .join(' + ')}
+            </p>
+          )}
+          {reviewing && <p>Preparing claim…</p>}
+          {quote && (
             <p>
-              Next: {label(queueItem.source.padId)} ·{' '}
-              {chainName(queueItem.source.chainId)} ·{' '}
-              {queueItem.position.payouts.map(payoutText).join(' + ')}
+              Estimated gas: <strong>{ethText(quote.estimatedWei)}</strong>
+              {' · '}
+              <span title="ETH/USD spot estimate from Coinbase">
+                {formatGasUsd(quote.gasUsd)}
+              </span>
             </p>
           )}
-          {currentQueue.status === 'awaiting' && (
-            <p>
-              Waiting for the current claim. Use Check receipt below after it is
-              included.
+          {quote && highGas(quote.estimatedWei) && (
+            <p role="alert" className="field-error">
+              High gas fee.
             </p>
           )}
-          {currentQueue.status === 'paused' && (
-            <p className="notice">
-              Queue stopped after an unsuccessful or uncertain request. Check
-              the claim status and your wallet activity below, then end this
-              queue and refresh fees before trying again.
-            </p>
-          )}
-          {currentQueue.status === 'complete' && (
-            <p>
-              Every eligible position in this queue has a recorded payout.
-              Refresh to check for newly accrued fees.
-            </p>
-          )}
-          {queueItem &&
-            currentQueue.status === 'ready' &&
-            account.chainId !== queueItem.source.chainId && (
-              <p className="notice">
-                Switch your wallet to {chainName(queueItem.source.chainId)} to
-                confirm this claim. The queue will keep your place.
-              </p>
-            )}
           <div className="fee-review-actions">
-            {queueItem &&
-              currentQueue.status === 'ready' &&
-              !reviewing &&
-              (!quote || expired) && (
-                <Button
-                  disabled={
-                    locked ||
-                    !ownerConnected ||
-                    !!reviewing ||
-                    (!!quote && !expired)
-                  }
-                  onClick={() => {
-                    setQueue(currentQueue);
-                    void review(queueItem.source, queueItem.position);
-                  }}
-                >
-                  {reviewing
-                    ? 'Checking…'
-                    : `Review claim ${currentQueue.index + 1} of ${currentQueue.items.length}`}
-                </Button>
-              )}
+            {queueItem && currentQueue.status === 'ready' && (
+              <Button
+                disabled={
+                  locked ||
+                  !ownerConnected ||
+                  !!reviewing ||
+                  !account.sendClaim ||
+                  !account.ensureClaimChain
+                }
+                onClick={() => {
+                  if (quote) void claim();
+                  else void review(queueItem.source, queueItem.position);
+                }}
+              >
+                {reviewing
+                  ? 'Preparing…'
+                  : sending
+                    ? 'Confirming…'
+                    : quote
+                      ? 'Confirm in wallet'
+                      : 'Try again'}
+              </Button>
+            )}
             <Button variant="outline" disabled={sending} onClick={cancelQueue}>
-              {currentQueue.status === 'complete' ? 'Done' : 'Cancel remaining'}
+              {currentQueue.status === 'complete' ? 'Done' : 'Cancel'}
             </Button>
           </div>
-        </section>
-      )}
-      {(quote || reviewing) && (
-        <section
-          className="fee-review"
-          aria-label="Review fee claim"
-          aria-busy={!!reviewing}
-        >
-          <h2>{reviewing ? 'Checking claim and gas…' : 'Review claim'}</h2>
-          {quote && (
-            <>
-              <p>
-                {label(quote.kind)} · {chainName(quote.chainId)} · to your
-                wallet <span title={quote.address}>{short(quote.address)}</span>
-              </p>
-              <p className="fee-payout">
-                {quote.payouts.map(payoutText).join(' + ')}
-              </p>
-              <p>
-                Estimated gas: <strong>{ethText(quote.estimatedWei)}</strong> ·
-                USD estimate unavailable
-              </p>
-              <p>
-                ETH balance needed with buffer: {ethText(quote.budgetWei)}. No
-                claim payment or token approval.
-              </p>
-              {quote.chainId === 8453 && (
-                <p>Includes Base execution, L1 data and operator fees.</p>
-              )}
-              <p>
-                Estimates can change before mining. Review the wallet’s final
-                fee; buffered costs are not a guaranteed cap.
-              </p>
-              {highGas(quote.estimatedWei) && (
-                <p role="alert" className="field-error">
-                  Gas is high: at least 0.01 ETH estimated. Consider waiting for
-                  lower fees.
-                </p>
-              )}
-              {quote.payouts.some(
-                (payout) =>
-                  /^0x0{40}$/i.test(payout.asset) &&
-                  BigInt(payout.claimableRaw) <= BigInt(quote.estimatedWei),
-              ) && (
-                <p className="notice">
-                  Gas may cost more than the ETH you receive. Other payout coins
-                  are not included in this comparison.
-                </p>
-              )}
-              {expired && (
-                <p className="notice">
-                  Estimate expired. Review the claim again to refresh it.
-                </p>
-              )}
-              {account.chainId !== quote.chainId && (
-                <p className="notice">
-                  Switch your wallet to {chainName(quote.chainId)} first.
-                </p>
-              )}
-              <div className="fee-review-actions">
-                <Button
-                  disabled={
-                    expired ||
-                    locked ||
-                    !ownerConnected ||
-                    !account.sendClaim ||
-                    quote.address.toLowerCase() !== address ||
-                    account.chainId !== quote.chainId
-                  }
-                  onClick={() => void claim()}
-                >
-                  Confirm in wallet
-                </Button>
-                <Button
-                  variant="outline"
-                  disabled={sending}
-                  onClick={() => {
-                    reviewSequence.current++;
-                    setQuote(null);
-                  }}
-                >
-                  Cancel
-                </Button>
-              </div>
-            </>
-          )}
         </section>
       )}
       {claimError && (
@@ -754,17 +687,20 @@ function ConnectedFees({ address }: { address: string }) {
           {activity.hash && activity.status === 'submitted' && (
             <Button
               variant="outline"
-              disabled={
-                checking ||
-                !account.checkClaim ||
-                account.chainId !== activity.quote.chainId ||
-                !ownerConnected
-              }
+              disabled={checking || !account.checkClaim || !ownerConnected}
               onClick={async () => {
                 setChecking(true);
                 setClaimError(null);
+                const sequence = reviewSequence.current;
                 try {
+                  await account.ensureClaimChain?.(
+                    address,
+                    activity.quote.chainId,
+                    () => sequence === reviewSequence.current,
+                  );
+                  if (sequence !== reviewSequence.current) return;
                   await account.checkClaim?.(activity.quote.positionId);
+                  if (sequence !== reviewSequence.current) return;
                   if (
                     getClaims().some(
                       (entry) =>
@@ -775,9 +711,20 @@ function ConnectedFees({ address }: { address: string }) {
                     setClaimedIds((previous) => [
                       ...new Set([...previous, activity.quote.positionId]),
                     ]);
+                    if (currentQueue) {
+                      const nextQueue = reconcileClaimQueue(
+                        currentQueue,
+                        getClaims(),
+                      );
+                      setQueue(nextQueue);
+                      const next = nextQueue.items[nextQueue.index];
+                      if (nextQueue.status === 'ready' && next)
+                        await review(next.source, next.position);
+                    }
                   }
                 } catch (error) {
-                  setClaimError(describeError(error, 'claim'));
+                  if (sequence === reviewSequence.current)
+                    setClaimError(describeError(error, 'claim'));
                 } finally {
                   setChecking(false);
                 }

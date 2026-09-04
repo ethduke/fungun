@@ -70,9 +70,13 @@ function mockRuntime(options = {}) {
   const budget = new Budget(":memory:", () => now);
   let calls = 0;
   const upstream = {
-    async json(provider, _url, request, _bytes, units) {
+    async json(provider, _url, request, _bytes, units = 1) {
       budget.upstream(provider, units);
       calls += units;
+      if (provider === "market") {
+        if (options.priceUnavailable) throw new Error("price unavailable");
+        return { data: { base: "ETH", currency: "USD", amount: "2500" } };
+      }
       if (provider === "o1") {
         const chainId = Number(_url.searchParams.get("chain_id"));
         assert.equal(_url.searchParams.get("limit"), "8");
@@ -237,13 +241,19 @@ test("cold Long reads and wallet preflight fit the durable burst allowance, coal
   assert.equal(quote.value, "0");
   assert.equal(quote.gas, "120000");
   assert.equal(quote.estimatedWei, "100000000");
+  assert.deepEqual(quote.gasUsd, {
+    amount: "0.00000025",
+    ethPrice: "2500",
+    observedAt: 1000,
+    source: "coinbase",
+  });
   assert.equal(
     decodeFunctionData({ abi: managerAbi, data: quote.data }).functionName,
     "collectFees",
   );
-  assert.equal(runtime.calls(), 26);
+  assert.equal(runtime.calls(), 27);
   await runtime.service.prepare({ address: owner, positionId });
-  assert.equal(runtime.calls(), 26);
+  assert.equal(runtime.calls(), 27);
   runtime.advance(30 * 60_000);
   await assert.rejects(runtime.service.prepare({ address: owner, positionId }), {
     code: "quote_expired",
@@ -265,6 +275,23 @@ test("transferred Long shares and wrong hook fail closed", async (t) => {
   await assert.rejects(runtime.service.list({ address: owner, chainId: 4663, padId: "long" }), {
     code: "contract_unverified",
   });
+});
+
+test("a failed USD price request leaves a valid simulated claim available", async (t) => {
+  const runtime = mockRuntime({ priceUnavailable: true });
+  t.after(() => runtime.budget.close());
+  const result = await runtime.service.list({ address: owner, chainId: 4663, padId: "long" });
+  const quote = await runtime.service.prepare({
+    address: owner,
+    positionId: result.positions[0].id,
+  });
+  assert.equal(quote.gasUsd, null);
+  assert.equal(quote.estimatedWei, "100000000");
+  assert.equal(quote.value, "0");
+  assert.equal(
+    decodeFunctionData({ abi: managerAbi, data: quote.data }).functionName,
+    "collectFees",
+  );
 });
 
 test("Longbow uses its own profile and prepares only beneficiary-bound collectFees", async (t) => {
@@ -299,9 +326,9 @@ test("Longbow uses its own profile and prepares only beneficiary-bound collectFe
   const decoded = decodeFunctionData({ abi: managerAbi, data: quote.data });
   assert.equal(decoded.functionName, "collectFees");
   assert.deepEqual(decoded.args, [quote.poolId]);
-  assert.equal(runtime.calls(), 26);
+  assert.equal(runtime.calls(), 27);
   await runtime.service.prepare({ address: owner, positionId });
-  assert.equal(runtime.calls(), 26);
+  assert.equal(runtime.calls(), 27);
 });
 
 test("Longbow refuses claims after shares transfer or code and hook changes", async (t) => {

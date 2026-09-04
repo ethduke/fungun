@@ -23,7 +23,7 @@ import {
 import { createPreviewConfig, previewQueryDefaults } from '@/lib/preview-web3';
 import type { ConnectedAccount } from '@/lib/account-context';
 import { AppError, describeError } from '@/lib/user-error';
-import { sendWalletClaim, checkWalletClaim } from '@/lib/claim-wallet';
+import { sendWalletClaim, checkWalletClaim, ensureClaimChain as ensureWalletClaimChain } from '@/lib/claim-wallet';
 import type { ClaimQuote } from '@/lib/fee-service';
 
 let configuration: ReturnType<typeof createPreviewConfig> | undefined;
@@ -53,6 +53,8 @@ const sendClaim = async (quote: ClaimQuote) =>
   sendWalletClaim(await walletProvider(), quote);
 const checkClaim = async (positionId: string) =>
   checkWalletClaim(await walletProvider(), positionId);
+const ensureClaimChain = async (address: string, chainId: number, isCurrent: () => boolean) =>
+  ensureWalletClaimChain(await walletProvider(), address, chainId, isCurrent);
 
 function ConnectionControl({
   onAccountChange,
@@ -68,7 +70,7 @@ function ConnectionControl({
   useEffect(() => {
     onAccountChange(
       connection.isConnected
-        ? { address, chainId: connection.chainId, sendClaim, checkClaim }
+        ? { address, chainId: connection.chainId, sendClaim, checkClaim, ensureClaimChain }
         : {},
     );
   }, [address, connection.chainId, connection.isConnected, onAccountChange]);
@@ -106,12 +108,6 @@ function ConnectionControl({
                 Network:{' '}
                 {connection.chain?.name ?? `Chain ${connection.chainId}`}
               </p>
-              {connection.chainId !== 4663 && (
-                <p className="notice">
-                  This webview currently supports Robinhood Chain. Switch
-                  manually in your wallet when needed.
-                </p>
-              )}
               <Button variant="outline" onClick={() => disconnect.mutate({})}>
                 Disconnect
               </Button>
