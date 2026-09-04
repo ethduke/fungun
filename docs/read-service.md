@@ -1,9 +1,9 @@
 # Read-service milestone
 
 The webview now calls a separate Node service for catalogs and explicit ticker
-checks. External reads are off by default. No credentials were copied from the
-reference project, and no live provider/contract verification or Fly deployment
-was performed for this milestone.
+checks. External reads are off by default. Long reservation reads were verified
+locally on 4 September 2026; O1 authenticated reads and Fly deployment remain
+pending. No provider credentials were copied from the reference project.
 
 ## Local setup
 
@@ -25,6 +25,24 @@ An ignored root `.env` can hold backend runtime configuration. Leave the committ
   `LONG_TICKER_REGISTRY_CODE_HASH`: server-only RPC configuration and independently
   verified deployed Long registry identity. Do not copy addresses into source/tests.
 - `APP_ORIGIN`: exact web origin; defaults to the local URL above.
+
+Run `npm run runtime:status` to list missing variable names and disabled features
+without printing their values. It performs no network calls or file writes.
+`needs_live_verification` means configuration is present, not that credentials,
+contract identities, API scopes or balances have been verified. A zero exit code
+only means the report was produced; it is not a deployment or execution gate.
+An empty optional `FEE_CONTRACTS_JSON` is treated as no configured fee contracts.
+
+## Local verification completed
+
+The reviewed LongLauncher source identity was matched to its verified, nonproxy
+deployment. Four read-only `cast` operations checked chain ID, captured a block,
+matched runtime bytecode to the reviewed pin, and decoded a reservation lookup at
+that same block. The web-to-backend ticker path then passed an HTTP smoke check.
+Only local catalog/ticker reads were opted in; O1 remains unavailable without its
+key, and wallet claims, launches and payments remain disabled. Registry identities
+and the RPC endpoint stay in the ignored local environment, never this document.
+This proves a reservation read works, not global uniqueness or launch readiness.
 
 Before enabling Long checks, verify chain ID, target code hash, ABI and whether
 the target is a proxy using read-only `cast` against the configured RPC. The current
@@ -117,6 +135,13 @@ socket-IP bucket. This deliberately limits initial throughput; trusted ingress a
 fair per-user limits are a separate production step, not an excuse to loosen caps.
 
 ## Fly preparation (not deployed)
+
+Before provisioning, choose the Fly organization, app name, region, web/API
+domains, and approve the single-Machine persistent-volume budget. An authenticated
+local Fly CLI is sufficient; do not send a Fly token in chat. Do not create a
+second backend in an existing app or overwrite another service's configuration.
+Load API/RPC keys and reviewed contract identities through an ignored local file
+or Fly secrets, never shell history, tracked files or public browser variables.
 
 `fly.api.toml` and `apps/api/Dockerfile` package only the API; test files, credentials
 and runtime databases are excluded from the image. The Node base is pinned to the

@@ -57,7 +57,7 @@ export function readConfig(env = process.env) {
     baseRpcUrl,
     feesEnabled: env.READ_FEES === "true",
     claimsEnabled: env.WALLET_CLAIMS === "true",
-    feeContracts: readFeeContracts(env.FEE_CONTRACTS_JSON),
+    feeContracts: readFeeContracts(env.FEE_CONTRACTS_JSON || undefined),
     registry,
     codeHash,
     longQuotes: new Set(longQuotes.map((value) => value.toLowerCase())),
