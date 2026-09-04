@@ -167,9 +167,15 @@ function card(row) {
     id = chain(row),
     name = String(row.name || row.sym || 'Unnamed token');
   const rawLaunchpad = String(row.launchpad || 'Unknown launchpad');
-  const launchpad = rawLaunchpad.startsWith('hook:')
-    ? 'Unknown hook'
-    : rawLaunchpad;
+  const isLong = /^long(?: launchpad)?$/i.test(rawLaunchpad.trim());
+  const launchpad = isLong
+    ? 'Long'
+    : rawLaunchpad.startsWith('hook:')
+      ? 'Unknown hook'
+      : rawLaunchpad;
+  const launchpadIcon = isLong
+    ? '<span class="launchpad-icon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M7 7h10v10"/><path d="M7 17 17 7"/></svg></span>'
+    : '';
   const quote =
     row.quote_symbol || (row.quote_kind === 'eth' ? 'ETH' : 'SHARES');
   const network =
@@ -181,7 +187,7 @@ function card(row) {
   const short = address
     ? `${address.slice(0, 8)}…${address.slice(-6)}`
     : 'Address unavailable';
-  return `<div class="metadata"><span title="${esc(rawLaunchpad)}">${esc(launchpad)}</span><span>${esc(network)}${id === 8453 ? ' · Observed snapshot' : ''}</span></div>
+  return `<div class="metadata"><span class="launchpad" title="${esc(rawLaunchpad)}">${launchpadIcon}${esc(launchpad)}</span><span>${esc(network)}${id === 8453 ? ' · Observed snapshot' : ''}</span></div>
     <div class="identity"><strong title="${esc(name)}">${esc(name)}</strong><span class="quote">/ ${esc(quote)}</span></div>
     <div class="address">${chart ? `<a href="${esc(chart)}" target="_blank" rel="noopener noreferrer" title="${esc(address)}">${esc(short)} ↗</a>` : esc(short)}${row.sym && row.name ? ` <span>${esc(row.sym)}</span>` : ''}</div>
     <div class="metric-title">ETH-equivalent per bin</div>${ladder(row.trail)}
@@ -199,7 +205,8 @@ const styles = `
   h3{font-size:14px;letter-spacing:.1em;margin:0 4px 10px}h3 span{font-weight:400;color:var(--feed-muted);letter-spacing:0}
   .list{max-height:320px;overflow:auto;scrollbar-gutter:stable;display:flex;flex-direction:column;gap:10px;overscroll-behavior:contain}
   article{background:var(--feed-panel);padding:13px;border:1px solid var(--feed-border);border-radius:10px;min-width:0}
-  .metadata{align-items:flex-start;font-size:12px;color:var(--feed-muted);margin-bottom:7px;overflow-wrap:anywhere}.metadata span:first-child{font-size:14px;font-weight:700;color:var(--feed-text)}.metadata span:last-child{text-align:right}
+  .metadata{align-items:center;font-size:12px;color:var(--feed-muted);margin-bottom:7px;overflow-wrap:anywhere}.metadata>.launchpad{display:inline-flex;align-items:center;gap:8px;font-size:14px;font-weight:700;color:var(--feed-text)}.metadata>span:last-child{text-align:right}
+  .launchpad-icon{display:grid;place-items:center;width:26px;height:26px;flex-shrink:0;border-radius:7px;color:#2f5034;background:#e6efcf}.launchpad-icon svg{width:18px;height:18px}
   .identity{justify-content:flex-start;gap:8px}.identity strong{font-size:15px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.quote{flex-shrink:0;font-size:12px;color:var(--feed-accent)}
   a{color:var(--feed-accent);text-decoration:none}a:hover{text-decoration:underline}a:focus-visible,.ladder:focus-visible,.list:focus-visible{outline:2px solid var(--feed-accent);outline-offset:3px}
   .address{font-size:12px;color:var(--feed-muted);margin:3px 0 12px;overflow-wrap:anywhere}.metric-title{font-size:12px;color:var(--feed-muted);margin-bottom:6px}
