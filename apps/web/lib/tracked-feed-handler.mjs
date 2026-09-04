@@ -3,6 +3,8 @@ import {
   feedRetryMs,
   retryAfterMs,
 } from './tracked-feed-policy.mjs';
+import { identifyO1Launchpad } from './tracked-feed-labels.mjs';
+import { getO1Hooks } from './tracked-feed-registry.mjs';
 
 const UPSTREAM = 'https://rh-monitor.fly.dev/api';
 const fields = [
@@ -25,7 +27,7 @@ const headers = {
   'Cache-Control': 'no-store',
 };
 
-export function projectTrackedPayload(payload) {
+export function projectTrackedPayload(payload, hooks = null) {
   if (!payload || !Array.isArray(payload.pools))
     throw new Error('Invalid upstream feed');
   return {
@@ -43,6 +45,8 @@ export function projectTrackedPayload(payload) {
             .filter((key) => row[key] !== undefined)
             .map((key) => [key, row[key]]),
         );
+        const launchpad = identifyO1Launchpad(row, hooks);
+        if (launchpad !== undefined) out.launchpad = launchpad;
         const trail = row.trail;
         out.trail =
           trail && Array.isArray(trail.ladder)
@@ -61,6 +65,7 @@ export function projectTrackedPayload(payload) {
 export function createTrackedFeedHandler({
   fetcher = (url, options) => fetch(url, options),
   now = () => performance.now(),
+  loadHookRegistry = async () => null,
 } = {}) {
   // Shared only within this server process / Worker isolate, never per URL/user.
   let snapshot = null;
@@ -73,19 +78,29 @@ export function createTrackedFeedHandler({
     const timeout = setTimeout(() => controller.abort(), 8000);
     let retryAfter = 0;
     try {
-      const upstream = await fetcher(UPSTREAM, {
-        cache: 'no-store',
-        // Workers support manual/follow; reject 3xx below without following them.
-        redirect: 'manual',
-        signal: controller.signal,
-        headers: { Accept: 'application/json' },
-      });
+      // Read the daily registry alongside the feed, with its own two-second
+      // timeout. Await both so the Worker lifetime covers all started work.
+      const [feed, registry] = await Promise.allSettled([
+        fetcher(UPSTREAM, {
+          cache: 'no-store',
+          // Workers support manual/follow; reject 3xx below without following them.
+          redirect: 'manual',
+          signal: controller.signal,
+          headers: { Accept: 'application/json' },
+        }),
+        loadHookRegistry(),
+      ]);
+      if (feed.status === 'rejected') throw new Error('Feed unavailable');
+      const upstream = feed.value;
       retryAfter = retryAfterMs(upstream.headers.get('retry-after'));
       if (!upstream.ok) {
         await upstream.body?.cancel();
         throw new Error('Feed unavailable');
       }
-      const body = JSON.stringify(projectTrackedPayload(await upstream.json()));
+      const hooks = registry.status === 'fulfilled' ? registry.value : null;
+      const body = JSON.stringify(
+        projectTrackedPayload(await upstream.json(), hooks),
+      );
       snapshot = { body, expiresAt: now() + FEED_INTERVAL_MS };
       failures = 0;
       retryAt = 0;
@@ -138,4 +153,6 @@ export function createTrackedFeedHandler({
 }
 
 // Demand-driven singleton: no timer or upstream request without a GET.
-export const handleTrackedFeed = createTrackedFeedHandler();
+export const handleTrackedFeed = createTrackedFeedHandler({
+  loadHookRegistry: getO1Hooks,
+});

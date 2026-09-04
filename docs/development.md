@@ -32,6 +32,15 @@ Run `npm run dev:api` in a second terminal for the read service. See
 - Popularity groups count similarly named distinct contracts in this selected
   feed, deduplicated by chain and token and ranked by count then inflow. They
   refresh on every response. Other chains are excluded from this tracker.
+- Launchpad labels are compact: Long, O1, O1 RWA, UniV3 and UniV4. Exact O1
+  hook matches come from the official current and historical
+  [suite registry](https://docs.o1.exchange/launchpad/reference/launch-contract-suites.json),
+  cached server-side for 24 hours with shared reads, a two-second timeout and
+  a five-minute failure cooldown. Existing historical matches survive registry
+  outages. This adds no RPC calls or per-token lookups. Pool version labels come
+  from the feed; unidentified hooks retain an explanatory tooltip. O1 Mig.
+  requires an explicit upstream migration label. An older suite or a quote token
+  such as USDG does not establish migration or launchpad provenance.
 - COPY transfers the selected token's name and ticker into the launch form and
   jumps to the coin details immediately. It clears old artwork and invalidates
   pending uploads so another token's image cannot carry over. The current public

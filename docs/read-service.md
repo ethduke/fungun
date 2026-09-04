@@ -69,6 +69,12 @@ All results are advisory and can change before a transaction.
   four seconds after completion, pause while hidden/offscreen/offline/disconnected,
   and retain retry deadlines across pauses. These bounds are not a distributed
   quota across isolates and do not control the public source's internal RPC usage.
+- O1 labels use a separate fixed public contract-suite registry, shared and cached
+  for 24 hours per process/Worker isolate. Reads start only with a feed refresh,
+  have a two-second timeout and a 64 KiB body limit, and failures wait five minutes
+  before retrying. Previously recognized historical hooks remain available during
+  outages. Registry failure never prevents the market feed from loading. No RPC
+  enrichment, per-token requests or runtime addresses are added to source control.
 - One shared catalog per chain, cached five minutes, with concurrent reads coalesced.
 - Ticker responses cached 15 seconds; no automatic polling/retries. Failed reads back
   off at least 15 seconds. Chain checks cache five minutes; block reads five seconds;

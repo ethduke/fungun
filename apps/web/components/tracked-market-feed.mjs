@@ -1,4 +1,5 @@
 import { TrackedFeedPoller } from '../lib/tracked-feed-poller.mjs';
+import { feedLaunchpad } from '../lib/tracked-feed-labels.mjs';
 
 const finite = (value) =>
   (typeof value === 'number' ||
@@ -177,13 +178,11 @@ function card(row) {
   const address = token(row),
     name = String(row.name || row.sym || 'Unnamed token');
   const draft = trackedTokenDraft(row);
-  const rawLaunchpad = String(row.launchpad || 'Unknown launchpad');
-  const isLong = /^long(?: launchpad)?$/i.test(rawLaunchpad.trim());
-  const launchpad = isLong
-    ? 'Long'
-    : rawLaunchpad.startsWith('hook:')
-      ? 'Unknown hook'
-      : rawLaunchpad;
+  const {
+    label: launchpad,
+    title: launchpadTitle,
+    isLong,
+  } = feedLaunchpad(row);
   const launchpadIcon = isLong
     ? '<span class="launchpad-icon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M7 7h10v10"/><path d="M7 17 17 7"/></svg></span>'
     : '';
@@ -195,7 +194,7 @@ function card(row) {
   const short = address
     ? `${address.slice(0, 8)}…${address.slice(-6)}`
     : 'Address unavailable';
-  return `<div class="metadata"><span class="launchpad" title="${esc(rawLaunchpad)}">${launchpadIcon}${esc(launchpad)}</span><button class="copy-button" type="button" aria-label="Copy ${esc(name)} to launch form"${!draft.name && !draft.ticker ? ' disabled' : ''}>COPY</button></div>
+  return `<div class="metadata"><span class="launchpad" title="${esc(launchpadTitle)}">${launchpadIcon}${esc(launchpad)}</span><button class="copy-button" type="button" aria-label="Copy ${esc(name)} to launch form"${!draft.name && !draft.ticker ? ' disabled' : ''}>COPY</button></div>
     <div class="flow"><div class="metric-title">ETH-equivalent per bin</div>${ladder(row.trail)}</div>
     <div class="identity"><strong title="${esc(name)}">${esc(name)}</strong><span class="quote">/ ${esc(quote)}</span></div>
     <div class="address">${chart ? `<a href="${esc(chart)}" target="_blank" rel="noopener noreferrer" title="${esc(address)}">${esc(short)} ↗</a>` : esc(short)}${row.sym && row.name ? ` <span>${esc(row.sym)}</span>` : ''}</div>

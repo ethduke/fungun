@@ -62,6 +62,12 @@ COPY fills the coin name and ticker and jumps to the launch form immediately.
 It clears prior artwork and pending uploads. This source does not provide a token
 image or metadata URL; upload artwork separately.
 
+Labels use Long, O1, O1 RWA, UniV3 and UniV4. O1 identification matches the
+pool's hook and chain against the official current and historical contract-suite
+registry, cached daily on the server without RPC calls. Historical does not mean
+migrated; O1 Mig. requires explicit migration provenance from the feed. A shared
+quote asset such as USDG never identifies a pool's launchpad by itself.
+
 ## Optional browser tools
 
 On the launch page only, the app registers these tools if the browser exposes
