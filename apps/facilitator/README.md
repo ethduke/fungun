@@ -37,7 +37,11 @@ Fund the relayer with only the operating float you intend to risk. The initial t
 Deploy with the dedicated config after setting the required secrets:
 
 ```sh
-flyctl deploy -c fly.facilitator.toml -a farmgun-facilitator
+flyctl deploy --ha=false -c fly.facilitator.toml -a farmgun-facilitator
 ```
+
+Keep exactly one facilitator machine running. Settlement writes use a process-local
+queue to serialize the relayer nonce, so multiple replicas require an external
+distributed nonce coordinator before they are safe.
 
 The public Fly edge terminates HTTPS, while the bearer token keeps all x402 routes private. Do not expose the bearer token or relayer key to the browser bundle.
