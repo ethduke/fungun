@@ -30,12 +30,12 @@ cropping, resizing or AI image generation occurs. The transformed image must be
 shown before the user approves its publication.
 
 The child-process boundary and V8 heap limit are not a native-code sandbox or a
-hard native-memory limit. Before public admission, validate a memory/CPU-limited,
-non-root decoder runtime without provider credentials, writable source or outbound
-network access. The currently pinned official Node image's executable was not PIE
-in the AMD64 check; Sharp's security guidance recommends PIE-enabled Node for
-untrusted inputs. A hardened isolated decoder image is still required before
-public upload admission. Test its actual deployment configuration on Fly.
+hard native-memory limit. `apps/decoder/Dockerfile` now packages a separate,
+Sharp-only Alpine runtime with distro Node. The build rejects non-PIE Node or an
+executable stack. Startup also requires nonroot, ASLR, nonwritable source, no
+asset-volume path and no recognized credential environment variables. This is
+defense in depth, not proof of arbitrary-code containment. The actual Fly runtime
+must pass the isolation and resource gates in [fly-assets.md](fly-assets.md).
 
 ## Metadata
 

@@ -1,0 +1,42 @@
+# Dedicated app/volume; pass its private deployment identity using -a.
+kill_signal = "SIGTERM"
+kill_timeout = "30s"
+
+[build]
+  dockerfile = "apps/api/Dockerfile.assets"
+
+[env]
+  NODE_ENV = "production"
+  ASSET_UPLOADS = "false"
+  ASSET_STORE_ROOT = "/data/launch-assets"
+
+[deploy]
+  strategy = "immediate"
+
+[[mounts]]
+  source = "launch_assets"
+  destination = "/data"
+
+[http_service]
+  internal_port = 8790
+  force_https = true
+  auto_stop_machines = "off"
+  auto_start_machines = false
+  min_machines_running = 1
+
+  [http_service.concurrency]
+    type = "requests"
+    soft_limit = 4
+    hard_limit = 8
+
+  [[http_service.checks]]
+    interval = "30s"
+    timeout = "2s"
+    grace_period = "10s"
+    method = "GET"
+    path = "/healthz"
+
+[[vm]]
+  cpu_kind = "shared"
+  cpus = 1
+  memory = "512mb"

@@ -6,6 +6,13 @@
 !apps/api/package.json
 !apps/api/package-lock.json
 !apps/api/Dockerfile
+!apps/api/Dockerfile.assets
+!apps/api/migrations/
+!apps/api/migrations/001-assets.sql
+!apps/decoder/
+!apps/decoder/Dockerfile
+!apps/decoder/package.json
+!apps/decoder/package-lock.json
 !apps/web/
 !apps/web/app/
 !apps/web/app/**

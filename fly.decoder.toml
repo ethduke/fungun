@@ -1,0 +1,17 @@
+# Private-only dedicated app. No services, public IP, Flycast, volume or secrets.
+kill_signal = "SIGTERM"
+kill_timeout = "10s"
+
+[build]
+  dockerfile = "apps/decoder/Dockerfile"
+
+[env]
+  NODE_ENV = "production"
+
+[deploy]
+  strategy = "immediate"
+
+[[vm]]
+  cpu_kind = "shared"
+  cpus = 1
+  memory = "512mb"
