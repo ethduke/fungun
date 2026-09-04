@@ -1,0 +1,120 @@
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import { mkdtempSync, mkdirSync, writeFileSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { execFileSync } from 'node:child_process';
+import { fileURLToPath } from 'node:url';
+import { analyzeBlob, scanRepository } from './check-repository.mjs';
+
+const scan = (path, text, size) => analyzeBlob(path, Buffer.from(text), size);
+const hex = (length) => ['0', 'x', 'a'.repeat(length)].join('');
+const credential = () => JSON.stringify({ [['api', 'key'].join('_')]: 'synthetic-'.repeat(4) });
+
+function repository(t) {
+  const cwd = mkdtempSync(join(tmpdir(), 'repository-safety-test-'));
+  t.after(() => rmSync(cwd, { recursive: true, force: true }));
+  const git = (...args) => execFileSync('git', args, { cwd, stdio: 'pipe' }).toString('utf8');
+  git('init', '--quiet');
+  git('config', 'user.name', 'Synthetic Test');
+  git('config', 'user.email', 'synthetic@example.invalid');
+  const write = (path, content) => {
+    mkdirSync(join(cwd, path, '..'), { recursive: true });
+    writeFileSync(join(cwd, path), content);
+  };
+  return { cwd, git, write };
+}
+
+test('rejects binary sensitive files and generated artifacts', () => {
+  for (const path of ['.env', '.env.production', 'secrets/blob.bin', 'wallet.json', 'signature.json', 'private-key.txt', 'credentials.bin', 'uploads/logo.png', 'test-results/result.json', 'archive.zip']) {
+    assert.ok(scan(path, '\0\u0001').includes('forbidden-sensitive-or-generated-path'), path);
+  }
+});
+
+test('enforces limits including binary blobs and the lockfile exception', () => {
+  assert.ok(scan('asset.bin', '\0', 1024 * 1024 + 1).includes('file-size-limit'));
+  assert.deepEqual(scan('package-lock.json', '{}', 3 * 1024 * 1024), []);
+  assert.ok(scan('package-lock.json', '{}', 3 * 1024 * 1024 + 1).includes('file-size-limit'));
+  assert.ok(scan('secrets/package-lock.json', '{}').includes('forbidden-sensitive-or-generated-path'));
+});
+
+test('rejects addresses, private-key hex and signatures including binary content', () => {
+  for (const length of [40, 64, 128, 130]) {
+    assert.ok(scan('fixture.json', `\0${hex(length)}`).includes('literal-evm-address-key-or-signature'));
+  }
+  assert.deepEqual(scan('rule.mjs', String.raw`/\b0x[a-f\d]{40}\b/i`), []);
+});
+
+test('rejects JSON, code and environment credential assignments', () => {
+  assert.ok(scan('config.json', credential()).includes('non-placeholder-credential-assignment'));
+  for (const key of ['XAI_API_KEY', 'privateKey', 'client_secret', 'authorization', 'seed_phrase', 'rpcUrl']) {
+    const value = [key, ' = ', 'synthetic-'.repeat(5)].join('');
+    assert.ok(scan('.env.example', JSON.stringify({ [key]: 'synthetic-'.repeat(5) })).includes('non-placeholder-credential-assignment'), key);
+    if (key === key.toUpperCase()) assert.ok(scan('.env.example', value).includes('non-placeholder-credential-assignment'));
+  }
+});
+
+test('permits empty and unmistakable placeholders, environment lookups and regex source', () => {
+  for (const value of ['', '<set-at-runtime>', 'YOUR_KEY', 'REPLACE_ME', '${XAI_API_KEY}', 'REDACTED']) {
+    assert.deepEqual(scan('.env.example', JSON.stringify({ [['api', 'key'].join('_')]: value })), []);
+  }
+  assert.deepEqual(scan('config.mjs', 'const key = process.env.XAI_API_KEY;'), []);
+  assert.deepEqual(scan('.env.example', ['XAI_API_KEY', '='].join('')), []);
+});
+
+test('rejects provider tokens, key material and authenticated URLs', () => {
+  for (const token of [['sk', '-', 'x'.repeat(32)].join(''), ['xai', '-', 'x'.repeat(32)].join(''), ['ghp', '_', 'a'.repeat(36)].join('')]) {
+    assert.ok(scan('config.txt', token).includes('provider-credential-token'));
+  }
+  assert.ok(scan('config.txt', ['-----BEGIN ', 'PRIVATE KEY-----'].join('')).includes('private-key-material'));
+  assert.ok(scan('config.txt', ['https://', 'synthetic:synthetic', '@example.invalid'].join('')).includes('credential-bearing-url'));
+  assert.ok(scan('config.txt', ['https://example.invalid/?', 'api_key', '=', 'synthetic'.repeat(4)].join('')).includes('credential-bearing-url'));
+});
+
+test('default reads staged blobs, never replacement worktree content', (t) => {
+  const repo = repository(t);
+  repo.write('config.json', credential());
+  repo.git('add', 'config.json');
+  repo.write('config.json', '{}');
+  assert.equal(scanRepository(repo.cwd).findings[0].rule, 'non-placeholder-credential-assignment');
+  repo.git('add', 'config.json');
+  repo.write('config.json', credential());
+  assert.deepEqual(scanRepository(repo.cwd).findings, []);
+});
+
+test('tracked scans unchanged index blobs and history finds removed data', (t) => {
+  const repo = repository(t);
+  repo.write('old.json', credential());
+  repo.git('add', 'old.json');
+  repo.git('-c', 'core.hooksPath=/dev/null', 'commit', '-m', 'Synthetic unsafe fixture');
+  assert.deepEqual(scanRepository(repo.cwd).findings, []);
+  assert.equal(scanRepository(repo.cwd, 'tracked').findings.length, 1);
+  repo.git('rm', 'old.json');
+  repo.git('-c', 'core.hooksPath=/dev/null', 'commit', '-m', 'Remove fixture');
+  assert.deepEqual(scanRepository(repo.cwd, 'tracked').findings, []);
+  assert.equal(scanRepository(repo.cwd, 'history').findings[0].path, 'old.json');
+});
+
+test('checks binary paths and file sizes from the index', (t) => {
+  const repo = repository(t);
+  repo.write('wallet.json', Buffer.from([0, 1, 2]));
+  repo.write('large.bin', Buffer.alloc(1024 * 1024 + 1));
+  repo.git('add', '.');
+  assert.deepEqual(new Set(scanRepository(repo.cwd).findings.map((finding) => finding.rule)), new Set(['forbidden-sensitive-or-generated-path', 'file-size-limit']));
+});
+
+test('CLI reports filenames and rules without credential contents', (t) => {
+  const repo = repository(t);
+  repo.write('unsafe.json', credential());
+  repo.git('add', '.');
+  try {
+    execFileSync(process.execPath, [fileURLToPath(new URL('./check-repository.mjs', import.meta.url))], { cwd: repo.cwd, stdio: 'pipe' });
+    assert.fail('Unsafe repository unexpectedly passed');
+  } catch (error) {
+    assert.equal(error.status, 1);
+    const output = `${error.stdout}${error.stderr}`;
+    assert.ok(output.includes('unsafe.json'));
+    assert.ok(!output.includes('synthetic-'));
+    assert.ok(!output.includes(credential()));
+  }
+});
