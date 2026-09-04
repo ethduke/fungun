@@ -585,7 +585,7 @@ export default function Home() {
         <footer className="workspace-footer">
           <span>YOUR IDEA. YOUR WALLET. YOUR LAUNCH.</span>
           <span>
-            Long + O1 + Longbow <span>·</span>Preview — no transactions
+            Long + O1 + Longbow <span>·</span>Wallet approval required
           </span>
         </footer>
       </main>

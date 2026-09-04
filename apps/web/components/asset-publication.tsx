@@ -321,126 +321,119 @@ export function AssetPublication({
       if (mounted.current) setBusy('');
     }
   }
+  const currentPublication =
+    cachedPublication ??
+    (published?.context === context ? published.result : null);
+  const previousPublication =
+    published && published.result.id !== currentPublication?.id
+      ? published.result
+      : null;
+  if (
+    !enabled &&
+    !recovery &&
+    !recoveryBlocked &&
+    !active &&
+    !currentPublication &&
+    !previousPublication &&
+    !error &&
+    !recoveryNotice
+  )
+    return null;
   return (
-    <div className="asset-publication" aria-busy={!!busy}>
-      <div className="asset-publication-heading">
-        <strong>Launch artwork</strong>
-        <span>Long · Robinhood</span>
-      </div>
-      {!published && cachedPublication && (
-        <output>Artwork and metadata saved. <a href={cachedPublication.metadataUrl} target="_blank" rel="noopener noreferrer">View metadata</a> · Ready for launch verification.</output>
-      )}
-      {published && (
-        <output>
-          {published.context !== context
-            ? 'Previous artwork published.'
-            : 'Artwork published.'}{' '}
-          <a
-            href={published.result.metadataUrl}
-            target="_blank"
-            rel="noopener noreferrer"
-          >
-            View metadata
-          </a>{' '}
-          Launch verification is still pending.
-        </output>
-      )}
+    <section
+      className="asset-publication"
+      aria-label="Artwork publication"
+      aria-busy={!!busy}
+    >
       {recovery ? (
         <>
           {progress && (
             <output>
-              Image: {progressLabel(progress.progress.image)} · Metadata: {progressLabel(progress.progress.metadata)}
-              {progress.issue ? ' · Verification is delayed; check again in a minute.' : ''}
+              Image {progressLabel(progress.progress.image)} · Metadata{' '}
+              {progressLabel(progress.progress.metadata)}
+              {progress.issue ? ' · Verification delayed' : ''}
             </output>
           )}
-          <p>
-            Previous publication needs a status check. Connect the same wallet;
-            no new signature is needed.
-          </p>
+          <p>Publication pending · no new signature</p>
           <Button
             type="button"
             variant="outline"
             disabled={!!busy || !account.address || cooldown}
             onClick={check}
           >
-            Check publication status
+            Check upload
           </Button>
         </>
+      ) : currentPublication ? (
+        <output className="asset-publication-ready">
+          <strong>Artwork published</strong>
+          <span>Ready for launch review</span>
+          <a
+            href={currentPublication.metadataUrl}
+            target="_blank"
+            rel="noopener noreferrer"
+          >
+            Metadata
+          </a>
+        </output>
       ) : active ? (
         <>
           <div className="asset-publication-preview">
             <Image
               src={active.url}
               alt="Processed artwork to publish"
-              width={88}
-              height={88}
+              width={48}
+              height={48}
               unoptimized
             />
             <div>
               <strong>
                 {active.approval.draft.name} · ${active.approval.draft.ticker}
               </strong>
-              <p>{active.approval.draft.description || 'No description'}</p>
+              {active.approval.draft.description && (
+                <p className="asset-publication-description">
+                  {active.approval.draft.description}
+                </p>
+              )}
+              <span>
+                Public IPFS; copies may remain permanently. One free wallet signature confirms publication and protects your upload allowance.
+              </span>
             </div>
           </div>
-          <p>
-            Publish this image and metadata publicly. Copies may remain
-            permanently. Wallet approval costs no gas.
-          </p>
-          <div className="asset-publication-actions">
-            <Button
-              type="button"
-              disabled={
-                !!busy || !ready || expires || cooldown || recoveryBlocked
-              }
-              onClick={publish}
-            >
-              Approve &amp; publish
-            </Button>
-            <Button
-              type="button"
-              variant="ghost"
-              disabled={!!busy || cooldown}
-              onClick={prepare}
-            >
-              {expires ? 'Refresh preview' : 'Check again'}
-            </Button>
-          </div>
-          {expires && (
-            <output>
-              Preview expired. Check the image again before approving.
-            </output>
-          )}
-        </>
-      ) : (
-        <>
-          <p>
-            {!enabled
-              ? 'Select Long to prepare its launch artwork.'
-              : !account.address
-                ? 'Connect your wallet to prepare the image.'
-                : account.chainId !== ASSET_CHAIN_ID
-                  ? 'Your wallet will ask to switch to Robinhood Chain.'
-                  : 'Upload for validation, then review before publishing.'}
-          </p>
           <Button
             type="button"
-            variant="outline"
-            onClick={prepare}
-            disabled={
-              !!busy ||
-              !ready ||
-              cooldown ||
-              recoveryBlocked ||
-              published?.context === context ||
-              !!cachedPublication
+            aria-label={
+              expires ? 'Refresh artwork preview' : 'Approve and publish artwork'
             }
+            disabled={!!busy || !ready || cooldown || recoveryBlocked}
+            onClick={expires ? prepare : publish}
           >
-            Upload for preview
+            {expires ? 'Refresh preview' : 'Confirm public artwork'}
           </Button>
         </>
+      ) : enabled ? (
+        <Button
+          type="button"
+          variant="outline"
+          onClick={prepare}
+          disabled={!!busy || !ready || cooldown || recoveryBlocked}
+        >
+          {account.address ? 'Prepare artwork' : 'Connect wallet first'}
+        </Button>
+      ) : null}
+      {previousPublication && !currentPublication && !recovery && (
+        <output>
+          Previous artwork published · launch verification pending.{' '}
+          <a
+            href={previousPublication.metadataUrl}
+            target="_blank"
+            rel="noopener noreferrer"
+          >
+            Metadata
+          </a>
+        </output>
       )}
-      {busy && <output>{busy}</output>}
+      {busy && <output className="asset-publication-status">{busy}</output>}
       {recoveryNotice && <output>{recoveryNotice}</output>}
       {recoveryBlocked && (
         <p className="field-error" role="alert">
@@ -454,6 +447,6 @@ export function AssetPublication({
           {error}
         </p>
       )}
-    </div>
+    </section>
   );
 }

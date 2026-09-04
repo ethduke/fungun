@@ -2,8 +2,7 @@
 
 import Image from 'next/image';
 import { useEffect, useState, type ReactNode } from 'react';
-import { ImagePlus, LockKeyhole, TriangleAlert } from 'lucide-react';
-import { Button } from '@/components/ui/button';
+import { ImagePlus, TriangleAlert } from 'lucide-react';
 import { Checkbox } from '@/components/ui/checkbox';
 import { Skeleton } from '@/components/ui/skeleton';
 import {
@@ -141,7 +140,6 @@ export function LaunchSection({
           <span>{ticker ? `$${ticker}` : 'Ticker'}</span>
         </div>
       </div>
-      {children}
       {destinations.length ? (
         <div className="launch-destinations">
           {destinations.map((pad) => (
@@ -284,15 +282,7 @@ export function LaunchSection({
               : 'Select a launchpad to see its launch costs.'}
           </p>
         </div>
-        <Button
-          type="button"
-          className="launch-button"
-          disabled
-          aria-describedby="launch-preview-notice"
-        >
-          <LockKeyhole size={16} />
-          Launch coin
-        </Button>
+        {children}
       </footer>
     </section>
   );

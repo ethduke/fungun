@@ -131,7 +131,7 @@ export function LongLaunch({ enabled, ready, pairId, name, ticker, description, 
       </label>}
       {!receipt || !['confirmed','failed'].includes(receipt.status) ? <Button type="button" variant="outline" disabled={!!busy || cooldown} onClick={check}>Check launch</Button> : null}
       {receipt?.hash && <a href={`https://robinhoodchain.blockscout.com/tx/${receipt.hash}`} target="_blank" rel="noopener noreferrer">View transaction</a>}
-      {receipt?.asset && <a href={`https://app.long.xyz/token/${receipt.asset}`} target="_blank" rel="noopener noreferrer">View token</a>}
+      {receipt?.asset && <a href={`https://robinhoodchain.blockscout.com/address/${receipt.asset}`} target="_blank" rel="noopener noreferrer">View token on explorer</a>}
       {receipt?.paidGasWei && <p>Gas paid: {formatEth(wei(receipt.paidGasWei))}</p>}
     </> : <>
       {validPlan && <details>
