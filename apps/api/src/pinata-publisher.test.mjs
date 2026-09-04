@@ -205,3 +205,26 @@ test("user-facing errors describe uncertainty without leaking technical details"
   assert.equal(ipfsMessage(jwt).includes(jwt), false);
   assert.equal(typeof ipfsMessage("__proto__"), "string");
 });
+
+test("CID reconciliation uses one bounded read and rejects missing or ambiguous account pins", async () => {
+  const file = await object();
+  let requests = 0;
+  const publisher = new PinataPublisher({ ...config, fetcher: async (url, options) => {
+    requests++;
+    assert.equal(url, `https://api.pinata.cloud/v3/files/public?cid=${file.cid}&limit=2`);
+    assert.equal(options.method, "GET");
+    return response({ files: [record(file)], next_page_token: "" });
+  } });
+  assert.equal((await publisher.findPin(file)).id, id);
+  assert.equal(requests, 1);
+  for (const data of [
+    { files: [], next_page_token: "" },
+    { files: [record(file), record(file)], next_page_token: "" },
+    { files: [record(file)], next_page_token: "more" },
+    { files: [record(file)] },
+    { files: [record(file, { size: 999 })], next_page_token: "" },
+  ]) {
+    const bad = new PinataPublisher({ ...config, fetcher: async () => response(data) });
+    await assert.rejects(bad.findPin(file), code("ipfs_verification_unavailable"));
+  }
+});

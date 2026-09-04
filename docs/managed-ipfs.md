@@ -35,12 +35,19 @@ Buffers are copied before asynchronous hashing; publication must revalidate them
 The result remains `launchReady: false` and does not authorize an upload.
 
 `PinataPublisher` is an isolated transport, disabled by default and not connected
-to any HTTP route or runtime launcher. It supports one bounded public file upload,
+to any HTTP route until runtime setup is explicit. It supports one bounded public file upload,
 read-only lookup of an acknowledged account file ID, and exact-byte gateway
 verification. Uploads recheck the expected CID and use generated hash filenames.
 Gateway requests carry no JWT, cookies or user headers. Provider redirects, changed
 bytes/CIDs, oversized responses and timeouts fail closed with redacted messages.
 It never retries an upload, deletes a pin, queries a wallet or submits a transaction.
+
+The separate IPFS journal records exact CIDs, hashes, byte lengths, importer/schema
+versions, an HMAC owner reference and per-object progress. It stores validated bytes
+in private staging only after wallet approval and before provider access. It does not
+store the wallet address, approval message or signature. The worker commits a
+`sending` state before each POST. A lost acknowledgment is reconciled with one
+bounded account lookup by CID; absence or ambiguity never permits another upload.
 
 Successful upload acknowledgment, current account pin record and gateway content
 verification are separate evidence. An upload timeout does not prove nothing was
@@ -72,13 +79,9 @@ does not itself pin the image.
    after adding the runtime allowlist. The gateway value is a hostname, not a URL.
    These names are planned runtime inputs; the transport currently takes explicit
    constructor options and never reads `.env` or process credentials itself.
-2. Persist exact CIDs, byte hashes, sizes, importer/schema versions, wallet approval
-   state and quotas before the first provider write. Keep signatures out of storage.
-3. Make ambiguous uploads recoverable by read-only reconciliation; never blindly
-   retry a POST, issue a new approval or refund charged quotas after uncertainty.
-4. Connect the existing preview/approval/status flow to the IPFS publisher without
+2. Connect the existing preview/approval/status flow to the IPFS publisher without
    exposing credentials or creating an arbitrary URL fetcher/upload relay.
-5. Verify account pin records and exact gateway bytes with approved disposable
+3. Verify account pin records and exact gateway bytes with approved disposable
    uploads, then verify new Long display and O1 preparation before enabling launches.
 
 Gateway availability proves content retrieval, not account pin ownership or an

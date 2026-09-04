@@ -11,7 +11,7 @@ intact but is no longer the selected destination for new uploads. See
 | Step | Status | Implemented | Remaining |
 | --- | --- | --- | --- |
 | 1. Live data | Partial | Server-only environment allowlists; bounded/cached read service; O1 catalogs; Long ticker checks | Complete contract/pairing verification and O1 ticker checks; fee coverage tracked separately |
-| 2. Image and metadata storage | In progress | Content validation; isolated decoder; inline publication flow; historical Fly recovery tools; deterministic Long IPFS CIDs; disabled Pinata upload/pin-check/retrieval transport | Durable IPFS approval/status and webview integration; server-only credentials; live pin/retrieval and new-launch display checks; private-record backups |
+| 2. Image and metadata storage | In progress | Content validation; isolated decoder; historical Fly recovery; deterministic Long IPFS CIDs; guarded Pinata transport; durable per-object IPFS journal, staging and no-retry worker | Runtime/webview integration; server-only credentials; live pin/retrieval and new-launch display checks; private-record backups |
 | 3. Launch preparation | Partial | Ordinary Long unsigned builder and cost model, tested offline | Live simulation and trustworthy ETH/USD totals; O1 builder; verified metadata attachment |
 | 4. Wallet execution | Next | Wallet connection exists; artwork approval is not launch execution | Explicit launch approval, per-launchpad progress, receipt checks and durable duplicate-submission protection |
 | 5. Paid Grok | Partial | System prompt builder and editable ticker-populated prompt | One-time payment approval, spend limits, paid generation and output validation |

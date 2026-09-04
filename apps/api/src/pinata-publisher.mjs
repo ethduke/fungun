@@ -22,11 +22,16 @@ export function ipfsMessage(code) {
     : "IPFS publication could not be completed. Please check its status before trying again.";
 }
 
-export function pinataGatewayUrl(gateway, cid) {
+export function pinataGatewayOrigin(gateway) {
   if (typeof gateway !== "string" || !gatewayHost.test(gateway))
     throw new ServiceError("ipfs_configuration");
+  return `https://${gateway}`;
+}
+
+export function pinataGatewayUrl(gateway, cid) {
+  const origin = pinataGatewayOrigin(gateway);
   ipfsUri(cid);
-  return `https://${gateway}/ipfs/${cid}`;
+  return `${origin}/ipfs/${cid}`;
 }
 
 function cancel(body) {
@@ -166,6 +171,21 @@ export class PinataPublisher {
       return this.#request(`${fileUrl}${id}`, { method: "GET", headers: this.#providerHeaders() },
         async (response, signal) => pinReceipt(JSON.parse(await readBytes(response, 8192, "application/json", signal)).data, object, id),
         "ipfs_verification_unavailable");
+    });
+  }
+
+  async findPin(input) {
+    return this.#run(async () => {
+      const object = await snapshotObject(input);
+      const url = new URL(fileUrl.slice(0, -1));
+      url.searchParams.set("cid", object.cid);
+      url.searchParams.set("limit", "2");
+      return this.#request(url.href, { method: "GET", headers: this.#providerHeaders() }, async (response, signal) => {
+        const data = JSON.parse(await readBytes(response, 8192, "application/json", signal)).data;
+        if (!data || !Array.isArray(data.files) || data.files.length !== 1 || data.next_page_token !== "")
+          throw new Error("Unresolved account pin");
+        return pinReceipt(data.files[0], object);
+      }, "ipfs_verification_unavailable");
     });
   }
 

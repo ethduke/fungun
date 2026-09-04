@@ -115,7 +115,7 @@ export function readExact(path, limit, sync = false) {
   }
 }
 
-function writeOnce(directory, name, bytes) {
+export function writeOnce(directory, name, bytes) {
   const target = join(directory, name);
   if (existsSync(target)) {
     if (!readExact(target, bytes.length, true).equals(bytes))
