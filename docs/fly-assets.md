@@ -80,8 +80,9 @@ Fly performance is not verified.
    partial writes. Test storage-full and missing-volume failures.
 7. Verify the implemented inline processed-image preview, explicit wallet
    publication approval and read-only recovery check against the real deployment.
-   Verify offline expired-pending recovery; add reserved/partial-write recovery
-   and a reviewed public-abuse admission
+   Verify offline expired-pending and complete-write reservation recovery using
+   the [backup runbook](asset-backups.md). Missing/corrupt bundles stay locked;
+   finish their operator procedure and a reviewed public-abuse admission
    policy before broad access. Neither wallet generation nor Origin checks stop
    automated upload abuse. Keep publication and launch readiness separately gated.
 

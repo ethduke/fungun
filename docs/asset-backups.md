@@ -38,6 +38,29 @@ No wallet keys, RPC URLs or provider credentials enter the snapshot child proces
 Inside the asset image, use `node src/asset-snapshot-cli.mjs` with the same arguments
 instead of the npm wrapper. Do not expose these commands as HTTP endpoints.
 
+## Interrupted publication
+
+When both approved final files were written but publication was not committed,
+run `npm run assets:snapshot -- recover-complete` to inspect eligible reservations.
+It requires a verified backup whose complete logical database state and object
+inventory still match the source. Keep the service stopped between backup and
+recovery. Then use `recover-complete --execute --service-stopped` to finalize only
+eligible reservations. No wallet is signed and no RPC request or transaction is made.
+
+Recovery verifies the exact approved image/metadata hashes, sizes, WebP header and
+canonical metadata, syncs the files and directory, then atomically registers the
+objects and marks the reserved approval published. It does not reset counters,
+release reserved bytes, alter owners, regenerate missing bytes or promote pending
+or expired approvals. A reservation that expired after its original publication
+started can still finish; it already crossed the signed-and-charged boundary.
+
+Missing, corrupt or temporary-only bundles stay locked and charged. Unsafe links,
+FIFOs, conflicting registered objects and stale backups refuse the operation.
+After a successful change the old backup is intentionally stale; take a fresh
+backup before another recovery attempt. A new attempt finds no already-completed
+work to repeat. The browser can resolve a recovered publication through its
+existing read-only status check. Storage receipts still say `launchReady: false`.
+
 ## Safety boundaries
 
 - Exports include quota counters, owner-HMAC material, reservations, pinned origins
@@ -53,7 +76,7 @@ instead of the npm wrapper. Do not expose these commands as HTTP endpoints.
 - An incomplete export has no completion manifest. Leave it isolated for inspection;
   reruns require a different new directory. No automatic cleanup or overwrite occurs.
 - Every exported database is quarantined before it receives the runtime filename.
-  Runtime startup, expiry, migration and re-export all reject quarantined stores.
+  Runtime startup, expiry, migration, recovery and re-export all reject quarantined stores.
   There is deliberately no unlock flag. Reconciliation with all post-backup
   publications/counters and a reviewed activation procedure are still required.
 - Production rejects same-filesystem exports. A different filesystem alone does

@@ -5,7 +5,8 @@ import {
 } from "node:fs";
 import { dirname, join, resolve, sep } from "node:path";
 import { createHash } from "node:crypto";
-import { checkAssetRoot, checkAssetStorage, readExact, syncDirectory } from "./asset-store.mjs";
+import { checkAssetRoot, checkAssetStorage, readExact, syncDirectory,
+  validAssetOrigin, validAssetAppOrigin } from "./asset-store.mjs";
 import { inspectAssetDatabase } from "./asset-maintenance.mjs";
 import { buildLongMetadata } from "./launch-metadata.mjs";
 import { ServiceError } from "./errors.mjs";
@@ -71,6 +72,11 @@ function databaseFiles(root) {
   }
 }
 
+export function checkAssetSnapshotSource(root, production = false) {
+  checkAssetStorage(root, production);
+  databaseFiles(root);
+}
+
 function inventory(db, root, now, quarantined) {
   const pageSize = db.prepare("PRAGMA page_size").get().page_size;
   const pages = db.prepare("PRAGMA page_count").get().page_count;
@@ -83,11 +89,8 @@ function inventory(db, root, now, quarantined) {
   const rows = db.prepare("SELECT * FROM asset_challenges").all();
   const origin = setting("asset-origin");
   const appOrigin = setting("asset-app-origin");
-  if (rows.length) {
-    const url = new URL(origin);
-    if (url.protocol !== "https:" || url.origin !== origin || url.username || url.password ||
-        !appOrigin) fail();
-  }
+  const unpinned = !rows.length && origin === "" && appOrigin === "";
+  if (!unpinned && (!validAssetOrigin(origin) || !validAssetAppOrigin(appOrigin))) fail();
   const names = directoryNames(join(root, "objects"), fileLimit);
   const files = new Map();
   let total = 0;
@@ -138,8 +141,7 @@ function copyFiles(source, target, files) {
 
 export async function backupAssets({ root, output, execute = false, serviceStopped = false,
   production = false, now = Date.now }) {
-  checkAssetStorage(root, production);
-  databaseFiles(root);
+  checkAssetSnapshotSource(root, production);
   destination(output, root);
   const sameFilesystem = lstatSync(root).dev === lstatSync(dirname(output)).dev;
   if (execute && (!serviceStopped || (production && sameFilesystem))) fail();
@@ -239,4 +241,27 @@ export function restoreAssetBackup({ backupRoot, expectedSha256, output, execute
   syncDirectory(dirname(output));
   verifyAssetBackup({ backupRoot: output, expectedSha256, now });
   return { ...verified, mode: "restore", execute };
+}
+
+function stateFingerprint(db) {
+  const state = ["settings", "counters", "asset_challenges", "asset_objects"].map((table) =>
+    db.prepare(`SELECT * FROM ${table}${table === "settings" ? " WHERE name != 'asset-restore-state'" : ""} ORDER BY 1`).all());
+  return hash(JSON.stringify(state));
+}
+
+export function verifyRecoverySource({ db, root, backupRoot, expectedSha256, now = Date.now }) {
+  verifyAssetBackup({ backupRoot, expectedSha256, now });
+  const manifestBytes = privateFile(join(backupRoot, manifestName), manifestLimit);
+  if (hash(manifestBytes) !== expectedSha256) fail();
+  const manifest = JSON.parse(manifestBytes.toString("utf8"));
+  const dbBytes = privateFile(join(backupRoot, "assets.sqlite"), databaseLimit);
+  if (hash(dbBytes) !== manifest.database.sha256) fail();
+  const saved = database(join(backupRoot, "assets.sqlite"));
+  try {
+    const source = inventory(db, root, now, false);
+    if (stateFingerprint(db) !== stateFingerprint(saved) ||
+        JSON.stringify(source.files) !== JSON.stringify(manifest.files))
+      throw new ServiceError("asset_backup_outdated");
+    return source.stats;
+  } finally { saved.close(); }
 }

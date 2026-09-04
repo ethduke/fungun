@@ -137,13 +137,17 @@ function writeOnce(directory, name, bytes) {
   syncDirectory(directory);
 }
 
-function validOrigin(value) {
+export function validAssetOrigin(value) {
   try {
     const url = new URL(value);
     return url.protocol === "https:" && url.origin === value && !url.username && !url.password;
   } catch {
     return false;
   }
+}
+
+export function validAssetAppOrigin(value, production = false) {
+  return validAssetOrigin(value) || (!production && ["http://127.0.0.1:3000", "http://localhost:3000"].includes(value));
 }
 
 export class AssetStore {
@@ -155,9 +159,7 @@ export class AssetStore {
         throw new ServiceError("asset_restore_quarantined");
     } finally { inspection.close(); }
     if (
-      !validOrigin(publicOrigin) ||
-      (!validOrigin(appOrigin) &&
-        (production || !["http://127.0.0.1:3000", "http://localhost:3000"].includes(appOrigin)))
+      !validAssetOrigin(publicOrigin) || !validAssetAppOrigin(appOrigin, production)
     )
       throw new ServiceError("invalid_asset_origin");
     this.root = root;

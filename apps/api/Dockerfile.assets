@@ -4,7 +4,7 @@ WORKDIR /service
 COPY apps/api/package.json apps/api/package-lock.json ./
 RUN npm ci --omit=dev --ignore-scripts --no-audit --no-fund && npm cache clean --force
 COPY apps/api/src/asset-store.mjs apps/api/src/asset-maintenance.mjs apps/api/src/asset-decoder.mjs apps/api/src/asset-service.mjs apps/api/src/asset-server.mjs apps/api/src/init-assets.mjs apps/api/src/launch-metadata.mjs apps/api/src/launch-image.mjs apps/api/src/budget.mjs apps/api/src/storage.mjs apps/api/src/errors.mjs ./src/
-COPY apps/api/src/asset-snapshot.mjs apps/api/src/asset-snapshot-cli.mjs ./src/
+COPY apps/api/src/asset-snapshot.mjs apps/api/src/asset-snapshot-cli.mjs apps/api/src/asset-recovery.mjs ./src/
 COPY apps/api/migrations/001-assets.sql apps/api/migrations/002-assets-expiry.sql ./migrations/
 USER node
 EXPOSE 8790

@@ -1,10 +1,11 @@
 import { pathToFileURL } from "node:url";
 import { backupAssets, restoreAssetBackup, verifyAssetBackup } from "./asset-snapshot.mjs";
+import { recoverCompleteAssets } from "./asset-recovery.mjs";
 import { ServiceError } from "./errors.mjs";
 
 export function snapshotArguments(args) {
   const [mode, ...flags] = args;
-  if (!["backup", "verify", "restore"].includes(mode) ||
+  if (!["backup", "verify", "restore", "recover-complete"].includes(mode) ||
       new Set(flags).size !== flags.length ||
       flags.some((flag) => !["--execute", "--service-stopped"].includes(flag)) ||
       (flags.includes("--execute") && !flags.includes("--service-stopped")) ||
@@ -35,11 +36,15 @@ export async function snapshotMain(args, env = process.env) {
       ? await backupAssets({ ...shared, output: env.ASSET_BACKUP_ROOT })
       : options.mode === "restore"
         ? restoreAssetBackup({ ...shared, output: env.ASSET_RESTORE_ROOT })
-        : verifyAssetBackup(shared);
+        : options.mode === "recover-complete"
+          ? recoverCompleteAssets(shared)
+          : verifyAssetBackup(shared);
     console.log(JSON.stringify(result));
     return 0;
-  } catch {
-    console.error("Asset snapshot refused. Check private paths, permissions, space, schema and the separately recorded digest. Writes need --execute --service-stopped. Never overwrite a live store; restored stores remain locked.");
+  } catch (error) {
+    console.error(error?.code === "asset_backup_outdated"
+      ? "The backup no longer matches the asset store. Keep the service stopped and create a fresh verified backup before recovery. No recovery was committed."
+      : "Asset snapshot refused. Check private paths, permissions, space, schema and the separately recorded digest. Writes need --execute --service-stopped. Never overwrite a live store; restored stores remain locked.");
     return 1;
   }
 }
