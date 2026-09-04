@@ -18,6 +18,11 @@ parent-enforced deadline. Only one conversion per processor is admitted; there
 is no pending queue. Raw decoder diagnostics are discarded. Use one shared
 processor instance when wiring the service.
 
+Synthetic PNG/JPEG/WebP/still-GIF conversion and malformed-input rejection passed
+in the API image on Linux AMD64, with a non-root user, a read-only filesystem,
+no network, no credentials, dropped capabilities and a 256 MiB container limit.
+These were local disposable-container checks, not a Fly deployment.
+
 The output is WebP with orientation applied and embedded metadata removed. It
 must remain under 2 MiB. Animated GIF/WebP and APNG are explicitly rejected for
 this first publication profile; previews remain unchanged. No silent flattening,
@@ -27,7 +32,10 @@ shown before the user approves its publication.
 The child-process boundary and V8 heap limit are not a native-code sandbox or a
 hard native-memory limit. Before public admission, validate a memory/CPU-limited,
 non-root decoder runtime without provider credentials, writable source or outbound
-network access. Test the actual Linux deployment architecture, not only macOS.
+network access. The currently pinned official Node image's executable was not PIE
+in the AMD64 check; Sharp's security guidance recommends PIE-enabled Node for
+untrusted inputs. A hardened isolated decoder image is still required before
+public upload admission. Test its actual deployment configuration on Fly.
 
 ## Metadata
 
