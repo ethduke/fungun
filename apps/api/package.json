@@ -7,6 +7,7 @@
     "test": "node --test src/*.test.mjs"
   },
   "dependencies": {
+    "ipfs-unixfs-importer": "17.1.0",
     "sharp": "0.35.4",
     "viem": "2.56.0"
   },

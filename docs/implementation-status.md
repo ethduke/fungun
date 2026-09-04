@@ -3,10 +3,15 @@
 Snapshot: 2026-09-04. This separates implemented code from production readiness.
 Fee reads/claims are owned by a separate task and are not assessed here.
 
+Storage direction updated: **managed IPFS for new public assets; Fly for the app
+and private records**. The historical Fly asset/recovery implementation below stays
+intact but is no longer the selected destination for new uploads. See
+[managed-ipfs.md](managed-ipfs.md) for current integration gates.
+
 | Step | Status | Implemented | Remaining |
 | --- | --- | --- | --- |
 | 1. Live data | Partial | Server-only environment allowlists; bounded/cached read service; O1 catalogs; Long ticker checks | Complete contract/pairing verification and O1 ticker checks; fee coverage tracked separately |
-| 2. Image and metadata storage | In progress | Content validation; isolated decoder; write-once Fly asset service; inline wallet publication; read-only status; offline expiry; verified backup/quarantined restore; complete-write recovery; read-only restore reconciliation | Provision approved independent backups; bind activation to actual Machine/volume identities; unavailable-original and incomplete-bundle recovery; restore drill and real Fly/public retrieval checks |
+| 2. Image and metadata storage | In progress | Content validation; isolated decoder; inline publication flow; historical Fly recovery tools; deterministic Long IPFS image/metadata CIDs | Pinata publisher and durable approval/status integration; server-only credentials; live pin/retrieval and new-launch display checks; private-record backups |
 | 3. Launch preparation | Partial | Ordinary Long unsigned builder and cost model, tested offline | Live simulation and trustworthy ETH/USD totals; O1 builder; verified metadata attachment |
 | 4. Wallet execution | Next | Wallet connection exists; artwork approval is not launch execution | Explicit launch approval, per-launchpad progress, receipt checks and durable duplicate-submission protection |
 | 5. Paid Grok | Partial | System prompt builder and editable ticker-populated prompt | One-time payment approval, spend limits, paid generation and output validation |
@@ -56,9 +61,9 @@ See [launch-assets.md](launch-assets.md) and [fly-assets.md](fly-assets.md).
 
 ## Next implementation boundary
 
-Approve independent backup retention and provision the private destination, bind
-activation to verified Fly Machine/volume identities, and finish unavailable-original
-and incomplete-bundle recovery. Then run a restore drill and verify the
-dedicated Fly asset stack before enabling uploads. Afterwards connect ordinary
-Long's prepared metadata to read-only live simulation and explicit wallet launch.
+Connect managed IPFS publication to durable approval and status records, then verify
+approved uploads and new-launch display. Preserve existing Fly records; do not
+activate a quarantined restore or discard old files as part of this change. B2
+asset-backup provisioning is no longer a gate for the new IPFS path. Afterwards
+connect ordinary Long's prepared metadata to live simulation and explicit wallet launch.
 Do not use the Telegram bot's runtime, secrets or volume for this service.
