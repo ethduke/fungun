@@ -34,6 +34,19 @@ profile. These are UnixFS CIDs, not simply the SHA-256 of a multi-chunk file.
 Buffers are copied before asynchronous hashing; publication must revalidate them.
 The result remains `launchReady: false` and does not authorize an upload.
 
+`PinataPublisher` is an isolated transport, disabled by default and not connected
+to any HTTP route or runtime launcher. It supports one bounded public file upload,
+read-only lookup of an acknowledged account file ID, and exact-byte gateway
+verification. Uploads recheck the expected CID and use generated hash filenames.
+Gateway requests carry no JWT, cookies or user headers. Provider redirects, changed
+bytes/CIDs, oversized responses and timeouts fail closed with redacted messages.
+It never retries an upload, deletes a pin, queries a wallet or submits a transaction.
+
+Successful upload acknowledgment, current account pin record and gateway content
+verification are separate evidence. An upload timeout does not prove nothing was
+stored. This transport alone cannot safely resume an unknown upload or enforce
+durable quotas; do not expose it until the state/approval integration below exists.
+
 ## Provider setup
 
 Use a dedicated Pinata account/project for public launch assets. Configure a
@@ -49,12 +62,16 @@ pinning can later protect against a compromised publisher or a provider outage.
 
 Keep the gateway publicly readable for account-pinned content without secret query
 tokens or a farmgun-only origin restriction: launchpad indexers need access too.
-There is no required custom-domain or IPFS-node setup. Pin both files permanently;
-a textual image link inside JSON does not itself pin the image.
+There is no required custom-domain or IPFS-node setup. Pin both files without an
+expiration and maintain the provider account; a textual image link inside JSON
+does not itself pin the image.
 
 ## Remaining integration
 
-1. Implement the bounded Pinata upload/verification adapter, disabled by default.
+1. Configure the isolated publisher with `PINATA_JWT` and `PINATA_GATEWAY` only
+   after adding the runtime allowlist. The gateway value is a hostname, not a URL.
+   These names are planned runtime inputs; the transport currently takes explicit
+   constructor options and never reads `.env` or process credentials itself.
 2. Persist exact CIDs, byte hashes, sizes, importer/schema versions, wallet approval
    state and quotas before the first provider write. Keep signatures out of storage.
 3. Make ambiguous uploads recoverable by read-only reconciliation; never blindly
@@ -75,5 +92,6 @@ Sources: [Long](https://app.long.xyz/),
 [O1 interface](https://docs.o1.exchange/launchpad/architecture/frontend-indexer),
 [Pinata profiles](https://docs.pinata.cloud/files/uploading-files),
 [v3 upload scope](https://docs.pinata.cloud/api-reference/endpoint/upload-a-file),
+[account file lookup](https://docs.pinata.cloud/api-reference/endpoint/get-file-by-id),
 [v3 delete scope](https://docs.pinata.cloud/api-reference/endpoint/delete-file-by-id),
 [IPFS persistence](https://docs.ipfs.tech/concepts/persistence/).
