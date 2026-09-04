@@ -1,8 +1,8 @@
 # Launch image and metadata boundary
 
-The internal asset pipeline is implemented and tested; it is not an upload API.
-Picking a file still keeps it in the browser. No image is published, persisted,
-sent to a model or included in Git by these modules.
+The image pipeline and a separate Fly asset service are implemented. Publication
+is disabled by default and is not yet wired to the webview. Picking a file still
+keeps it in the browser; it does not publish anything or send it to a model.
 
 ## Image processing
 
@@ -58,18 +58,82 @@ allocation or category fields into ordinary Long metadata.
 
 ## Publication gates
 
-- Confirm the storage transport. IPFS requires a server-only pinning credential;
-  Fly-hosted assets require persistent storage, backup/recovery and public serving.
-- Verify a wallet-bound, expiring publication intent and explicit public-content
-  approval. Never treat selecting an image as consent to publish it.
-- Enforce durable byte/job quotas, bounded concurrency and idempotency before
-  consuming paid storage. Fail closed after an uncertain publication result;
-  reconcile it before retrying. Keep orphaned published content charged.
+- Fly-hosted assets are selected. Verify an isolated decoder, a dedicated durable
+  volume, independent backups and recovery before enabling public publication.
+- The service verifies an EOA signature over the exact processed-image and
+  metadata hashes, byte count, wallet, chain, origins, nonce and five-minute expiry.
+  This is local signature recovery, not a transaction or RPC request. Contract
+  wallets are not yet supported by this publication-intent profile.
+- Persisted quotas and write-once publication are implemented. Expensive decoding
+  is capped separately from public egress and the read service's RPC budget.
 - Keep original filenames, images, metadata, wallet/signature data and provider
   responses out of logs, build context and source history.
 - Only then connect browser upload, approved-image preview, publication and the
-  unsigned launch builder. No public endpoint or new runtime secret is enabled
-  by this milestone.
+  unsigned launch builder. Published responses currently have `launchReady: false`;
+  storage success alone does not establish backup durability or launch readiness.
+
+## Dedicated asset service
+
+`asset-server.mjs` listens on port 8790. It must run in a **different Fly app** from
+the RPC service and the decoder. It needs no API key, wallet key or RPC URL. Use
+`node scripts/start-assets.mjs` locally: the launcher forwards only asset-specific
+configuration, never arbitrary `.env` values or `NODE_OPTIONS`.
+
+Initialize a new private directory outside Git using the explicit
+`node scripts/start-assets.mjs --initialize-new-volume` command. Set
+`ASSET_STORE_ROOT` to that absolute, mode-0700 directory first. Initialization
+refuses an existing store; normal startup never recreates lost quota state.
+Production requires the dedicated disk-backed `/data` mount, root
+`/data/launch-assets`, and `ASSETS_MACHINE_ID` matching the current Fly Machine.
+Do not copy another service's SQLite database or volume into this app.
+
+Required configuration: `APP_ORIGIN`, `ASSET_PUBLIC_ORIGIN`, `ASSET_STORE_ROOT`,
+and production Machine identity. Origins are pinned on first open and cannot be
+silently changed. The asset origin must be HTTPS. `ASSET_UPLOADS=false` keeps all
+publication routes disabled; enabling them also requires a private
+`ASSET_DECODER_ORIGIN` shaped as `http://<decoder-app>.internal:8791`.
+
+The HTTP contract is deliberately narrow:
+
+- `POST /v1/asset-prepare`: exact `chainId` (4663), `wallet`, `draft`
+  (`name`, `ticker`, `description`) and canonical `imageBase64`. Decodes in the
+  isolated worker and returns processed bytes and an expiring approval message.
+  Preparation keeps image bytes in memory, not on disk.
+- `POST /v1/asset-publish`: the same **processed** image and normalized draft,
+  plus challenge `id` and the wallet's `signature`. Browser approval must follow
+  the processed preview. Neither route accepts filenames, URLs or decoder options.
+- Both POST routes require the exact configured Origin, JSON content type and
+  `x-fungun-intent` matching `asset-prepare` or `asset-publish`. These headers are
+  CSRF checks, not authentication or protection against non-browser clients.
+- `GET`/`HEAD /launch-assets/<sha256>.webp|json`: committed objects only, checked
+  against their content address, with immutable caching, ETag and safe MIME types.
+  No directory listing or generic filesystem handler exists.
+
+Only one preparation and one publication can execute concurrently. Ingress is
+capped at 8 active requests, 30/minute per socket IP and 300/minute globally;
+forwarded IP headers cannot buy extra quota. Behind a proxy, callers may share
+that socket-IP allowance. Images are at most 2 MiB; JSON and streamed output are
+bounded. Preparation is capped at 6/minute and 60/day globally. Publication is
+limited to 30/day globally and 3/day per verified wallet. Public GET egress is
+charged in 128 KiB units with a 256 MiB/hour origin allowance. These are initial
+small-beta caps, not a guarantee against denial of service. Wallets are cheap to
+generate; real public admission needs a reviewed abuse policy.
+
+The lifetime reservation ceiling is 256 MiB with at least 256 MiB disk headroom.
+Reservations cover both files before any write and survive failures/restarts.
+New files use exclusive temporary files, fsync and no-overwrite hard links;
+reused objects are verified and synced. Only a completed SQLite record permits
+public reads. Exact successful retries return the same URLs without another
+charge. Interrupted reservations remain charged and blocked; do not reset the
+database, delete orphan files or approve another upload to work around them.
+Publication attempt quotas can remain charged if later reservation checks fail.
+An operator recovery/status workflow is still required before broad rollout.
+
+Fly volumes are not automatically shared between Machines. Keep this store
+single-writer and separately backed up; adding another Machine with an empty
+volume is not replication. Restore tests must preserve database, objects and
+pinned origins together. Publicly published content is public by design; hashes
+are not access control. Private keys and signatures are never stored alongside it.
 
 References: [Sharp security](https://sharp.pixelplumbing.com/security/),
 [input limits](https://sharp.pixelplumbing.com/api-constructor/),
