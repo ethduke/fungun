@@ -174,7 +174,7 @@ export class Upstream {
           safe.status === 429 && safe.retryScope !== "operation"
             ? new ServiceError(safe.code, 429, safe.retryAfter, "operation")
             : safe;
-        if (scoped.status === 429)
+        if (scoped.status === 429 && requested)
           this.retryAt.set(
             provider,
             Math.max(this.retryAt.get(provider) ?? 0, this.now() + scoped.retryAfter * 1000),

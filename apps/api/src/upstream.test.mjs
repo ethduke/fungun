@@ -125,7 +125,7 @@ test("read retries exclude quota, invalid data, permanent HTTP errors and JSON-R
   assert.equal(calls, 1);
 });
 
-test("retry still respects budget and provider cooldown without another fetch", async () => {
+test("retry still respects a local budget denial without another fetch", async () => {
   let calls = 0;
   let debits = 0;
   const upstream = new Upstream(
@@ -144,13 +144,53 @@ test("retry still respects budget and provider cooldown without another fetch", 
     retryAfter: 60,
     retryScope: "operation",
   });
-  await assert.rejects(read(upstream), {
+  assert.equal(calls, 1);
+  assert.equal(debits, 2);
+  assert.equal(upstream.active, 0);
+});
+
+test("local weighted limits allow smaller reads while provider 429s start cooldowns", async () => {
+  const debits = [];
+  let calls = 0;
+  let providerLimited = false;
+  const upstream = new Upstream(
+    {
+      upstream(_provider, units) {
+        debits.push(units);
+        if (units > 1) throw new ServiceError("rate_limited", 429, 60);
+      },
+    },
+    async () => {
+      calls++;
+      return providerLimited
+        ? new Response(null, { status: 429, headers: { "retry-after": "10" } })
+        : Response.json({ ok: true });
+    },
+    () => 1000,
+  );
+
+  await assert.rejects(upstream.json("o1", url, {}, 1024, 3), {
     code: "rate_limited",
     retryAfter: 60,
     retryScope: "operation",
   });
-  assert.equal(calls, 1);
-  assert.equal(debits, 2);
+  assert.equal(calls, 0);
+  assert.deepEqual(await upstream.json("o1", url, {}, 1024, 1), { ok: true });
+
+  providerLimited = true;
+  await assert.rejects(upstream.json("o1", url, {}, 1024, 1), {
+    code: "rate_limited",
+    retryAfter: 10,
+    retryScope: "operation",
+  });
+  providerLimited = false;
+  await assert.rejects(upstream.json("o1", url, {}, 1024, 1), {
+    code: "rate_limited",
+    retryAfter: 10,
+    retryScope: "operation",
+  });
+  assert.equal(calls, 2);
+  assert.deepEqual(debits, [3, 1, 1]);
   assert.equal(upstream.active, 0);
 });
 
