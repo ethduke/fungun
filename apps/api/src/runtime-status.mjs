@@ -15,9 +15,9 @@ export function runtimeStatus(env) {
   const present = (value) => typeof value === "string" && value.trim().length > 0;
   const o1 = ["O1_API_KEY", present(config.o1Key)];
   const rpc = ["ROBINHOOD_RPC", present(config.rpcUrl)];
-  const longFees = [
-    "FEE_CONTRACTS_JSON.long",
-    !!(config.feeContracts.long?.pools.length || config.feeContracts.long?.discovery),
+  const lockedFees = (padId) => [
+    `FEE_CONTRACTS_JSON.${padId}`,
+    !!(config.feeContracts[padId]?.pools.length || config.feeContracts[padId]?.discovery),
   ];
   const reads = ["READ_UPSTREAMS"];
   const fees = ["READ_FEES"];
@@ -57,8 +57,10 @@ export function runtimeStatus(env) {
         reads,
       ),
       feature("o1_indexed_fees", [o1], fees),
-      feature("long_locked_pool_fees", [rpc, longFees], fees),
-      feature("long_locked_pool_claims", [rpc, longFees], claims),
+      ...["long", "longbow"].flatMap((padId) => [
+        feature(`${padId}_locked_pool_fees`, [rpc, lockedFees(padId)], fees),
+        feature(`${padId}_locked_pool_claims`, [rpc, lockedFees(padId)], claims),
+      ]),
       feature(
         "o1_base_live_fees_and_claims",
         [

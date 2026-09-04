@@ -49,16 +49,16 @@ or placed in the browser URL. Switching accounts or disconnecting clears
 displayed fees. Missing or failed balances are unknown, never zero. Refresh is
 explicit and cached.
 
-Long discovers beneficiary pools from the configured manager's event history,
+Long and Longbow discover beneficiary pools from a separately configured manager's event history,
 including transferred fee rights, or pages through configured locked pools.
 Historical scans may take many pages; separate hook fees remain unknown.
 O1 pages through indexed Robinhood positions and verifies every position in a
-reviewed current escrow. Configured, verified Robinhood claims are supported.
-Base fee lookups are paused, and Longbow fee lookup is not connected.
+reviewed current or legacy escrow. Configured, verified Robinhood claims are supported.
+Longbow has its own profile and Claim all action; never duplicate a Long pool there.
+Base fee lookups are paused.
 Shared escrow balances are by payout asset,
 not individual launched coin; do not merge matching tickers with different addresses.
-Load more reads one page. Check remaining pages continues until completion,
-Stop scan or an error; honor provider retry delays and preserve partial results.
+Check more reads one page; honor provider retry delays and preserve partial results.
 The source cards report coverage. A balance of an ordinary held token does not
 establish a creator-fee entitlement.
 
@@ -146,9 +146,9 @@ Same-origin JSON POSTs use `/api/catalog` with `{ "chainId": 4663 }`, or
 The `x-fungun-intent` header must match `catalog` or `ticker`. These are bounded
 anonymous read endpoints, not authentication or consent for financial actions.
 The webview only requests Robinhood (4663). Base (8453) remains supported by the
-backend but is paused in the webview. Longbow is a draft destination, not an API pad.
+backend but is paused in the webview. Longbow is excluded from catalog/ticker requests.
 Never send keys, wallet addresses, signatures, images or prompts to these routes.
-Fee lookup uses `/api/fees` with `address`, `chainId`, `padId` and an optional
+Fee lookup supports Long, O1 and Longbow through `/api/fees` with `address`, `chainId`, `padId` and an optional
 opaque `cursor` returned by the previous page. It returns `nextCursor` and coverage.
 `/api/claim-prepare` takes only `address` and an opaque returned `positionId`;
 it prepares but never sends. Intent headers match the operation. Handles expire,

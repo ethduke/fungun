@@ -46,6 +46,7 @@ await test('preview fee lookups never request RPC, invent zero balances or enabl
     assert.deepEqual(result.unavailableSources, [
       { padId: 'long', chainId: 4663 },
       { padId: 'o1', chainId: 4663 },
+      { padId: 'longbow', chainId: 4663 },
     ]);
   } finally {
     globalThis.fetch = original;
@@ -76,6 +77,15 @@ await test('matching tickers never merge different assets, chains or native and 
     { ...balance, asset: 'native' },
   ]);
   assert.equal(rows.length, 4);
+});
+
+await test('Longbow fees preserve launchpad identity and only support Robinhood', () => {
+  const rows = groupFeeBalances([{ ...balance, padId: 'longbow' }]);
+  assert.deepEqual(rows[0].launchpads, ['longbow']);
+  assert.equal(rows[0].claimable, '1.000000000000000001');
+  assert.throws(() =>
+    groupFeeBalances([{ ...balance, padId: 'longbow', chainId: 8453 }]),
+  );
 });
 
 await test('malformed amounts and conflicting asset metadata are rejected', () => {

@@ -82,7 +82,12 @@ await test('launchpad claim all includes only the selected launchpad across its 
     chainId: 4663 as const,
     padId: 'long' as const,
   };
-  const all = [o1Base, long, o1Robinhood];
+  const longbow = {
+    ...source('d'.repeat(64)),
+    chainId: 4663 as const,
+    padId: 'longbow' as const,
+  };
+  const all = [o1Base, long, o1Robinhood, longbow];
   const o1Queue = startClaimQueue(all, 'o1');
   assert.deepEqual(
     o1Queue.items.map((item) => item.source),
@@ -93,6 +98,13 @@ await test('launchpad claim all includes only the selected launchpad across its 
     [long],
   );
   assert.equal(startClaimQueue([long], 'o1').status, 'complete');
+  assert.deepEqual(
+    startClaimQueue(all, 'longbow').items.map((item) => item.source),
+    [longbow],
+  );
+  assert.throws(() =>
+    queueClaimAttempt(startClaimQueue(all, 'longbow'), quote(long)),
+  );
   assert.throws(() => queueClaimAttempt(o1Queue, quote(long)));
 });
 

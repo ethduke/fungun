@@ -233,6 +233,81 @@ await test('claim validation rejects recipient redirects, trailing data, native 
     assert.throws(() => validateClaim({ ...quote(), ...change }));
 });
 
+await test('Longbow accepts only its Robinhood locked-pool claim and preserves the source in preparation', async () => {
+  const poolId = `0x${'b'.repeat(64)}` as `0x${string}`;
+  const poolPosition = {
+    ...position,
+    payouts: [payout, { ...payout, asset: addr('3'), symbol: 'PAIR' }],
+  };
+  const poolSource = {
+    ...source,
+    padId: 'longbow' as const,
+    chainId: 4663 as const,
+    positions: [poolPosition],
+  };
+  assert.equal(parseFees(poolSource, owner, 4663, 'longbow').padId, 'longbow');
+  assert.throws(() =>
+    parseFees({ ...poolSource, chainId: 8453 }, owner, 8453, 'longbow'),
+  );
+  assert.throws(() =>
+    parseFees({ ...poolSource, positions: [position] }, owner, 4663, 'longbow'),
+  );
+  assert.throws(() =>
+    parseFees(
+      {
+        ...poolSource,
+        positions: [
+          { ...poolPosition, verification: 'indexed', claimable: false },
+        ],
+      },
+      owner,
+      4663,
+      'longbow',
+    ),
+  );
+  const poolQuote: ClaimQuote = {
+    ...quote(),
+    kind: 'longbow',
+    chainId: 4663,
+    poolId,
+    payouts: poolPosition.payouts,
+    data: encodeFunctionData({
+      abi: claimAbi,
+      functionName: 'collectFees',
+      args: [poolId],
+    }),
+  };
+  assert.equal(validateClaim(poolQuote).kind, 'longbow');
+  for (const change of [
+    { chainId: 8453 },
+    { escrowVersion: 'legacy' },
+    { data: quote().data },
+    { poolId: `0x${'c'.repeat(64)}` },
+  ])
+    assert.throws(() => validateClaim({ ...poolQuote, ...change }));
+  const original = globalThis.fetch;
+  let kind = 'long';
+  globalThis.fetch = async () =>
+    Response.json({
+      ...poolQuote,
+      kind,
+      serverTime: Date.now(),
+      expiresAt: Date.now() + 20_000,
+    });
+  try {
+    await assert.rejects(prepareClaim(owner, poolSource, poolPosition), {
+      code: 'invalid_response',
+    });
+    kind = 'longbow';
+    assert.equal(
+      (await prepareClaim(owner, poolSource, poolPosition)).kind,
+      'longbow',
+    );
+  } finally {
+    globalThis.fetch = original;
+  }
+});
+
 await test('fee loading coalesces without polling and preparation rejects a changed target', async () => {
   const original = globalThis.fetch;
   let calls = 0;

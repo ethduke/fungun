@@ -8,7 +8,12 @@ import {
   type EIP1193Provider,
   type Hash,
 } from 'viem';
-import { claimAbi, legacyClaimAbi, validateClaim, type ClaimQuote } from './fee-service.ts';
+import {
+  claimAbi,
+  legacyClaimAbi,
+  validateClaim,
+  type ClaimQuote,
+} from './fee-service.ts';
 import {
   acknowledgeClaim,
   checkWalletClaim,
@@ -81,7 +86,7 @@ await test('receipt proof requires exact beneficiary, destination, currency, emi
   );
 });
 
-await test('Long Release confirms beneficiary payout; pool-wide Collect or successful empty receipts do not', () => {
+await test('Long and Longbow require a matching beneficiary Release to confirm payouts', () => {
   const poolId = `0x${'d'.repeat(64)}` as Hash;
   const input: ClaimQuote = {
     ...quote(),
@@ -117,6 +122,41 @@ await test('Long Release confirms beneficiary payout; pool-wide Collect or succe
     ['55', '60'],
   );
   assert.equal(receiptPayouts({ ...receipt(), logs: [] }, input), null);
+  const longbow: ClaimQuote = { ...input, kind: 'longbow' };
+  assert.equal(validateClaim(longbow).kind, 'longbow');
+  assert.deepEqual(
+    receiptPayouts({ ...receipt(), logs: [log] }, longbow)?.map(
+      (p) => p.claimableRaw,
+    ),
+    ['55', '60'],
+  );
+  assert.equal(receiptPayouts({ ...receipt(), logs: [] }, longbow), null);
+  assert.equal(
+    receiptPayouts(
+      { ...receipt(), logs: [log] },
+      { ...longbow, poolId: `0x${'e'.repeat(64)}` },
+    ),
+    null,
+  );
+  assert.equal(
+    receiptPayouts(
+      {
+        ...receipt(),
+        logs: [
+          {
+            ...log,
+            topics: encodeEventTopics({
+              abi: claimAbi,
+              eventName: 'Release',
+              args: { poolId, beneficiary: addr('b') },
+            }) as Hash[],
+          },
+        ],
+      },
+      longbow,
+    ),
+    null,
+  );
 });
 
 await test('legacy escrow requires its explicit version and proves recipient-bound payouts using the legacy event', () => {
@@ -133,10 +173,16 @@ await test('legacy escrow requires its explicit version and proves recipient-bou
   for (const escrowVersion of [undefined, 'current', 'unknown'])
     assert.throws(() => validateClaim({ ...legacy, escrowVersion }));
   assert.throws(() => validateClaim({ ...quote(), escrowVersion: 'legacy' }));
-  assert.throws(() => validateClaim({
-    ...legacy,
-    data: encodeFunctionData({ abi: legacyClaimAbi, functionName: 'claim', args: [addr('b'), currency] }),
-  }));
+  assert.throws(() =>
+    validateClaim({
+      ...legacy,
+      data: encodeFunctionData({
+        abi: legacyClaimAbi,
+        functionName: 'claim',
+        args: [addr('b'), currency],
+      }),
+    }),
+  );
   const log = {
     address: target,
     topics: encodeEventTopics({
@@ -150,11 +196,25 @@ await test('legacy escrow requires its explicit version and proves recipient-bou
   assert.equal(receiptPayouts(proof, legacy)?.[0].claimableRaw, '125');
   assert.equal(receiptPayouts(proof, quote()), null);
   assert.equal(receiptPayouts(receipt(), legacy), null);
-  assert.equal(receiptPayouts({ ...proof, logs: [{ ...log, topics: encodeEventTopics({
-    abi: legacyClaimAbi,
-    eventName: 'Claimed',
-    args: { recipient: addr('b'), currency },
-  }) as Hash[] }] }, legacy), null);
+  assert.equal(
+    receiptPayouts(
+      {
+        ...proof,
+        logs: [
+          {
+            ...log,
+            topics: encodeEventTopics({
+              abi: legacyClaimAbi,
+              eventName: 'Claimed',
+              args: { recipient: addr('b'), currency },
+            }) as Hash[],
+          },
+        ],
+      },
+      legacy,
+    ),
+    null,
+  );
 });
 
 await test('wallet operations are explicit, never retried, identity-bound and retain ambiguous activity', async () => {

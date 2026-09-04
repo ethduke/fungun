@@ -37,6 +37,7 @@ export const uint = (value) => {
   return BigInt(value);
 };
 const hash = (value) => typeof value === "string" && /^0x[\da-f]{64}$/i.test(value);
+export const isLockedPoolPad = (padId) => padId === "long" || padId === "longbow";
 const asset = (value) =>
   value &&
   validAddress(value.address, true) &&
@@ -57,11 +58,13 @@ export function readFeeContracts(raw = "{}") {
     !value ||
     Array.isArray(value) ||
     typeof value !== "object" ||
-    Object.keys(value).some((key) => !["o1", "long", "baseOracle"].includes(key))
+    Object.keys(value).some((key) => !["o1", "long", "longbow", "baseOracle"].includes(key))
   )
     throw new ServiceError("invalid_fee_configuration");
   const o1 = value.o1 ?? [];
-  const long = value.long;
+  const lockedProfiles = ["long", "longbow"].flatMap((padId) =>
+    value[padId] === undefined ? [] : [{ padId, profile: value[padId] }],
+  );
   const oracle = value.baseOracle;
   if (
     !Array.isArray(o1) ||
@@ -77,9 +80,12 @@ export function readFeeContracts(raw = "{}") {
     new Set(o1.map((entry) => `${entry.chainId}:${entry.escrow.toLowerCase()}`)).size !== o1.length
   )
     throw new ServiceError("invalid_fee_configuration");
-  if (
-    long &&
-    (!validAddress(long.manager) ||
+  for (const { profile: long } of lockedProfiles) {
+    if (
+      !long ||
+      typeof long !== "object" ||
+      Array.isArray(long) ||
+      !validAddress(long.manager) ||
       !hash(long.managerCodeHash) ||
       !validAddress(long.hook) ||
       !hash(long.hookCodeHash) ||
@@ -101,27 +107,60 @@ export function readFeeContracts(raw = "{}") {
           !Number.isInteger(pool.tickSpacing) ||
           pool.tickSpacing <= 0 ||
           pool.tickSpacing >= 2 ** 23,
-      ))
-  )
-    throw new ServiceError("invalid_fee_configuration");
-  if (
-    long &&
-    new Set((long.pools ?? []).map((pool) => poolId(pool, long.manager))).size !==
+      )
+    )
+      throw new ServiceError("invalid_fee_configuration");
+    if (
+      new Set((long.pools ?? []).map((pool) => poolId(pool, long.manager))).size !==
       (long.pools ?? []).length
-  )
-    throw new ServiceError("invalid_fee_configuration");
-  if (
-    long?.discovery &&
-    (typeof long.discovery !== "object" ||
-      Array.isArray(long.discovery) ||
-      Object.keys(long.discovery).some((key) => !["fromBlock", "blockRange"].includes(key)) ||
-      !Number.isSafeInteger(long.discovery.fromBlock) ||
-      long.discovery.fromBlock < 0 ||
-      !Number.isInteger(long.discovery.blockRange ?? 2000) ||
-      (long.discovery.blockRange ?? 2000) < 1 ||
-      (long.discovery.blockRange ?? 2000) > 10000)
-  )
-    throw new ServiceError("invalid_fee_configuration");
+    )
+      throw new ServiceError("invalid_fee_configuration");
+    if (
+      long?.discovery &&
+      (typeof long.discovery !== "object" ||
+        Array.isArray(long.discovery) ||
+        Object.keys(long.discovery).some((key) => !["fromBlock", "blockRange"].includes(key)) ||
+        !Number.isSafeInteger(long.discovery.fromBlock) ||
+        long.discovery.fromBlock < 0 ||
+        !Number.isInteger(long.discovery.blockRange ?? 2000) ||
+        (long.discovery.blockRange ?? 2000) < 1 ||
+        (long.discovery.blockRange ?? 2000) > 10000)
+    )
+      throw new ServiceError("invalid_fee_configuration");
+  }
+  // Both launchpads can use the same initializer. A pool must still belong to
+  // exactly one source, and every use of a contract must agree on its code pin.
+  const identities = new Set();
+  const assets = new Map();
+  const pins = new Map();
+  for (const { padId, profile } of lockedProfiles) {
+    for (const [target, codeHash] of [
+      [profile.manager, profile.managerCodeHash],
+      [profile.hook, profile.hookCodeHash],
+    ]) {
+      const key = target.toLowerCase();
+      if (pins.has(key) && pins.get(key) !== codeHash.toLowerCase())
+        throw new ServiceError("invalid_fee_configuration");
+      pins.set(key, codeHash.toLowerCase());
+    }
+    for (const pool of profile.pools ?? []) {
+      const id = poolId(pool, profile.manager);
+      const assetId = `${profile.manager.toLowerCase()}:${pool.asset.toLowerCase()}`;
+      if (identities.has(id) || (assets.has(assetId) && assets.get(assetId) !== padId))
+        throw new ServiceError("invalid_fee_configuration");
+      identities.add(id);
+      assets.set(assetId, padId);
+    }
+    // Manager logs do not identify the launchpad. Never assign their discoveries
+    // to one brand while the other brand also uses that manager.
+    if (
+      profile.discovery &&
+      lockedProfiles.some(
+        (entry) => entry.padId !== padId && sameAddress(entry.profile.manager, profile.manager),
+      )
+    )
+      throw new ServiceError("invalid_fee_configuration");
+  }
   if (
     oracle &&
     (!validAddress(oracle.address) ||
@@ -132,15 +171,28 @@ export function readFeeContracts(raw = "{}") {
     throw new ServiceError("invalid_fee_configuration");
   return {
     o1,
-    long: long
-      ? {
-          ...long,
-          pools: long.pools ?? [],
-          ...(long.discovery
-            ? { discovery: { ...long.discovery, blockRange: long.discovery.blockRange ?? 2000 } }
-            : {}),
-        }
-      : undefined,
+    ...Object.fromEntries(
+      ["long", "longbow"].map((padId) => {
+        const long = value[padId];
+        return [
+          padId,
+          long
+            ? {
+                ...long,
+                pools: long.pools ?? [],
+                ...(long.discovery
+                  ? {
+                      discovery: {
+                        ...long.discovery,
+                        blockRange: long.discovery.blockRange ?? 2000,
+                      },
+                    }
+                  : {}),
+              }
+            : undefined,
+        ];
+      }),
+    ),
     baseOracle: oracle,
   };
 }

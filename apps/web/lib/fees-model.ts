@@ -1,11 +1,16 @@
 import { isAddress, formatUnits } from 'viem';
-import { supportsChain, type ChainId, type PadId } from './launch-model.ts';
+import {
+  supportsChain,
+  type ChainId,
+  type LaunchpadId as PadId,
+} from './launch-model.ts';
 
 export const FEE_LOOKUP_DELAY = 500;
 const MAX_FEE_RAW = (BigInt(1) << BigInt(256)) - BigInt(1);
 export const FEE_SOURCES = [
   { padId: 'long', chainId: 4663 },
   { padId: 'o1', chainId: 4663 },
+  { padId: 'longbow', chainId: 4663 },
 ] as const;
 
 export interface FeeBalance {
@@ -59,7 +64,7 @@ export function groupFeeBalances(balances: FeeBalance[]) {
   >();
   for (const balance of balances) {
     if (
-      !['long', 'o1'].includes(balance.padId) ||
+      !['long', 'o1', 'longbow'].includes(balance.padId) ||
       !supportsChain(balance.padId, balance.chainId) ||
       (balance.asset !== 'native' &&
         !isAddress(balance.asset, { strict: false })) ||

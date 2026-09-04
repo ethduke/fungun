@@ -1,5 +1,6 @@
 import { decodeFunctionData, isAddress, parseAbi } from 'viem';
-import type { ChainId, PadId } from './launch-model';
+import type { ChainId, LaunchpadId as PadId } from './launch-model';
+import { supportsChain } from './launch-model.ts';
 import { AppError, retrySeconds } from './user-error.ts';
 import { localExpiry } from './read-service.ts';
 
@@ -72,6 +73,8 @@ export const legacyClaimAbi = parseAbi([
   'function claim(address recipient, address currency)',
   'event Claimed(address indexed recipient, address indexed currency, uint256 amount)',
 ]);
+export const isLockedPoolClaim = (kind: string) =>
+  kind === 'long' || kind === 'longbow';
 const equal = (a: string, b: string) => a.toLowerCase() === b.toLowerCase();
 const amount = (value: unknown): value is string =>
   typeof value === 'string' &&
@@ -191,6 +194,8 @@ export function parseFees(
     !equal(result.address, owner) ||
     result.chainId !== chainId ||
     result.padId !== padId ||
+    !['long', 'o1', 'longbow'].includes(padId) ||
+    !supportsChain(padId, chainId) ||
     !['ready', 'partial', 'unavailable'].includes(result.status) ||
     (result.reason !== undefined &&
       (!feeUnavailableReasons.includes(result.reason) ||
@@ -221,8 +226,12 @@ export function parseFees(
         !payouts(position.payouts) ||
         !['live', 'indexed'].includes(position.verification) ||
         typeof position.claimable !== 'boolean' ||
+        (isLockedPoolClaim(padId) &&
+          (position.verification !== 'live' ||
+            position.payouts.length !== 2)) ||
         (position.escrowVersion !== undefined &&
-          (padId !== 'o1' || !['current', 'legacy'].includes(position.escrowVersion))) ||
+          (padId !== 'o1' ||
+            !['current', 'legacy'].includes(position.escrowVersion))) ||
         (position.claimDisabledReason !== undefined &&
           (!claimDisabledReasons.includes(position.claimDisabledReason) ||
             position.claimable)) ||
@@ -277,7 +286,8 @@ export function mergeFeePages(previous: FeeSource, page: FeeSource): FeeSource {
     if (
       existing &&
       (!equal(existing.target, position.target) ||
-        (existing.escrowVersion ?? 'current') !== (position.escrowVersion ?? 'current') ||
+        (existing.escrowVersion ?? 'current') !==
+          (position.escrowVersion ?? 'current') ||
         existing.payouts.length !== position.payouts.length ||
         existing.payouts.some(
           (payout, index) =>
@@ -310,14 +320,15 @@ export function validateClaim(value: unknown): ClaimQuote {
   if (
     !quote ||
     !id(quote.positionId) ||
-    !['long', 'o1'].includes(quote.kind) ||
-    !(quote.kind === 'long'
+    !['long', 'o1', 'longbow'].includes(quote.kind) ||
+    !(isLockedPoolClaim(quote.kind)
       ? quote.chainId === 4663
       : [4663, 8453].includes(quote.chainId)) ||
     !nonzeroAddress(quote.address) ||
     !nonzeroAddress(quote.target) ||
     (quote.escrowVersion !== undefined &&
-      (quote.kind !== 'o1' || !['current', 'legacy'].includes(quote.escrowVersion))) ||
+      (quote.kind !== 'o1' ||
+        !['current', 'legacy'].includes(quote.escrowVersion))) ||
     !payouts(quote.payouts) ||
     !quote.payouts.some((payout) => BigInt(payout.claimableRaw) > 0n) ||
     quote.value !== '0' ||
@@ -348,13 +359,14 @@ export function validateClaim(value: unknown): ClaimQuote {
     throw new AppError('invalid_response');
   }
   if (
-    quote.kind === 'long'
+    isLockedPoolClaim(quote.kind)
       ? quote.payouts.length !== 2 ||
         decoded.functionName !== 'collectFees' ||
         quote.data.length !== 74 ||
         decoded.args[0] !== quote.poolId
       : quote.payouts.length !== 1 ||
-        decoded.functionName !== (quote.escrowVersion === 'legacy' ? 'claim' : 'claimFor') ||
+        decoded.functionName !==
+          (quote.escrowVersion === 'legacy' ? 'claim' : 'claimFor') ||
         quote.data.length !== 138 ||
         !equal(decoded.args[0], quote.address) ||
         !equal(decoded.args[1], quote.payouts[0].asset)
@@ -377,7 +389,8 @@ export async function prepareClaim(
     quote.kind !== source.padId ||
     quote.positionId !== position.id ||
     !equal(quote.target, position.target) ||
-    (quote.escrowVersion ?? 'current') !== (position.escrowVersion ?? 'current') ||
+    (quote.escrowVersion ?? 'current') !==
+      (position.escrowVersion ?? 'current') ||
     quote.payouts.length !== position.payouts.length ||
     quote.payouts.some(
       (payout, index) =>

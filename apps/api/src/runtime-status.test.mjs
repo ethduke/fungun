@@ -81,3 +81,41 @@ test("fee readiness requires chain-specific escrow configuration", () => {
     "missing_configuration",
   );
 });
+
+test("Longbow readiness requires its own profile without enabling Long", () => {
+  const address = (digit) => `0x${digit.repeat(40)}`;
+  const codeHash = `0x${"2".repeat(64)}`;
+  const env = {
+    ROBINHOOD_RPC: new URL("/rpc", "https://example.invalid").href,
+    READ_FEES: "true",
+    WALLET_CLAIMS: "true",
+    FEE_CONTRACTS_JSON: JSON.stringify({
+      longbow: {
+        manager: address("1"),
+        managerCodeHash: codeHash,
+        hook: address("2"),
+        hookCodeHash: codeHash,
+        pools: [
+          {
+            asset: address("3"),
+            currency0: { address: address("3"), symbol: "TEST", decimals: 18 },
+            currency1: { address: address("4"), symbol: "PAIR", decimals: 6 },
+            fee: 3000,
+            tickSpacing: 60,
+          },
+        ],
+      },
+    }),
+  };
+  assert.equal(feature(env, "longbow_locked_pool_fees").status, "needs_live_verification");
+  assert.equal(feature(env, "longbow_locked_pool_claims").status, "needs_live_verification");
+  assert.equal(feature(env, "long_locked_pool_claims").status, "missing_configuration");
+  assert.deepEqual(
+    feature({ ...env, FEE_CONTRACTS_JSON: "{}" }, "longbow_locked_pool_fees").missing,
+    ["FEE_CONTRACTS_JSON.longbow"],
+  );
+  assert.equal(
+    feature({ ...env, WALLET_CLAIMS: "false" }, "longbow_locked_pool_claims").status,
+    "disabled",
+  );
+});

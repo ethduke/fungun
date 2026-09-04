@@ -51,6 +51,30 @@ export class FeeRpc {
     if (!url) throw new ServiceError("not_configured");
     if (!calls.length || calls.length > 12 || calls.some((call) => !methods.has(call.method)))
       throw new ServiceError("invalid_request", 400);
+    if (this.config.rpcBatchRequests === false) {
+      const values = [];
+      // Some RPC providers accept only individual request objects. This mode is
+      // explicit: charge each read, send in order, and stop without a retry.
+      for (const [id, call] of calls.entries()) {
+        const result = await this.upstream.json(
+          "rpc",
+          url,
+          {
+            method: "POST",
+            headers: { "content-type": "application/json" },
+            body: JSON.stringify({ jsonrpc: "2.0", id, ...call }),
+          },
+          256 * 1024,
+          1,
+        );
+        if (!result || Array.isArray(result) || result.id !== id || result.jsonrpc !== "2.0")
+          throw new ServiceError("invalid_response");
+        if (result.error) throw rpcError(result.error);
+        if (!Object.hasOwn(result, "result")) throw new ServiceError("invalid_response");
+        values.push(result.result);
+      }
+      return values;
+    }
     const results = await this.upstream.json(
       "rpc",
       url,

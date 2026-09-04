@@ -123,11 +123,11 @@ function mockRuntime(options = {}) {
               1,
             ],
             getShares: options.shares ?? 5n * 10n ** 17n,
-            getCumulatedFees0: 100n,
-            getCumulatedFees1: 200n,
-            getLastCumulatedFees0: 10n,
-            getLastCumulatedFees1: 20n,
-            collectFees: [10n, 20n],
+            getCumulatedFees0: options.emptyFees ? 0n : 100n,
+            getCumulatedFees1: options.emptyFees ? 0n : 200n,
+            getLastCumulatedFees0: options.emptyFees ? 0n : 10n,
+            getLastCumulatedFees1: options.emptyFees ? 0n : 20n,
+            collectFees: options.emptyFees ? [0n, 0n] : [10n, 20n],
             owed: options.owed ?? 150n,
             getL1Fee: 12n,
             getOperatorFee: args[0] === 100_000n ? 3n : 4n,
@@ -146,8 +146,14 @@ function mockRuntime(options = {}) {
       });
     },
   };
+  const cfg = config();
+  if (options.padId === "longbow") {
+    cfg.feeContracts = readFeeContracts(
+      JSON.stringify({ ...contracts(), long: undefined, longbow: contracts().long }),
+    );
+  }
   return {
-    service: new Fees(config(), upstream, () => now),
+    service: new Fees(cfg, upstream, () => now),
     upstream,
     budget,
     advance: (milliseconds = 61_000) => {
@@ -158,7 +164,12 @@ function mockRuntime(options = {}) {
 }
 
 test("configuration and fee inputs reject arbitrary targets, methods and unsupported claim profiles", () => {
-  assert.deepEqual(readFeeContracts(), { o1: [], long: undefined, baseOracle: undefined });
+  assert.deepEqual(readFeeContracts(), {
+    o1: [],
+    long: undefined,
+    longbow: undefined,
+    baseOracle: undefined,
+  });
   assert.throws(() =>
     readFeeContracts(JSON.stringify({ o1: [{ ...contracts().o1[0], chainId: 1 }] })),
   );
@@ -256,6 +267,144 @@ test("transferred Long shares and wrong hook fail closed", async (t) => {
   });
 });
 
+test("Longbow uses its own profile and prepares only beneficiary-bound collectFees", async (t) => {
+  const runtime = mockRuntime({ padId: "longbow" });
+  t.after(() => runtime.budget.close());
+  const input = { address: owner, chainId: 4663, padId: "longbow" };
+  assert.deepEqual(validateInput("fees", input), input);
+  assert.throws(() => validateInput("fees", { ...input, chainId: 8453 }));
+  const results = await Promise.all(Array.from({ length: 10 }, () => runtime.service.list(input)));
+  assert.equal(runtime.calls(), 11);
+  const result = results[0];
+  assert.equal(result.padId, "longbow");
+  assert.equal(result.coverage, "configured_pools");
+  assert.equal(result.status, "partial");
+  assert.deepEqual(
+    result.positions[0].payouts.map((payout) => payout.claimableRaw),
+    ["50", "100"],
+  );
+  assert.equal(result.positions[0].claimable, true);
+  const long = await runtime.service.list({ ...input, padId: "long" });
+  assert.equal(long.status, "unavailable");
+  assert.equal(long.reason, "contracts_not_configured");
+  const positionId = result.positions[0].id;
+  await assert.rejects(runtime.service.prepare({ address: address("b"), positionId }), {
+    code: "quote_expired",
+  });
+  const quote = await runtime.service.prepare({ address: owner, positionId });
+  assert.equal(quote.kind, "longbow");
+  assert.equal(quote.chainId, 4663);
+  assert.equal(quote.target, contracts().long.manager);
+  assert.equal(quote.value, "0");
+  const decoded = decodeFunctionData({ abi: managerAbi, data: quote.data });
+  assert.equal(decoded.functionName, "collectFees");
+  assert.deepEqual(decoded.args, [quote.poolId]);
+  assert.equal(runtime.calls(), 26);
+  await runtime.service.prepare({ address: owner, positionId });
+  assert.equal(runtime.calls(), 26);
+});
+
+test("Longbow refuses claims after shares transfer or code and hook changes", async (t) => {
+  for (const mode of ["shares", "code", "hook"]) {
+    const options = { padId: "longbow" };
+    const runtime = mockRuntime(options);
+    t.after(() => runtime.budget.close());
+    const result = await runtime.service.list({ address: owner, chainId: 4663, padId: "longbow" });
+    if (mode === "shares") options.shares = 0n;
+    if (mode === "code") options.changedCode = true;
+    if (mode === "hook") options.changedHook = true;
+    await assert.rejects(
+      runtime.service.prepare({ address: owner, positionId: result.positions[0].id }),
+      {
+        code: mode === "shares" ? "nothing_to_claim" : "contract_unverified",
+      },
+    );
+  }
+});
+
+test("locked-pool lists omit nonbeneficiaries but retain owned positions with zero fees", async (t) => {
+  for (const padId of ["long", "longbow"]) {
+    for (const shares of [0n, 95n * 10n ** 16n]) {
+      const runtime = mockRuntime({ padId, shares, emptyFees: true });
+      t.after(() => runtime.budget.close());
+      const result = await runtime.service.list({ address: owner, chainId: 4663, padId });
+      assert.equal(result.positions.length, shares === 0n ? 0 : 1);
+      if (shares > 0n) {
+        assert.deepEqual(
+          result.positions[0].payouts.map((payout) => payout.claimableRaw),
+          ["0", "0"],
+        );
+        assert.equal(result.positions[0].claimable, false);
+        assert.equal(result.positions[0].claimDisabledReason, "nothing_to_claim");
+      }
+    }
+  }
+});
+
+test("locked-pool handles cannot survive reassignment or reuse cached quotes after profile edits", async (t) => {
+  for (const padId of ["long", "longbow"]) {
+    for (const field of ["manager", "managerCodeHash", "hook", "hookCodeHash", "pools"]) {
+      const runtime = mockRuntime({ padId });
+      t.after(() => runtime.budget.close());
+      const result = await runtime.service.list({ address: owner, chainId: 4663, padId });
+      const input = { address: owner, positionId: result.positions[0].id };
+      await runtime.service.prepare(input);
+      const before = runtime.calls();
+      runtime.service.config.feeContracts[padId][field] =
+        field === "pools" ? [] : field.endsWith("Hash") ? keccak256("0x6000") : address("9");
+      await assert.rejects(runtime.service.prepare(input), { code: "contract_unverified" });
+      assert.equal(runtime.calls(), before);
+    }
+  }
+});
+
+test("Long and Longbow cannot count the same pool, disagree on pins, or share unlabelled discovery", () => {
+  const profile = contracts().long;
+  const distinct = {
+    ...pool,
+    asset: address("8"),
+    currency0: { ...pool.currency0, address: address("8") },
+    currency1: { ...pool.currency1, address: address("9") },
+  };
+  const longbow = { ...profile, pools: [distinct] };
+  assert.equal(
+    readFeeContracts(JSON.stringify({ long: profile, longbow })).longbow.pools.length,
+    1,
+  );
+  for (const changed of [
+    profile,
+    { ...profile, pools: [{ ...pool, currency0: { ...pool.currency0, symbol: "RENAMED" } }] },
+    { ...profile, pools: [{ ...pool, fee: pool.fee + 1 }] },
+    { ...longbow, managerCodeHash: keccak256("0x6000") },
+    { ...longbow, hookCodeHash: keccak256("0x6000") },
+    { ...longbow, discovery: { fromBlock: 0 } },
+    null,
+    [],
+  ])
+    assert.throws(() => readFeeContracts(JSON.stringify({ long: profile, longbow: changed })), {
+      code: "invalid_fee_configuration",
+    });
+  assert.throws(
+    () =>
+      readFeeContracts(
+        JSON.stringify({
+          long: { ...profile, discovery: { fromBlock: 0 } },
+          longbow,
+        }),
+      ),
+    { code: "invalid_fee_configuration" },
+  );
+  assert.equal(
+    readFeeContracts(
+      JSON.stringify({
+        long: { ...profile, discovery: { fromBlock: 0 } },
+        longbow: { ...longbow, manager: address("b") },
+      }),
+    ).long.discovery.blockRange,
+    2000,
+  );
+});
+
 test("Base escrow uses live owed and requires complete execution, L1 and operator fee estimates", async (t) => {
   const runtime = mockRuntime({ chainId: 8453 });
   t.after(() => runtime.budget.close());
@@ -287,8 +436,11 @@ test("disabled and unconfigured fee sources report the cause without upstream wo
   const cases = [
     { padId: "o1", settings: { feesEnabled: false }, reason: "fees_disabled" },
     { padId: "long", settings: { feesEnabled: false }, reason: "fees_disabled" },
+    { padId: "longbow", settings: { feesEnabled: false }, reason: "fees_disabled" },
     { padId: "o1", settings: { o1Key: "" }, reason: "provider_not_configured" },
     { padId: "long", settings: { rpcUrl: "" }, reason: "provider_not_configured" },
+    { padId: "longbow", settings: { rpcUrl: "" }, reason: "provider_not_configured" },
+    { padId: "longbow", settings: {}, reason: "contracts_not_configured" },
     {
       padId: "long",
       settings: { feeContracts: readFeeContracts() },
@@ -350,7 +502,7 @@ test("live balances retain disabled-claim reasons for switches, gas configuratio
     {
       padId: "long",
       chainId: 4663,
-      options: { shares: 0n },
+      options: { emptyFees: true },
       reason: "nothing_to_claim",
       amount: "0",
     },
@@ -577,6 +729,7 @@ test("configured Long pools paginate beyond two without changing the scan block"
     blocks.push(block);
     return {
       kind: "long",
+      beneficiary: true,
       chainId: 4663,
       address,
       target: contracts().long.manager,
@@ -607,6 +760,58 @@ test("configured Long pools paginate beyond two without changing the scan block"
     ).long.pools,
     [],
   );
+});
+
+test("Longbow paginates all configured pools with source-bound cursors and one scan block", async (t) => {
+  const runtime = mockRuntime({ padId: "longbow" });
+  t.after(() => runtime.budget.close());
+  const pools = Array.from({ length: 5 }, (_, index) => ({ ...pool, fee: 3000 + index }));
+  runtime.service.config.feeContracts = readFeeContracts(
+    JSON.stringify({
+      long: { ...contracts().long, manager: address("b") },
+      longbow: { ...contracts().long, pools },
+    }),
+  );
+  const blocks = [];
+  runtime.service.longPosition = async (address, selected, block, padId) => {
+    assert.equal(padId, "longbow");
+    blocks.push(block);
+    return {
+      kind: padId,
+      beneficiary: true,
+      chainId: 4663,
+      address,
+      target: contracts().long.manager,
+      poolId: toHex(selected.fee, { size: 32 }),
+      payouts: [{ ...pool.currency0, asset: pool.currency0.address, claimableRaw: "1" }],
+      verification: "live",
+      claimable: true,
+    };
+  };
+  const input = { address: owner, chainId: 4663, padId: "longbow" };
+  const first = await runtime.service.list(input);
+  await assert.rejects(
+    runtime.service.list({ ...input, padId: "long", cursor: first.nextCursor }),
+    {
+      code: "cursor_expired",
+    },
+  );
+  const second = await runtime.service.list({ ...input, cursor: first.nextCursor });
+  const last = await runtime.service.list({ ...input, cursor: second.nextCursor });
+  assert.deepEqual(
+    [first, second, last].map((page) => page.positions.length),
+    [2, 2, 1],
+  );
+  assert.equal(last.nextCursor, null);
+  assert.equal(last.padId, "longbow");
+  assert.equal(last.coverage, "configured_pools");
+  assert.equal(last.status, "partial");
+  assert.deepEqual(blocks, Array(5).fill("0x123"));
+  assert.equal(runtime.calls(), 4);
+  runtime.service.config.feeContracts.longbow.hookCodeHash = keccak256("0x6000");
+  await assert.rejects(runtime.service.list({ ...input, cursor: first.nextCursor }), {
+    code: "cursor_expired",
+  });
 });
 
 test("batch RPC debits every method, rejects duplicate IDs and never exposes provider errors", async () => {

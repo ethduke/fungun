@@ -50,3 +50,16 @@ test("missing, inherited-prototype and non-string entries cannot become configur
   assert.deepEqual(apiEnvironment(inherited, { READ_UPSTREAMS: true }), {});
   assert.deepEqual(apiEnvironment(), {});
 });
+
+test("RPC batch compatibility is forwarded only as server runtime configuration", () => {
+  assert.deepEqual(apiEnvironment({}, { RPC_BATCH_REQUESTS: "false" }), {
+    RPC_BATCH_REQUESTS: "false",
+  });
+  assert.deepEqual(
+    apiEnvironment({ RPC_BATCH_REQUESTS: "true" }, { RPC_BATCH_REQUESTS: "false" }),
+    {
+      RPC_BATCH_REQUESTS: "true",
+    },
+  );
+  assert.deepEqual(apiEnvironment({}, { NEXT_PUBLIC_RPC_BATCH_REQUESTS: "false" }), {});
+});

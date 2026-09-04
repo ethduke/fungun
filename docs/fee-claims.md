@@ -11,10 +11,12 @@ discards old work and clears displayed fees.
 
 ## Coverage
 
-- Long / Robinhood: discover locked pools from a reviewed manager's beneficiary
+- Long and Longbow / Robinhood: discover locked pools from a reviewed manager's beneficiary
   events, including transferred fee rights, or page through up to 256 configured
   pools. Each page verifies at most two pools. Separate hook payouts remain
-  unsupported. Both pool currencies are paid by one claim.
+  unsupported. Both pool currencies are paid by one claim. Longbow has its own
+  reviewed profile and card; the same pool must not appear under both launchpads.
+  A shared manager cannot provide launchpad attribution for an unfiltered event scan.
 - O1 / Robinhood and Base: resumable wallet-index pages with eight positions per
   page, including historical indexed positions. Every position in an approved
   escrow profile receives a live `owed` read; there is no four-position live cap.
@@ -22,7 +24,6 @@ discards old work and clears displayed fees.
   Unapproved or incompatible escrows remain indexed and cannot be claimed here.
 - O1 claims support reviewed current and legacy escrow profiles on both chains. Base
   additionally needs a pinned gas oracle. The webview still has Base paused.
-  Longbow does not have a separate fee adapter.
 - Fees are displayed by payout currency and source. O1 escrow balances are shared
   across launches; they cannot be labeled as fees owed by an individual launched coin.
   Owning an ERC-20 balance does not itself confer creator or beneficiary fees.
@@ -51,7 +52,10 @@ or a positive fee balance. Restart the API after changing runtime settings, then
 use Refresh in the connected wallet's Fees page.
 
 Use server-only `O1_API_KEY`, `ROBINHOOD_RPC` (or its existing alias), and
-`BASE_RPC_URL`. `FEE_CONTRACTS_JSON` has this shape; the placeholders below are
+`BASE_RPC_URL`. Set `RPC_BATCH_REQUESTS=false` for a provider that rejects or
+stalls JSON-RPC batches. This sends the same bounded read methods individually,
+with the same quota accounting and no request retries. The default retains batch
+requests. `FEE_CONTRACTS_JSON` has this shape; the placeholders below are
 intentionally invalid and cannot enable claims:
 
 ```json
@@ -78,6 +82,11 @@ intentionally invalid and cannot enable claims:
   }
 }
 ```
+
+For Longbow, add a separate `longbow` section with the same locked-pool schema as
+`long`, using independently identified Longbow default-route pools. Shared
+manager/hook code pins must agree, and pools cannot be duplicated across profiles.
+Other Longbow routes are not enabled by a default-route profile.
 
 Omit unconfigured sections. Native currency uses the runtime zero address, ETH/18;
 wrapped ETH is distinct. Verify actual pool fee, spacing and token decimals—example
@@ -132,7 +141,7 @@ The service retains at most 4,096 position handles and 512 cursors in memory.
 An O1 scan stops after 512 pages with an explicit limit error; exceeding a limit
 never upgrades coverage to complete. Restarting the service invalidates all handles.
 
-Long calls only `collectFees(poolId)` directly from the beneficiary wallet. O1
+Long and Longbow call only `collectFees(poolId)` directly from the beneficiary wallet. O1
 uses `claimFor(owner,currency)` for current escrows or `claim(owner,currency)` for
 explicitly configured legacy escrows, each paying that owner. All claims have zero
 native value and no token approval. Review shows gas in ETH, including Base L1/operator

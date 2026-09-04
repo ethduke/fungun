@@ -10,6 +10,7 @@ import { base, robinhood } from 'viem/chains';
 import {
   claimAbi,
   legacyClaimAbi,
+  isLockedPoolClaim,
   validateClaim,
   type ClaimQuote,
   type FeePayout,
@@ -201,7 +202,7 @@ export function receiptPayouts(
     )
       amounts[0] += event.args.amount;
     if (
-      quote.kind === 'long' &&
+      isLockedPoolClaim(quote.kind) &&
       event.eventName === 'Release' &&
       event.args.poolId === quote.poolId &&
       event.args.beneficiary.toLowerCase() === quote.address.toLowerCase()

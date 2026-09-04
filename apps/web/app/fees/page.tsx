@@ -11,7 +11,7 @@ import {
   EmptyTitle,
 } from '@/components/ui/empty';
 import { useConnectedAccount } from '@/lib/account-context';
-import { chainName } from '@/lib/launch-model';
+import { chainName, launchpadName } from '@/lib/launch-model';
 import {
   FEE_LOOKUP_DELAY,
   FEE_SOURCES,
@@ -51,7 +51,7 @@ type SourceResult = {
   pageError?: string;
   pages: number;
 };
-const label = (pad: string) => (pad === 'long' ? 'Long' : 'O1');
+const label = launchpadName;
 const short = (value: string) => `${value.slice(0, 6)}…${value.slice(-4)}`;
 const payoutText = (payout: FeePayout) =>
   `${formatUnits(BigInt(payout.claimableRaw), payout.decimals)} ${payout.symbol}`;
@@ -257,7 +257,7 @@ function ConnectedFees({ address }: { address: string }) {
               ...previous,
               entries: previous.entries.map((result) =>
                 result.key === entry.key
-                    ? { ...result, pageError: describeError(error, 'fees') }
+                  ? { ...result, pageError: describeError(error, 'fees') }
                   : result,
               ),
             }
@@ -378,21 +378,16 @@ function ConnectedFees({ address }: { address: string }) {
           const unverified = positions.some(
             (position) => position.verification === 'indexed',
           );
-          const positive = positions.filter((position) =>
-            position.payouts.some((payout) => BigInt(payout.claimableRaw) > 0n),
-          );
-          const claimUnavailable = positive
+          const claimUnavailable = positions
             .map(disabledClaimMessage)
             .find(Boolean);
           const balances = groupFeeBalances(
-            positive.flatMap((position) =>
-              position.payouts
-                .filter((payout) => BigInt(payout.claimableRaw) > 0n)
-                .map((payout) => ({
-                  ...payout,
-                  padId: source.padId,
-                  chainId: source.chainId,
-                })),
+            positions.flatMap((position) =>
+              position.payouts.map((payout) => ({
+                ...payout,
+                padId: source.padId,
+                chainId: source.chainId,
+              })),
             ),
           );
           const incomplete = data?.status === 'partial' || !!data?.nextCursor;

@@ -72,14 +72,15 @@ Run `npm run dev:api` in a second terminal for the read service. See
   O1 loads a per-chain catalog when the backend is configured; otherwise samples
   remain labeled. O1 refresh is explicit; no periodic background calls.
 - Check Long ticker reservations on click; O1 availability remains unverified.
-  Longbow has no ticker or fee adapter; its ID never enters those API requests.
+  Longbow has no ticker adapter; its ID is excluded from ticker requests. Its
+  separate fee adapter supports reviewed locked pools on Robinhood.
 - The inline launch section updates coin details, destinations and draft validation as you edit.
 - Image checks show an inline loading state; O1's metadata-update toggle stays in the launch section.
 - Open the Grok/x402 flow preview; no image generation or payment occurs.
   The [server-side memecoin prompt scaffold](image-generation.md) prepares one square
   image with ticker/name context; it is not connected to paid generation yet.
 - Explicitly connect/disconnect a discovered EIP-6963 wallet using wagmi/viem.
-- Open FEE from the header: one payout-coin table, no console tabs.
+- Open FEES from the header: one balance card and Claim all action per launchpad.
 - FEE shows fees only for the connected wallet; while disconnected, it shows “Connect your wallet to show fees.” without making fee lookups.
 
 Fee reads and wallet claims are implemented behind runtime configuration; see

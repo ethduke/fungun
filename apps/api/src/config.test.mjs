@@ -2,6 +2,17 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { readConfig } from "./config.mjs";
 
+test("RPC request transport defaults to batches and accepts only explicit boolean settings", () => {
+  assert.equal(readConfig({}).rpcBatchRequests, true);
+  assert.equal(readConfig({ RPC_BATCH_REQUESTS: "" }).rpcBatchRequests, true);
+  assert.equal(readConfig({ RPC_BATCH_REQUESTS: "true" }).rpcBatchRequests, true);
+  assert.equal(readConfig({ RPC_BATCH_REQUESTS: "false" }).rpcBatchRequests, false);
+  for (const value of ["0", "1", "TRUE", "False", " true", "false ", true, false])
+    assert.throws(() => readConfig({ RPC_BATCH_REQUESTS: value }), {
+      code: "invalid_rpc_configuration",
+    });
+});
+
 test("local API ports and exact loopback web origins can be isolated per worktree", () => {
   assert.equal(readConfig({}).port, 8787);
   for (const [origin, port] of [

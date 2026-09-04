@@ -8,6 +8,7 @@ import {
   beneficiaryFees,
   escrowAbi,
   legacyEscrowAbi,
+  isLockedPoolPad,
   managerAbi,
   oracleAbi,
   poolId,
@@ -28,6 +29,24 @@ const view = (address, abi, functionName, args, from) => ({
   args,
   from,
 });
+
+const profileKey = (config, padId) =>
+  isLockedPoolPad(padId) ? JSON.stringify(config.feeContracts[padId]) : "";
+
+function lockedProfile(config, position) {
+  const profile = config.feeContracts[position.kind];
+  if (
+    !isLockedPoolPad(position.kind) ||
+    !profile ||
+    position.chainId !== 4663 ||
+    position.profileKey !== profileKey(config, position.kind) ||
+    !sameAddress(position.target, profile.manager) ||
+    (!profile.discovery &&
+      !profile.pools.some((pool) => JSON.stringify(pool) === JSON.stringify(position.pool)))
+  )
+    throw new ServiceError("contract_unverified", 409);
+  return profile;
+}
 
 export function parseO1Positions(body, address, chainId, limit = 25) {
   if (
@@ -128,6 +147,7 @@ export class Fees {
       position.target,
       position.poolId ?? position.payouts[0].asset,
       position.escrowVersion,
+      position.profileKey,
     ];
     const id = createHmac("sha256", this.key).update(JSON.stringify(identity)).digest("hex");
     this.handles.delete(id);
@@ -142,7 +162,9 @@ export class Fees {
       payouts: position.payouts,
       verification: position.verification,
       claimable: position.claimable,
-      ...(position.claimDisabledReason ? { claimDisabledReason: position.claimDisabledReason } : {}),
+      ...(position.claimDisabledReason
+        ? { claimDisabledReason: position.claimDisabledReason }
+        : {}),
     };
   }
 
@@ -154,6 +176,7 @@ export class Fees {
       address: input.address,
       chainId: input.chainId,
       padId: input.padId,
+      profileKey: profileKey(this.config, input.padId),
       state,
       expires: this.now() + HANDLE_TTL,
     });
@@ -168,7 +191,8 @@ export class Fees {
       cursor.expires <= this.now() ||
       !sameAddress(cursor.address, input.address) ||
       cursor.chainId !== input.chainId ||
-      cursor.padId !== input.padId
+      cursor.padId !== input.padId ||
+      cursor.profileKey !== profileKey(this.config, input.padId)
     )
       throw new ServiceError("cursor_expired", 409);
     return cursor.state;
@@ -176,10 +200,12 @@ export class Fees {
 
   async list(input) {
     const { address, chainId, padId } = input;
+    if (!["o1", "long", "longbow"].includes(padId) || (isLockedPoolPad(padId) && chainId !== 4663))
+      throw new ServiceError("invalid_request", 400);
     const coverage =
       padId === "o1"
         ? "wallet_index"
-        : this.config.feeContracts.long?.discovery
+        : this.config.feeContracts[padId]?.discovery
           ? "beneficiary_events"
           : "configured_pools";
     const unavailable = {
@@ -194,31 +220,37 @@ export class Fees {
       expiresAt: this.now() + TTL,
     };
     if (!this.config.feesEnabled) return { ...unavailable, reason: "fees_disabled" };
-    if (
-      (padId === "o1" && !this.config.o1Key) ||
-      (padId === "long" && !this.config.rpcUrl)
-    )
+    if ((padId === "o1" && !this.config.o1Key) || (isLockedPoolPad(padId) && !this.config.rpcUrl))
       return { ...unavailable, reason: "provider_not_configured" };
-    if (padId === "long" && !this.config.feeContracts.long?.pools.length &&
-      !this.config.feeContracts.long?.discovery)
+    if (
+      isLockedPoolPad(padId) &&
+      !this.config.feeContracts[padId]?.pools.length &&
+      !this.config.feeContracts[padId]?.discovery
+    )
       return { ...unavailable, reason: "contracts_not_configured" };
-    return this.cache.get(`fees:${JSON.stringify(input)}`, TTL, async () => {
-      const state = this.cursor(input);
-      const result =
-        padId === "o1" ? await this.o1(address, chainId, state) : await this.long(address, state);
-      return {
-        address,
-        chainId,
-        padId,
-        coverage,
-        nextCursor: this.continuation(input, result.nextState),
-        status: result.partial ? "partial" : "ready",
-        checkedAt: this.now(),
-        expiresAt: this.now() + TTL,
-        positions: result.positions.map((position) => this.remember(position)),
-        ...(result.progress ? { progress: result.progress } : {}),
-      };
-    });
+    return this.cache.get(
+      `fees:${JSON.stringify(input)}:${profileKey(this.config, padId)}`,
+      TTL,
+      async () => {
+        const state = this.cursor(input);
+        const result =
+          padId === "o1"
+            ? await this.o1(address, chainId, state)
+            : await this.long(address, state, padId);
+        return {
+          address,
+          chainId,
+          padId,
+          coverage,
+          nextCursor: this.continuation(input, result.nextState),
+          status: result.partial ? "partial" : "ready",
+          checkedAt: this.now(),
+          expiresAt: this.now() + TTL,
+          positions: result.positions.map((position) => this.remember(position)),
+          ...(result.progress ? { progress: result.progress } : {}),
+        };
+      },
+    );
   }
 
   async o1(address, chainId, state) {
@@ -287,10 +319,14 @@ export class Fees {
               this.config.claimsEnabled &&
               (chainId !== 8453 || !!this.config.feeContracts.baseOracle) &&
               amounts[index] > 0n;
-            position.claimDisabledReason = amounts[index] === 0n ? "nothing_to_claim"
-              : !this.config.claimsEnabled ? "claims_disabled"
-              : chainId === 8453 && !this.config.feeContracts.baseOracle ? "gas_oracle_not_configured"
-              : undefined;
+            position.claimDisabledReason =
+              amounts[index] === 0n
+                ? "nothing_to_claim"
+                : !this.config.claimsEnabled
+                  ? "claims_disabled"
+                  : chainId === 8453 && !this.config.feeContracts.baseOracle
+                    ? "gas_oracle_not_configured"
+                    : undefined;
           });
         } catch (error) {
           // An incompatible owed method remains visible as indexed-only;
@@ -309,8 +345,8 @@ export class Fees {
     };
   }
 
-  async long(address, state) {
-    const profile = this.config.feeContracts.long;
+  async long(address, state, padId = "long") {
+    const profile = this.config.feeContracts[padId];
     const block = state?.block ?? (await this.rpc.block(4663));
     await this.rpc.verify(
       4663,
@@ -330,8 +366,10 @@ export class Fees {
         block,
         state?.discovery,
       );
-      for (const pool of result.pools)
-        positions.push(await this.longPosition(address, pool, block));
+      for (const pool of result.pools) {
+        const position = await this.longPosition(address, pool, block, padId);
+        if (position.beneficiary) positions.push(position);
+      }
       return {
         positions,
         progress: result.progress,
@@ -340,8 +378,10 @@ export class Fees {
       };
     }
     const offset = state?.offset ?? 0;
-    for (const pool of profile.pools.slice(offset, offset + LONG_PAGE_SIZE))
-      positions.push(await this.longPosition(address, pool, block));
+    for (const pool of profile.pools.slice(offset, offset + LONG_PAGE_SIZE)) {
+      const position = await this.longPosition(address, pool, block, padId);
+      if (position.beneficiary) positions.push(position);
+    }
     return {
       positions,
       partial: true,
@@ -352,8 +392,8 @@ export class Fees {
     };
   }
 
-  async longPosition(address, pool, block) {
-    const profile = this.config.feeContracts.long;
+  async longPosition(address, pool, block, padId = "long") {
+    const profile = this.config.feeContracts[padId];
     const id = poolId(pool, profile.manager);
     const stateCall = view(profile.manager, managerAbi, "getState", [pool.asset]);
     const calls = [
@@ -392,7 +432,9 @@ export class Fees {
       beneficiaryFees(cumulative1, collected[1], last1, shares),
     ];
     return {
-      kind: "long",
+      kind: padId,
+      profileKey: profileKey(this.config, padId),
+      beneficiary: shares > 0n,
       address,
       chainId: 4663,
       target: profile.manager,
@@ -400,8 +442,12 @@ export class Fees {
       pool,
       verification: "live",
       claimable: this.config.claimsEnabled && shares > 0n && amounts.some((amount) => amount > 0n),
-      claimDisabledReason: shares === 0n || !amounts.some((amount) => amount > 0n)
-        ? "nothing_to_claim" : !this.config.claimsEnabled ? "claims_disabled" : undefined,
+      claimDisabledReason:
+        shares === 0n || !amounts.some((amount) => amount > 0n)
+          ? "nothing_to_claim"
+          : !this.config.claimsEnabled
+            ? "claims_disabled"
+            : undefined,
       payouts: [pool.currency0, pool.currency1].map((currency, index) => ({
         asset: currency.address,
         symbol: currency.symbol,
@@ -418,14 +464,15 @@ export class Fees {
     if (!handle || handle.expires <= this.now() || !sameAddress(handle.position.address, address))
       throw new ServiceError("quote_expired", 409);
     if (!handle.position.claimable) throw new ServiceError("contract_unverified", 409);
+    if (isLockedPoolPad(handle.position.kind)) lockedProfile(this.config, handle.position);
     return this.preflights.get(`claim:${address}:${positionId}`, 10_000, async () => {
       let position = handle.position;
       const chainId = position.chainId;
       const block = await this.rpc.block(chainId);
       let data;
       let escrowVersion;
-      if (position.kind === "long") {
-        const profile = this.config.feeContracts.long;
+      if (isLockedPoolPad(position.kind)) {
+        const profile = lockedProfile(this.config, position);
         await this.rpc.verify(
           chainId,
           [
@@ -435,7 +482,7 @@ export class Fees {
           true,
           block,
         );
-        position = await this.longPosition(address, position.pool, block);
+        position = await this.longPosition(address, position.pool, block, position.kind);
         data = encodeFunctionData({
           abi: managerAbi,
           functionName: "collectFees",

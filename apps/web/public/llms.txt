@@ -6,10 +6,10 @@ Agents can help prepare a coin draft and explain its validation. Configured
 backends can load RWA catalogs and check Long ticker reservations on explicit
 request. External reads default to disabled; O1 ticker availability remains
 unverified; Longbow ticker checking is not connected. Fees supports paginated
-Long beneficiary-pool discovery and O1 wallet-index positions, with claims for
-reviewed current contracts. Claim all queues eligible discovered positions with
+Long/Longbow beneficiary-pool discovery and O1 wallet-index positions, with claims for
+reviewed contracts. Each launchpad's Claim all queues its eligible discovered positions with
 separate review, wallet confirmation and receipt proof for every claim. Base fee lookups are
-paused and Longbow fee lookup is not connected.
+paused. Longbow uses a separate reviewed pool profile.
 Live launch quotes and paid image generation are not enabled.
 An unavailable balance is unknown, not zero. A reservation check is not proof
 of global ticker uniqueness or launch readiness.

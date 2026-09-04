@@ -37,6 +37,9 @@ export function readConfig(env = process.env) {
   const baseRpcUrl = env.BASE_RPC_URL || "";
   if (baseRpcUrl && new URL(baseRpcUrl).protocol !== "https:")
     throw new ServiceError("invalid_rpc_configuration");
+  const rpcBatchRequests = env.RPC_BATCH_REQUESTS ?? "";
+  if (!["", "true", "false"].includes(rpcBatchRequests))
+    throw new ServiceError("invalid_rpc_configuration");
   const registry = env.LONG_TICKER_REGISTRY_ADDRESS || "";
   const codeHash = env.LONG_TICKER_REGISTRY_CODE_HASH || "";
   const longQuotes = (env.LONG_RWA_ALLOWLIST || "")
@@ -60,6 +63,7 @@ export function readConfig(env = process.env) {
     o1Key,
     rpcUrl,
     baseRpcUrl,
+    rpcBatchRequests: rpcBatchRequests !== "false",
     feesEnabled: env.READ_FEES === "true",
     claimsEnabled: env.WALLET_CLAIMS === "true",
     feeContracts: readFeeContracts(env.FEE_CONTRACTS_JSON || undefined),
