@@ -288,6 +288,8 @@ export class AssetStore {
     return {
       id: row.id,
       message: this.message(row, wallet),
+      issuedAt: row.created,
+      totalBytes: row.bytes,
       expiresAt: row.expires,
       imageHash: row.image_hash,
       metadataHash: row.metadata_hash,
@@ -331,7 +333,7 @@ export class AssetStore {
       if (row.state === "published") {
         this.read(`${bundle.imageHash}.webp`);
         this.read(`${bundle.metadataHash}.json`);
-        return this.result(bundle);
+        return this.result(bundle, id);
       }
       if (row.state !== "pending") throw new ServiceError("asset_publication_uncertain", 409);
       if (row.expires < this.clock()) throw new ServiceError("asset_approval_expired", 409);
@@ -381,7 +383,7 @@ export class AssetStore {
         this.db.exec("ROLLBACK");
         throw error;
       }
-      return this.result(bundle);
+      return this.result(bundle, id);
     } catch (error) {
       if (error instanceof ServiceError) throw error;
       throw new ServiceError("asset_publication_uncertain", 409);
@@ -390,8 +392,40 @@ export class AssetStore {
     }
   }
 
-  result(bundle) {
+  status({ id, wallet, imageHash, metadataHash }) {
+    if (
+      typeof id !== "string" ||
+      !/^[a-f0-9]{48}$/.test(id) ||
+      typeof wallet !== "string" ||
+      !isAddress(wallet)
+    )
+      throw new ServiceError("invalid_asset_approval", 400);
+    const row = this.db.prepare("SELECT * FROM asset_challenges WHERE id = ?").get(id);
+    if (
+      !row ||
+      row.owner !== this.owner(wallet) ||
+      row.image_hash !== imageHash ||
+      row.metadata_hash !== metadataHash
+    )
+      throw new ServiceError("asset_approval_changed", 404);
+    if (row.state !== "published")
+      return { id, status: row.state === "reserved" ? "uncertain" : "pending" };
+    this.read(`${imageHash}.webp`);
+    this.read(`${metadataHash}.json`);
+    return this.result(
+      {
+        imageHash,
+        metadataHash,
+        imageUrl: `${this.publicOrigin}/launch-assets/${imageHash}.webp`,
+        metadataUrl: `${this.publicOrigin}/launch-assets/${metadataHash}.json`,
+      },
+      id,
+    );
+  }
+
+  result(bundle, id) {
     return {
+      id,
       status: "published",
       imageUrl: bundle.imageUrl,
       metadataUrl: bundle.metadataUrl,

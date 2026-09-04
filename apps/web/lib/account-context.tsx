@@ -2,6 +2,7 @@
 
 import { createContext, useContext } from 'react';
 import type { ClaimQuote } from './fee-service';
+import type { AssetApproval } from './asset-protocol';
 
 export type ConnectedAccount = {
   address?: string;
@@ -9,6 +10,7 @@ export type ConnectedAccount = {
   ensureClaimChain?: (address: string, chainId: number, isCurrent: () => boolean) => Promise<void>;
   sendClaim?: (quote: ClaimQuote) => Promise<string>;
   checkClaim?: (positionId: string) => Promise<void>;
+  signAsset?: (approval: AssetApproval, isCurrent: () => boolean) => Promise<`0x${string}`>;
 };
 export const AccountContext = createContext<ConnectedAccount>({});
 

@@ -62,6 +62,26 @@ async function body(request) {
 }
 
 export function validateAssetInput(kind, input) {
+  if (kind === "status") {
+    const fields = ["chainId", "wallet", "id", "imageHash", "metadataHash"];
+    if (
+      !input ||
+      typeof input !== "object" ||
+      Array.isArray(input) ||
+      Object.keys(input).length !== fields.length ||
+      fields.some((key) => !Object.hasOwn(input, key)) ||
+      input.chainId !== 4663 ||
+      typeof input.wallet !== "string" ||
+      !isAddress(input.wallet) ||
+      typeof input.id !== "string" ||
+      !/^[a-f0-9]{48}$/.test(input.id) ||
+      [input.imageHash, input.metadataHash].some(
+        (hash) => typeof hash !== "string" || !/^[a-f0-9]{64}$/.test(hash),
+      )
+    )
+      throw new ServiceError("invalid_request", 400);
+    return input;
+  }
   const fields =
     kind === "prepare"
       ? ["chainId", "wallet", "draft", "imageBase64"]
@@ -156,15 +176,19 @@ export function createAssetHandler(config, store, processor) {
           ? "prepare"
           : request.url === "/v1/asset-publish"
             ? "publish"
-            : null;
+            : request.url === "/v1/asset-status"
+              ? "status"
+              : null;
       if (!kind || request.headers["x-fungun-intent"] !== `asset-${kind}`)
         throw new ServiceError("not_found", 404);
-      if (!config.uploadsEnabled) throw new ServiceError("asset_uploads_disabled");
+      if (kind !== "status" && !config.uploadsEnabled)
+        throw new ServiceError("asset_uploads_disabled");
       if (kind === "prepare") {
         if (preparing) throw new ServiceError("asset_busy", 429, 2);
         preparing = acquired = true;
       }
       const input = validateAssetInput(kind, await body(request));
+      if (kind === "status") return send(200, store.status(input));
       if (kind === "publish") return send(200, await store.publish(input));
       validateImageInput(input.image);
       store.budget.debit([

@@ -31,6 +31,7 @@ import {
 } from '@/components/ui/dialog';
 import { LaunchpadCard } from '@/components/launchpad-card';
 import { LaunchSection } from '@/components/launch-section';
+import { AssetPublication } from '@/components/asset-publication';
 import {
   autofillCoinName,
   IMAGE_LIMIT,
@@ -557,7 +558,18 @@ export default function Home() {
             tickerCheck={reads.check}
             checking={reads.checking}
             now={reads.now}
-          />
+          >
+            <AssetPublication
+              name={name}
+              ticker={ticker}
+              description={description}
+              image={image}
+              imagePending={imagePending}
+              enabled={
+                chainId === 4663 && active.some((pad) => pad.id === 'long')
+              }
+            />
+          </LaunchSection>
         </form>
         <footer className="workspace-footer">
           <span>YOUR IDEA. YOUR WALLET. YOUR LAUNCH.</span>

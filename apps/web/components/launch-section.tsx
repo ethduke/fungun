@@ -1,7 +1,7 @@
 'use client';
 
 import Image from 'next/image';
-import { useEffect, useState } from 'react';
+import { useEffect, useState, type ReactNode } from 'react';
 import { ImagePlus, LockKeyhole, TriangleAlert } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Checkbox } from '@/components/ui/checkbox';
@@ -47,6 +47,7 @@ export function LaunchSection({
   costContextKey,
   costQuote,
   usdRate,
+  children,
 }: {
   name: string;
   ticker: string;
@@ -63,6 +64,7 @@ export function LaunchSection({
   costContextKey: string;
   costQuote?: LaunchCostQuote | null;
   usdRate?: UsdRate | null;
+  children?: ReactNode;
 }) {
   const [costTick, setCostTick] = useState(0);
   const costNow = Math.max(now, costTick);
@@ -139,6 +141,7 @@ export function LaunchSection({
           <span>{ticker ? `$${ticker}` : 'Ticker'}</span>
         </div>
       </div>
+      {children}
       {destinations.length ? (
         <div className="launch-destinations">
           {destinations.map((pad) => (

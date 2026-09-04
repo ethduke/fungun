@@ -1,0 +1,47 @@
+.asset-publication {
+  border-block: 1px solid var(--border);
+  padding: 1.25rem 0;
+  margin-block: 1.25rem;
+}
+.asset-publication-heading,
+.asset-publication-actions {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 0.75rem;
+}
+.asset-publication-heading {
+  justify-content: space-between;
+}
+.asset-publication output {
+  display: block;
+  margin-block: 0.75rem;
+  font-size: 0.875rem;
+  line-height: 1.5;
+}
+.asset-publication p,
+.asset-publication-heading span {
+  font-size: 0.875rem;
+  line-height: 1.5;
+}
+.asset-publication p {
+  margin-block: 0.75rem;
+}
+.asset-publication a {
+  text-decoration: underline;
+}
+.asset-publication-preview {
+  display: flex;
+  align-items: center;
+  gap: 1rem;
+  margin-block: 1rem;
+  overflow-wrap: anywhere;
+}
+.asset-publication-preview img {
+  flex: 0 0 88px;
+  object-fit: contain;
+  border-radius: 0.5rem;
+}
+.asset-publication-preview p {
+  white-space: pre-wrap;
+}

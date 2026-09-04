@@ -9,7 +9,7 @@ const localBindingConfig = {
   compatibility_flags: ['nodejs_compat'],
 };
 
-export default defineConfig(async () => {
+export default defineConfig(async ({ command }) => {
   const apiPort = Number(process.env.READ_SERVICE_PORT || 8787);
   if (!Number.isInteger(apiPort) || apiPort < 1024 || apiPort > 65535)
     throw new Error('Invalid local read-service port.');
@@ -49,7 +49,23 @@ export default defineConfig(async () => {
         inspectorPort: false,
         remoteBindings: false,
         viteEnvironment: { name: 'rsc', childEnvironments: ['ssr'] },
-        config: localBindingConfig,
+        config: {
+          ...localBindingConfig,
+          ...(command === 'serve'
+            ? {
+                vars: Object.fromEntries(
+                  [
+                    'APP_ORIGIN',
+                    'ASSET_SERVICE_ORIGIN',
+                    'ASSET_PUBLIC_ORIGIN',
+                    'ASSET_UPLOADS',
+                  ]
+                    .filter((name) => typeof process.env[name] === 'string')
+                    .map((name) => [name, process.env[name]!]),
+                ),
+              }
+            : {}),
+        },
       }),
     ],
   };

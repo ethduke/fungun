@@ -71,8 +71,9 @@ Fly performance is not verified.
 6. Verify public HTTPS hash URLs return the approved bytes, including through the
    Long indexer/frontend. Confirm immutable cache headers and refusal to serve
    partial writes. Test storage-full and missing-volume failures.
-7. Wire explicit processed-image preview and wallet publication approval in the
-   webview. Add operator status/recovery and a reviewed public-abuse admission
+7. Verify the implemented inline processed-image preview, explicit wallet
+   publication approval and read-only recovery check against the real deployment.
+   Add terminal operator recovery and a reviewed public-abuse admission
    policy before broad access. Neither wallet generation nor Origin checks stop
    automated upload abuse. Keep publication and launch readiness separately gated.
 

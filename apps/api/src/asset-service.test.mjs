@@ -193,6 +193,33 @@ test("asset inputs accept canonical bytes only, never URLs or extra operations",
     assert.throws(() => validateAssetInput("prepare", { ...input, ...changed }));
 });
 
+test("asset status remains read-only and owner-bound when publication is disabled", async (t) => {
+  const { account, image, input } = await fixture();
+  const { store, post } = await setup(t, {
+    process() { assert.fail("Status invoked decoder"); },
+  }, false);
+  const challenge = store.challenge(account.address, image, input.draft);
+  const query = {
+    chainId: 4663, wallet: account.address, id: challenge.id,
+    imageHash: challenge.imageHash, metadataHash: challenge.metadataHash,
+  };
+  assert.deepEqual(await (await post("status", query)).json(), {
+    id: challenge.id, status: "pending",
+  });
+  const published = await store.publish({
+    wallet: account.address, image, draft: input.draft, id: challenge.id,
+    signature: await account.signMessage({ message: challenge.message }),
+  });
+  const before = store.db.prepare("SELECT * FROM asset_challenges").all();
+  assert.deepEqual(await (await post("status", query)).json(), published);
+  assert.deepEqual(store.db.prepare("SELECT * FROM asset_challenges").all(), before);
+  const stranger = privateKeyToAccount(generatePrivateKey());
+  assert.equal((await post("status", { ...query, wallet: stranger.address })).status, 404);
+  assert.equal((await post("status", { ...query, imageHash: createHash("sha256").update("other").digest("hex") })).status, 404);
+  assert.equal((await post("status", { ...query, signature: "EXAMPLE" })).status, 400);
+  assert.equal((await post("status", query, { origin: "https://attacker.invalid" })).status, 403);
+});
+
 test("decoder transport pins its origin, strips credentials and checks bounded output", async () => {
   const { image } = await fixture();
   const credentialUrl = new URL("http://decoder.internal:8791");

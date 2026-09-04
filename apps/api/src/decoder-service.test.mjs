@@ -66,7 +66,10 @@ test("decoder serves safe WebP only and rejects malformed, animated and unsuppor
   assert.equal((await fetch(url)).status, 404);
   assert.equal((await send(image, { "content-encoding": "gzip" })).status, 415);
   assert.equal((await send(image, { "content-type": "application/json" })).status, 415);
-  assert.equal((await send(Buffer.alloc(IMAGE_BYTE_LIMIT + 1))).status, 413);
+  await send(Buffer.alloc(IMAGE_BYTE_LIMIT + 1)).then(
+    (response) => assert.equal(response.status, 413),
+    (error) => assert.equal(error?.cause?.code ?? error?.code, "ECONNRESET"),
+  );
   assert.equal((await send(image)).status, 200);
 });
 

@@ -25,6 +25,8 @@ import type { ConnectedAccount } from '@/lib/account-context';
 import { AppError, describeError } from '@/lib/user-error';
 import { sendWalletClaim, checkWalletClaim, ensureClaimChain as ensureWalletClaimChain } from '@/lib/claim-wallet';
 import type { ClaimQuote } from '@/lib/fee-service';
+import { signWalletAsset } from '@/lib/asset-wallet';
+import type { AssetApproval } from '@/lib/asset-protocol';
 
 let configuration: ReturnType<typeof createPreviewConfig> | undefined;
 async function walletProvider() {
@@ -55,6 +57,8 @@ const checkClaim = async (positionId: string) =>
   checkWalletClaim(await walletProvider(), positionId);
 const ensureClaimChain = async (address: string, chainId: number, isCurrent: () => boolean) =>
   ensureWalletClaimChain(await walletProvider(), address, chainId, isCurrent);
+const signAsset = async (approval: AssetApproval, isCurrent: () => boolean) =>
+  signWalletAsset(await walletProvider(), approval, isCurrent);
 
 function ConnectionControl({
   onAccountChange,
@@ -70,7 +74,7 @@ function ConnectionControl({
   useEffect(() => {
     onAccountChange(
       connection.isConnected
-        ? { address, chainId: connection.chainId, sendClaim, checkClaim, ensureClaimChain }
+        ? { address, chainId: connection.chainId, sendClaim, checkClaim, ensureClaimChain, signAsset }
         : {},
     );
   }, [address, connection.chainId, connection.isConnected, onAccountChange]);

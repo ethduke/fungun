@@ -1,8 +1,44 @@
 # Launch image and metadata boundary
 
-The image pipeline and a separate Fly asset service are implemented. Publication
-is disabled by default and is not yet wired to the webview. Picking a file still
-keeps it in the browser; it does not publish anything or send it to a model.
+The image pipeline, separate Fly asset service and inline webview flow are
+implemented. Publication is disabled by default pending the rollout gates below.
+Picking a file keeps it in the browser; only clicking **Upload for preview** sends
+it for isolated validation. No model or paid generation is invoked.
+
+## Webview approval and recovery
+
+Ordinary Long on Robinhood is the first supported publication profile. The
+webview shows the processed image and normalized coin details before a separate
+**Approve & publish** action. This asks the connected EOA for a publication-intent
+signature, not a transaction, token approval or gas payment. It never reads a
+wallet key or requests a backend RPC call.
+
+Both browser and web proxy independently verify the exact message, processed
+image hash, canonical metadata hash, byte count, pinned origins and expiry.
+Changes to the wallet, chain, file or coin details invalidate the preview. The
+wallet account and chain are rechecked before and after signing. A synchronous
+in-flight guard prevents repeated clicks from opening another approval.
+
+Before publication is dispatched, session storage receives a minimal recovery
+marker: challenge ID, content hashes, public URLs, origins and a wallet hash.
+It contains no raw address, signature, full message, image bytes or coin text.
+Unreadable or malformed recovery information blocks publication with an explicit
+message. Successful verified responses clear the marker. A lost response keeps
+it locked and offers a read-only status check; it never replays publication or
+requests another signature. Safe error causes and Retry-After remain visible.
+
+The server database is authoritative; a browser marker is not a durable job
+queue. Pending, reserved, expired/unknown or inconsistent records never authorize
+another publication. Terminal cancellation and operator recovery are still
+required before broad rollout. Closing a tab may lose its session marker.
+
+The web server needs runtime-only `APP_ORIGIN`, `ASSET_PUBLIC_ORIGIN`,
+`ASSET_SERVICE_ORIGIN` and `ASSET_UPLOADS`. The service origin is a pinned HTTPS
+endpoint or `http://<asset-app>.internal:8790`; local development additionally
+allows loopback port 8790. Never expose these through client build variables.
+The same-origin `/api/assets/prepare|publish|status` proxy rejects unknown fields,
+redirects and oversized/stalled bodies, forwards no browser credentials, admits
+at most four active calls and performs no automatic retries.
 
 ## Image processing
 
@@ -68,8 +104,8 @@ allocation or category fields into ordinary Long metadata.
   is capped separately from public egress and the read service's RPC budget.
 - Keep original filenames, images, metadata, wallet/signature data and provider
   responses out of logs, build context and source history.
-- Only then connect browser upload, approved-image preview, publication and the
-  unsigned launch builder. Published responses currently have `launchReady: false`;
+- The browser upload, processed preview and publication approval are connected;
+  connection to the unsigned launch builder remains gated. Responses have `launchReady: false`;
   storage success alone does not establish backup durability or launch readiness.
 
 ## Dedicated asset service
@@ -98,12 +134,18 @@ The HTTP contract is deliberately narrow:
 - `POST /v1/asset-prepare`: exact `chainId` (4663), `wallet`, `draft`
   (`name`, `ticker`, `description`) and canonical `imageBase64`. Decodes in the
   isolated worker and returns processed bytes and an expiring approval message.
-  Preparation keeps image bytes in memory, not on disk.
+  Structured `issuedAt`, `expiresAt`, `serverTime`, `totalBytes` and challenge `id`
+  allow independent validation. Preparation keeps image bytes in memory, not on disk.
 - `POST /v1/asset-publish`: the same **processed** image and normalized draft,
   plus challenge `id` and the wallet's `signature`. Browser approval must follow
   the processed preview. Neither route accepts filenames, URLs or decoder options.
-- Both POST routes require the exact configured Origin, JSON content type and
-  `x-fungun-intent` matching `asset-prepare` or `asset-publish`. These headers are
+- `POST /v1/asset-status`: exact chain, wallet, challenge ID and both content
+  hashes. Looks up only the matching owner-bound record and verifies committed
+  object bytes. It returns `pending`, `uncertain`, or the exact published receipt,
+  without signing, decoding, publishing or RPC. It remains available when uploads
+  are disabled. Published receipts include the challenge `id`.
+- All POST routes require the exact configured Origin, JSON content type and
+  `x-fungun-intent` matching the operation. These headers are
   CSRF checks, not authentication or protection against non-browser clients.
 - `GET`/`HEAD /launch-assets/<sha256>.webp|json`: committed objects only, checked
   against their content address, with immutable caching, ETag and safe MIME types.
@@ -127,7 +169,7 @@ public reads. Exact successful retries return the same URLs without another
 charge. Interrupted reservations remain charged and blocked; do not reset the
 database, delete orphan files or approve another upload to work around them.
 Publication attempt quotas can remain charged if later reservation checks fail.
-An operator recovery/status workflow is still required before broad rollout.
+Read-only status exists; terminal operator recovery is still required before broad rollout.
 
 Fly volumes are not automatically shared between Machines. Keep this store
 single-writer and separately backed up; adding another Machine with an empty
