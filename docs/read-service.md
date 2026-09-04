@@ -177,6 +177,14 @@ user. This refuses to replace an existing database. Production startup checks th
 mount, schema/integrity, exact database path and `READS_MACHINE_ID=FLY_MACHINE_ID`.
 Set the approved machine identity and origins as runtime configuration, not tracked files.
 
+The explicit initializer also checks the mount before creating any file. Both
+initialization and startup require exactly one writable, disk-backed `/data`
+mount with a supported filesystem and no path aliases. An ordinary container
+directory, memory filesystem, read-only volume or ambiguous mount is rejected.
+Confirm the provisioned volume satisfies this check before enabling the API.
+If initialization fails after exclusive file creation, leave the failed state
+for operator inspection; never delete it or silently retry with a fresh budget.
+
 Do not use blue/green or extra Machines: separate Fly volumes do not share budgets.
 Use an immediate single-Machine deployment (`--ha=false`) after provisioning and
 validating the approved identity. A replacement Machine needs an explicitly approved
