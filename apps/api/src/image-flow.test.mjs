@@ -27,13 +27,14 @@ const sanitized = Buffer.from("mock-sanitized-webp");
 const imageHash = createHash("sha256").update(sanitized).digest("hex");
 const config = {
   enabled: true,
-  amount: "100000",
+  maxAmount: "1000000",
   payTo: `0x${"1".repeat(40)}`,
   asset: USDG_ADDRESS,
   domainName: "Global Dollar",
   domainVersion: "1",
   appOrigin: origin,
 };
+const quotedAmount = "40000";
 const operation = (index = 1) => ({
   requestId: `00000000-0000-4000-8000-${String(index).padStart(12, "0")}`,
   wallet: account.address.toLowerCase(),
@@ -45,19 +46,25 @@ const encode = (value) => Buffer.from(JSON.stringify(value)).toString("base64");
 const decodeHeader = (response, header) =>
   JSON.parse(Buffer.from(response.headers.get(header), "base64"));
 
-test("image runtime uses only required configuration and a fixed USDG price", () => {
-  assert.deepEqual(
-    readImageConfig({
-      APP_ORIGIN: origin,
-      IMAGE_GENERATION: "true",
-      IMAGE_PAYMENT_RECIPIENT: config.payTo,
-      IMAGE_USDG_ADDRESS: USDG_ADDRESS,
-      OPENROUTER_API_KEY: "EXAMPLE",
-      X402_FACILITATOR_URL: "https://payments.example",
-      ROBINHOOD_RPC: "https://rpc.example",
-    }),
-    config,
-  );
+test("image runtime requires a valid maximum dynamic USDG price", () => {
+  const env = {
+    APP_ORIGIN: origin,
+    IMAGE_GENERATION: "true",
+    IMAGE_PAYMENT_RECIPIENT: config.payTo,
+    IMAGE_USDG_ADDRESS: USDG_ADDRESS,
+    IMAGE_MAX_PRICE_USDG_BASE_UNITS: config.maxAmount,
+    OPENROUTER_KEY: "EXAMPLE",
+    X402_FACILITATOR_URL: "https://payments.example",
+    ROBINHOOD_RPC: "https://rpc.example",
+  };
+  assert.deepEqual(readImageConfig(env), config);
+  for (const maxAmount of [undefined, "", "0", "040000", "10000001", "1.1"]) {
+    assert.throws(
+      () => readImageConfig({ ...env, IMAGE_MAX_PRICE_USDG_BASE_UNITS: maxAmount }),
+      { code: "image_service_not_configured" },
+    );
+  }
+  assert.equal(readImageConfig({ IMAGE_GENERATION: "false" }).enabled, false);
 });
 
 async function signedProof(job, { signer = account, authorization = {} } = {}) {
@@ -105,14 +112,24 @@ function fixture(t, hooks = {}) {
   let worker;
   let handler;
   const events = [];
-  const counts = { ready: 0, verify: 0, generate: 0, process: 0, settle: 0 };
+  const counts = { quote: 0, ready: 0, verify: 0, generate: 0, process: 0, settle: 0 };
   const settledProofs = [];
   const provider = {
+    async quote(input) {
+      counts.quote++;
+      const price = await hooks.quote?.(input);
+      return price ?? { amount: hooks.quotedAmount ?? quotedAmount };
+    },
     async generate(input) {
       counts.generate++;
       events.push("generate");
       await hooks.generate?.(input);
-      return { bytes: raw, mime: "image/png", model: "mock-grok" };
+      return {
+        bytes: raw,
+        mime: "image/png",
+        model: "mock-grok",
+        costAmount: hooks.generationCostAmount ?? hooks.quotedAmount ?? quotedAmount,
+      };
     },
   };
   const processor = {
@@ -150,7 +167,7 @@ function fixture(t, hooks = {}) {
   function boot() {
     store = new ImageJobStore(path, { now: () => currentTime });
     worker = createImageWorker(store, provider, processor, payments, hooks.reader);
-    handler = createImageHandler(config, store, worker, payments, hooks.reader);
+    handler = createImageHandler(config, store, provider, worker, payments, hooks.reader);
   }
   boot();
   t.after(async () => {
@@ -223,7 +240,7 @@ test("unpaid request returns a USDG x402 quote and never verifies, generates, or
   assert.equal(terms.scheme, "exact");
   assert.equal(terms.network, "eip155:4663");
   assert.equal(terms.asset, USDG_ADDRESS);
-  assert.equal(terms.amount, config.amount);
+  assert.equal(terms.amount, quotedAmount);
   assert.equal(terms.payTo, config.payTo);
   assert.equal(terms.extra.assetTransferMethod, "eip3009");
   assert.equal(job.product, GROK_IMAGE_PRODUCT);
@@ -235,7 +252,87 @@ test("unpaid request returns a USDG x402 quote and never verifies, generates, or
   assert.equal(body.image, undefined);
   await f.worker.idle();
   assert.deepEqual(f.events, []);
-  assert.deepEqual(f.counts, { ready: 1, verify: 0, generate: 0, process: 0, settle: 0 });
+  assert.deepEqual(f.counts, {
+    quote: 1,
+    ready: 1,
+    verify: 0,
+    generate: 0,
+    process: 0,
+    settle: 0,
+  });
+});
+
+test("each new prompt snapshots current pricing while a saved request is never repriced", async (t) => {
+  const prices = ["41000", "62000"];
+  const f = fixture(t, { quote: async () => ({ amount: prices.shift() }) });
+  const first = operation();
+  let job = await quote(f, first);
+  assert.equal(JSON.parse(job.requirements).amount, "41000");
+  await f.restart();
+  const repeated = await f.post(first);
+  assert.equal(repeated.status, 402);
+  assert.equal((await repeated.json()).accepts[0].amount, "41000");
+  assert.equal(f.counts.quote, 1);
+  job = await quote(f, operation(2));
+  assert.equal(JSON.parse(job.requirements).amount, "62000");
+  assert.equal(f.counts.quote, 2);
+});
+
+test("unavailable, malformed, or above-limit pricing creates no payable job", async (t) => {
+  const cases = [
+    { hooks: { quotedAmount: "1000001" }, error: "image_price_above_limit" },
+    { hooks: { quotedAmount: "0" }, error: "image_pricing_unavailable" },
+    { hooks: { quotedAmount: "040000" }, error: "image_pricing_unavailable" },
+    { hooks: { quote: async () => ({ amount: 40000 }) }, error: "image_pricing_unavailable" },
+    {
+      hooks: {
+        quote() {
+          throw new ServiceError("image_pricing_unavailable", 503);
+        },
+      },
+      error: "image_pricing_unavailable",
+    },
+  ];
+  let index = 3;
+  for (const { hooks, error } of cases) {
+    const f = fixture(t, hooks);
+    const input = operation(index++);
+    const response = await f.post(input);
+    assert.equal(response.status, 503);
+    assert.deepEqual(await response.json(), { error });
+    assert.equal(f.store.get(input.requestId), undefined);
+    assert.equal(f.counts.generate, 0);
+  }
+});
+
+test("a signature for a request that was never quoted is rejected before upstream work", async (t) => {
+  const f = fixture(t);
+  const input = operation(20);
+  const response = await f.post(input, {});
+  assert.equal(response.status, 400);
+  assert.deepEqual(await response.json(), { error: "invalid_image_payment" });
+  assert.equal(f.store.get(input.requestId), undefined);
+  assert.equal(f.counts.quote, 0);
+  assert.equal(f.counts.ready, 0);
+});
+
+test("a provider cost increase after authorization discards the image without settling", async (t) => {
+  const f = fixture(t, { generationCostAmount: "40001" });
+  const input = operation(21);
+  const proof = await signedProof(await quote(f, input));
+  assert.equal((await f.post(input, proof)).status, 202);
+  await f.worker.idle();
+  const failed = await f.get(input.requestId);
+  assert.equal(failed.status, 202);
+  assert.deepEqual(await failed.json(), {
+    requestId: input.requestId,
+    status: "failed",
+    payment: { status: "not_charged", transaction: null, network: "eip155:4663" },
+    error: "image_price_changed",
+  });
+  assert.equal(f.counts.generate, 1);
+  assert.equal(f.counts.process, 0);
+  assert.equal(f.counts.settle, 0);
 });
 
 test("signed flow persists sanitized artwork before settlement and replays completed output after restart", async (t) => {

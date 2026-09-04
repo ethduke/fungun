@@ -110,6 +110,12 @@ const messages: Record<string, string> = {
     'The payment service is unavailable. Try again later.',
   image_payment_network_unsupported:
     'USDG payments are not available on this payment service yet.',
+  image_pricing_unavailable:
+    'The current image price is unavailable. No payment was requested.',
+  image_price_above_limit:
+    'The current image price exceeds the service limit. No payment was requested.',
+  image_price_changed:
+    'The provider price changed during generation. No payment was collected; request a new image.',
   image_quote_expired:
     'This price expired. Request a new price before signing.',
   image_request_changed:

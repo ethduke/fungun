@@ -16,19 +16,29 @@ verification work; generating or publishing artwork does not enable a token laun
 Generation defaults to disabled. Configure the **asset service**, not the read
 service or browser bundle, with these runtime values:
 
-| Variable                  | Purpose                                                            |
-| ------------------------- | ------------------------------------------------------------------ |
-| `IMAGE_GENERATION=true`   | Enable new image requests after setup                              |
-| `OPENROUTER_API_KEY`      | Server-only image API credential                                   |
-| `IMAGE_PAYMENT_RECIPIENT` | One operator-controlled address receiving every image payment      |
-| `IMAGE_USDG_ADDRESS`      | Canonical USDG contract from the official Robinhood registry       |
-| `X402_FACILITATOR_URL`    | HTTPS facilitator supporting v2 exact / Robinhood / EIP-3009       |
-| `ROBINHOOD_RPC`           | Server-only HTTPS RPC for read-only settlement reconciliation      |
-| `ASSET_DECODER_ORIGIN`    | Existing isolated image decoder                                    |
+| Variable                           | Purpose                                                       |
+| ---------------------------------- | ------------------------------------------------------------- |
+| `IMAGE_GENERATION=true`            | Enable new image requests after setup                         |
+| `OPENROUTER_KEY`                   | Server-only image API credential                              |
+| `IMAGE_PAYMENT_RECIPIENT`          | One operator-controlled address receiving every image payment |
+| `IMAGE_USDG_ADDRESS`               | Canonical USDG contract from the official Robinhood registry  |
+| `IMAGE_MAX_PRICE_USDG_BASE_UNITS`  | Required live-price ceiling, using six USDG decimals           |
+| `X402_FACILITATOR_URL`             | HTTPS facilitator supporting v2 exact / Robinhood / EIP-3009  |
+| `ROBINHOOD_RPC`                    | Server-only HTTPS RPC for settlement reconciliation            |
+| `ASSET_DECODER_ORIGIN`             | Existing isolated image decoder                               |
 
-The service charges a fixed `100000` base units (0.10 USDG) for one image. The
-OpenRouter request is fixed to one low-quality 1K image, so it has no text-token
-cap variable.
+Each new prompt initiates a fresh read of OpenRouter's xAI endpoint metadata. The
+backend selects the low/1K output-image SKU, rounds its current USD price up to
+six-decimal USDG base units, and refuses an amount above
+`IMAGE_MAX_PRICE_USDG_BASE_UNITS`. The amount is persisted with the prompt-bound
+request before the HTTP 402 response; recovery never reprices an existing request
+ID.
+
+OpenRouter does not expose a preflight API that accepts image prompt text and
+returns the eventual bill. This Grok SKU bills by output-image tier instead of
+prompt tokens, so different prompt text currently produces the same price. The
+prompt causes a new price snapshot and is bound to it, but is not sent to the
+catalog endpoint. There is no `MAX_TOKENS_CAP` for this dedicated Images API.
 
 Use the existing `APP_ORIGIN`, `ASSET_STORE_ROOT`, `ASSET_PUBLIC_ORIGIN` and
 single-Machine configuration. Set `ASSET_UPLOADS=true` for subsequent artwork and
@@ -58,12 +68,17 @@ and service terms before activation.
 
 ## Provider and payment details
 
-The fixed server product uses OpenRouter `POST /api/v1/images`, model
+The server product uses OpenRouter `POST /api/v1/images`, model
 `x-ai/grok-imagine-image-2.0`, provider `xai` only, `n:1`, `aspect_ratio:"1:1"`,
 `resolution:"1K"`, and `quality:"low"`. OpenRouter returns `data[0].b64_json`.
 No wallet, signature, payment headers, or deployment instructions go to Grok.
 The existing prompt scaffold supplies the validated coin name, ticker, and brief.
-There are no automatic image-provider retries or alternate providers.
+There are no automatic image-provider retries or alternate providers. Before a
+new x402 quote, the server reads the model's fixed OpenRouter endpoint-pricing URL;
+unavailable, malformed, mismatched, oversized, or above-limit pricing fails before
+the wallet is asked to sign. The completed generation must also include
+`usage.cost`. If that exact cost is greater than the signed snapshot, the result is
+discarded and payment is not settled; the user must request a fresh image quote.
 
 The adapter bounds the provider deadline at 180 seconds and decoded input at
 2 MiB, checks raster signatures and moderation failures, then passes the image

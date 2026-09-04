@@ -86,6 +86,13 @@ export function createImageWorker(store, provider, processor, payments, settleme
                 if (!store.claim(job.id)) continue;
                 const { name, ticker, prompt } = JSON.parse(job.input);
                 const result = await provider.generate({ name, ticker, prompt });
+                const quotedAmount = JSON.parse(job.requirements).amount;
+                if (
+                  typeof result.costAmount !== "string" ||
+                  !/^[1-9][0-9]{0,7}$/.test(result.costAmount) ||
+                  BigInt(result.costAmount) > BigInt(quotedAmount)
+                )
+                  throw new ServiceError("image_price_changed", 503);
                 store.generated(job.id, result.bytes);
                 job = store.get(job.id);
               }

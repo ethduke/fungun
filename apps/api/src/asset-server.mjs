@@ -52,8 +52,9 @@ try {
   const images=imageConfig.enabled || existsSync(imagePath) ? new ImageJobStore(imagePath) : null;
   const payments=imageConfig.enabled ? createImagePayments({asset:imageConfig.asset,facilitatorUrl:process.env.X402_FACILITATOR_URL}) : null;
   const settlementReader=imageConfig.enabled ? createImageSettlementReader({asset:imageConfig.asset,rpcUrl:process.env.ROBINHOOD_RPC}) : null;
-  const worker=imageConfig.enabled ? createImageWorker(images,createGrokImageProvider({apiKey:process.env.OPENROUTER_API_KEY}),processor,payments,settlementReader) : null;
-  const imageHandler=createImageHandler(imageConfig,images,worker,payments,settlementReader);
+  const provider=imageConfig.enabled ? createGrokImageProvider({apiKey:process.env.OPENROUTER_KEY}) : null;
+  const worker=imageConfig.enabled ? createImageWorker(images,provider,processor,payments,settlementReader) : null;
+  const imageHandler=createImageHandler(imageConfig,images,provider,worker,payments,settlementReader);
   const assetHandler=createAssetHandler(config,store,processor);
   const server = createServer(
     { maxHeaderSize: 16384 },

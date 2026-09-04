@@ -7,6 +7,9 @@ import {
   createGrokImageProvider,
   GROK_IMAGE_ENDPOINT,
   GROK_IMAGE_MODEL,
+  GROK_IMAGE_PRICE_VARIANT,
+  GROK_IMAGE_PRICING_ENDPOINT,
+  GROK_IMAGE_PRICING_RESPONSE_LIMIT,
   GROK_IMAGE_PRODUCT,
   GROK_IMAGE_RESPONSE_LIMIT,
 } from "./grok-image-provider.mjs";
@@ -17,9 +20,107 @@ const png = Buffer.from(
   "base64",
 );
 const item = () => ({ b64_json: png.toString("base64"), media_type: "image/png" });
-const response = (entry = item()) => Response.json({ data: [entry] });
+const response = (entry = item(), cost = 0.04) =>
+  Response.json({ data: [entry], usage: { cost } });
+const pricingResponse = (costUsd = 0.04, changes = {}) =>
+  Response.json({
+    id: GROK_IMAGE_MODEL,
+    endpoints: [
+      {
+        provider_slug: "xai",
+        provider_tag: "xai",
+        pricing: [
+          {
+            billable: "output_image",
+            unit: "image",
+            variant: GROK_IMAGE_PRICE_VARIANT,
+            cost_usd: costUsd,
+          },
+        ],
+        ...changes,
+      },
+    ],
+  });
 const provider = (fetcher, options = {}) =>
   createGrokImageProvider({ apiKey: "EXAMPLE", fetcher, ...options });
+
+test("each new prompt snapshots the current exact Grok image SKU price", async () => {
+  const calls = [];
+  const prices = [0.04, "0.0470001"];
+  const api = provider(async (...args) => {
+    calls.push(args);
+    return pricingResponse(prices.shift());
+  });
+  assert.deepEqual(await api.quote(draft), { amount: "40000" });
+  assert.deepEqual(
+    await api.quote({ ...draft, prompt: "A different moon prompt" }),
+    { amount: "47001" },
+  );
+  assert.equal(calls.length, 2);
+  for (const [url, options] of calls) {
+    assert.equal(url, GROK_IMAGE_PRICING_ENDPOINT);
+    assert.equal(options.method, "GET");
+    assert.equal(options.redirect, "error");
+    assert.deepEqual(options.headers, {
+      ["Authorization"]: "Bearer EXAMPLE",
+      Accept: "application/json",
+    });
+    assert.equal(options.body, undefined);
+  }
+});
+
+test("pricing fails closed on another provider, SKU, unit, or invalid amount", async () => {
+  const invalid = [
+    pricingResponse(0.04, { provider_tag: "other", provider_slug: "other" }),
+    pricingResponse(0.04, { provider_tag: "other", provider_slug: "xai" }),
+    pricingResponse(0.04, {
+      pricing: [{ billable: "output_image", unit: "image", variant: "medium_1k", cost_usd: 0.06 }],
+    }),
+    pricingResponse(0.04, {
+      pricing: [{ billable: "output_image", unit: "token", variant: "low_1k", cost_usd: 0.04 }],
+    }),
+    pricingResponse(0),
+    pricingResponse("1e-2"),
+    pricingResponse(10.01),
+    Response.json({ id: GROK_IMAGE_MODEL, endpoints: [] }),
+  ];
+  for (const result of invalid)
+    await assert.rejects(provider(async () => result).quote(draft), {
+      code: "image_pricing_unavailable",
+      status: 503,
+    });
+});
+
+test("pricing responses are bounded and time out without generation", async () => {
+  let cancelled = 0;
+  const stream = new ReadableStream({
+    start(controller) {
+      controller.enqueue(new Uint8Array(GROK_IMAGE_PRICING_RESPONSE_LIMIT + 1));
+    },
+    cancel() {
+      cancelled++;
+    },
+  });
+  await assert.rejects(
+    provider(async () => new Response(stream, { headers: { "content-type": "application/json" } })).quote(
+      draft,
+    ),
+    { code: "image_pricing_unavailable" },
+  );
+  assert.equal(cancelled, 1);
+  let signal;
+  await assert.rejects(
+    provider(
+      (_url, options) => {
+        signal = options.signal;
+        return new Promise(() => {});
+      },
+      { pricingTimeoutMs: 10 },
+    ).quote(draft),
+    { code: "image_pricing_unavailable" },
+  );
+  assert.equal(signal.aborted, true);
+});
 
 test("one fixed OpenRouter request uses Grok through xai without sending wallet or payment data", async () => {
   const calls = [];
@@ -59,10 +160,11 @@ test("one fixed OpenRouter request uses Grok through xai without sending wallet 
     mime: "image/png",
     sha256: createHash("sha256").update(png).digest("hex"),
     model: GROK_IMAGE_MODEL,
+    costAmount: "40000",
   });
 });
 
-test("input validation and missing server configuration fail before generation", async () => {
+test("input validation and missing server configuration fail before pricing or generation", async () => {
   let calls = 0;
   const fetcher = async () => {
     calls++;
@@ -75,6 +177,10 @@ test("input validation and missing server configuration fail before generation",
       code: "image_service_not_configured",
       status: 503,
     });
+    await assert.rejects(api.quote(draft), {
+      code: "image_service_not_configured",
+      status: 503,
+    });
   }
   for (const input of [
     null,
@@ -82,8 +188,14 @@ test("input validation and missing server configuration fail before generation",
     { ...draft, model: "other" },
     { prompt: "" },
   ])
-    await assert.rejects(provider(fetcher).generate(input), ImagePromptError);
+    for (const method of ["quote", "generate"])
+      await assert.rejects(provider(fetcher)[method](input), ImagePromptError);
   assert.equal(calls, 0);
+});
+
+test("completed generation exposes exact provider cost rounded up to USDG base units", async () => {
+  const image = await provider(async () => response(item(), "0.0470001")).generate(draft);
+  assert.equal(image.costAmount, "47001");
 });
 
 test("base64 and inline data URLs use detected PNG, JPEG or WebP signatures", async () => {
@@ -151,6 +263,16 @@ test("response requires exactly one image and rejects explicit moderation failur
       status: 422,
     },
   );
+});
+
+test("response requires a valid completed-request cost", async () => {
+  for (const usage of [undefined, null, {}, { cost: 0 }, { cost: "1e-2" }, { cost: 10.01 }]) {
+    const body = { data: [item()], ...(usage === undefined ? {} : { usage }) };
+    await assert.rejects(provider(async () => Response.json(body)).generate(draft), {
+      code: "image_provider_response_invalid",
+      status: 502,
+    });
+  }
 });
 
 test("upstream HTTP failures and transport errors are redacted and never retried", async () => {

@@ -15,7 +15,7 @@ export const TRANSFER_AUTHORIZATION_TYPES = {
 };
 export function readImageConfig(env = process.env) {
   const enabled = env.IMAGE_GENERATION === "true";
-  const amount = "100000";
+  const maxAmount = env.IMAGE_MAX_PRICE_USDG_BASE_UNITS || "";
   const payTo = (env.IMAGE_PAYMENT_RECIPIENT || "").toLowerCase();
   const asset = (env.IMAGE_USDG_ADDRESS || "").toLowerCase();
   if (
@@ -24,16 +24,16 @@ export function readImageConfig(env = process.env) {
       /^0x0+$/.test(asset) ||
       !/^0x[0-9a-f]{40}$/.test(payTo) ||
       /^0x0+$/.test(payTo) ||
-      !/^[1-9][0-9]{0,7}$/.test(amount) ||
-      BigInt(amount) > 10000000n ||
-      !env.OPENROUTER_API_KEY ||
+      !/^[1-9][0-9]{0,7}$/.test(maxAmount) ||
+      BigInt(maxAmount) > 10000000n ||
+      !env.OPENROUTER_KEY ||
       !env.X402_FACILITATOR_URL ||
       !env.ROBINHOOD_RPC)
   )
     throw new ServiceError("image_service_not_configured");
   return {
     enabled,
-    amount,
+    maxAmount,
     payTo,
     asset,
     domainName: "Global Dollar",
@@ -123,7 +123,7 @@ export async function validateImagePayment(header, job, origin) {
   return proof;
 }
 
-export function createImageHandler(config, store, worker, payments, settlementReader = null) {
+export function createImageHandler(config, store, provider, worker, payments, settlementReader = null) {
   let active = 0;
   const baseHeaders = {
     "cache-control": "no-store",
@@ -180,6 +180,7 @@ export function createImageHandler(config, store, worker, payments, settlementRe
       )
         return send(415, { error: "invalid_image_request" });
       const input = validateImageOperation(await readJson(request.body));
+      const header = request.headers.get("payment-signature");
       let job = store.get(input.requestId);
       if (job) {
         store.authenticate(input.requestId, token);
@@ -191,12 +192,28 @@ export function createImageHandler(config, store, worker, payments, settlementRe
         }
       }
       if (!config.enabled) return send(503, { error: "image_service_not_configured" });
+      // A signature cannot be valid before this server has issued and saved the
+      // request-specific amount and nonce. Reject it before any pricing/RPC work.
+      if (!job && header) throw new ServiceError("invalid_image_payment", 400);
       if (!job) {
-        const [, fromBlock] = await Promise.all([payments.ready(), settlementReader?.anchor()]);
-        job = store.quote(input, token, { ...config, fromBlock }, GROK_IMAGE_PRODUCT);
+        const pricingInput = { name: input.name, ticker: input.ticker, prompt: input.prompt };
+        const [price, , fromBlock] = await Promise.all([
+          provider.quote(pricingInput),
+          payments.ready(),
+          settlementReader?.anchor(),
+        ]);
+        if (!price || typeof price.amount !== "string" || !/^[1-9][0-9]{0,7}$/.test(price.amount))
+          throw new ServiceError("image_pricing_unavailable", 503);
+        if (BigInt(price.amount) > BigInt(config.maxAmount))
+          throw new ServiceError("image_price_above_limit", 503);
+        job = store.quote(
+          input,
+          token,
+          { ...config, amount: price.amount, fromBlock },
+          GROK_IMAGE_PRODUCT,
+        );
       }
       if (store.now() >= job.expires_at) return send(409, { error: "image_quote_expired" });
-      const header = request.headers.get("payment-signature");
       if (!header) {
         const quote = imagePaymentRequired(job, config.appOrigin);
         return send(402, quote, { "payment-required": encode(quote) });
