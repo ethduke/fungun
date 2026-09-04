@@ -62,6 +62,8 @@ Run `npm run dev:api` in a second terminal for the read service. See
 - The inline launch section updates coin details, destinations and draft validation as you edit.
 - Image checks show an inline loading state; O1's metadata-update toggle stays in the launch section.
 - Open the Grok/x402 flow preview; no image generation or payment occurs.
+  The [server-side memecoin prompt scaffold](image-generation.md) prepares one square
+  image with ticker/name context; it is not connected to paid generation yet.
 - Explicitly connect/disconnect a discovered EIP-6963 wallet using wagmi/viem.
 - Open FEE from the header: one payout-coin table, no console tabs.
 - FEE follows the connected account or a manually entered address after a 500 ms debounce.
