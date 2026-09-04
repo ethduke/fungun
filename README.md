@@ -2,6 +2,14 @@
 
 A noncustodial launchpad composer for Long and O1.
 
+```sh
+npm run setup
+npm run dev
+```
+
+Open http://127.0.0.1:3000. See [development notes](docs/development.md) for
+working controls, deliberate limitations, tests and the Fly backend boundary.
+
 This milestone is a local, clickable webview. Live deployments, ticker lookups,
 RPC services and paid image generation remain disabled until their adapters
 and safeguards are verified. Telegram integration is out of scope.

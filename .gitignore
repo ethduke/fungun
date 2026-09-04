@@ -63,4 +63,7 @@ tmp/
 .agents/
 .codex/
 .openai/
+!apps/web/.openai/
+apps/web/.openai/*
+!apps/web/.openai/hosting.json
 *.swp

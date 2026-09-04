@@ -1,0 +1,149 @@
+'use client';
+
+import { useState } from 'react';
+import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
+import {
+  WagmiProvider,
+  useConnect,
+  useConnection,
+  useConnectors,
+  useDisconnect,
+} from 'wagmi';
+import { ArrowUpRight, Wallet, ShieldCheck, Smartphone } from 'lucide-react';
+import { Button } from '@/components/ui/button';
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogHeader,
+  DialogTitle,
+} from '@/components/ui/dialog';
+import { createPreviewConfig, previewQueryDefaults } from '@/lib/preview-web3';
+
+let configuration: ReturnType<typeof createPreviewConfig> | undefined;
+
+function ConnectionControl() {
+  const [open, setOpen] = useState(true);
+  const connection = useConnection();
+  const connectors = useConnectors();
+  const connect = useConnect();
+  const disconnect = useDisconnect();
+  const address = connection.address;
+  return (
+    <>
+      <Button className="wallet-button" onClick={() => setOpen(true)}>
+        <Wallet size={16} />
+        {address
+          ? `${address.slice(0, 6)}…${address.slice(-4)}`
+          : 'Connect wallet'}
+      </Button>
+      <Dialog open={open} onOpenChange={setOpen}>
+        <DialogContent className="app-dialog">
+          <DialogHeader>
+            <span className="dialog-icon">
+              <Wallet />
+            </span>
+            <DialogTitle>
+              {connection.isConnected ? 'Your wallet' : 'Connect your wallet'}
+            </DialogTitle>
+            <DialogDescription>
+              Connect to preview your account. No signature, payment or network
+              switch is requested.
+            </DialogDescription>
+          </DialogHeader>
+          {connection.isConnected ? (
+            <div className="connection-details">
+              <strong>{connection.connector?.name}</strong>
+              <span>
+                {address
+                  ? `${address.slice(0, 6)}…${address.slice(-4)}`
+                  : 'Connected'}
+              </span>
+              <p>
+                Network:{' '}
+                {connection.chain?.name ?? `Chain ${connection.chainId}`}
+              </p>
+              {connection.chainId !== 4663 && connection.chainId !== 8453 && (
+                <p className="notice">
+                  This network is not supported by the launchpads. Switch
+                  manually in your wallet when needed.
+                </p>
+              )}
+              <Button variant="outline" onClick={() => disconnect.mutate({})}>
+                Disconnect
+              </Button>
+            </div>
+          ) : (
+            <div className="wallet-list">
+              {connectors.map((connector) => (
+                <Button
+                  key={connector.uid}
+                  variant="outline"
+                  className="wallet-choice"
+                  disabled={connect.isPending}
+                  onClick={() =>
+                    connect.mutate(
+                      { connector },
+                      { onSuccess: () => setOpen(false) },
+                    )
+                  }
+                >
+                  <span className="wallet-symbol">
+                    <Wallet size={18} />
+                  </span>
+                  {connector.name}
+                  <ArrowUpRight size={16} />
+                </Button>
+              ))}
+              {!connectors.length && (
+                <div className="empty-wallet">
+                  <Wallet size={25} />
+                  <strong>No browser wallet found</strong>
+                  <p>
+                    Open this preview in a browser with Rabby, MetaMask, or
+                    another EIP-6963 wallet installed.
+                  </p>
+                </div>
+              )}
+              <div className="mobile-wallet">
+                <Smartphone size={19} />
+                <span>
+                  WalletConnect <small>QR connection · next milestone</small>
+                </span>
+                <span className="sample-tag">Not configured</span>
+              </div>
+              {connect.isPending && (
+                <output className="notice">
+                  Confirm the connection in your wallet.
+                </output>
+              )}
+              {connect.isError && (
+                <p role="alert" className="field-error">
+                  Connection was declined or unavailable. You can try again.
+                </p>
+              )}
+            </div>
+          )}
+          <div className="dialog-safety">
+            <ShieldCheck size={16} />
+            <span>Never enter a seed phrase or private key here.</span>
+          </div>
+        </DialogContent>
+      </Dialog>
+    </>
+  );
+}
+
+export default function WalletConnection() {
+  const [config] = useState(() => (configuration ??= createPreviewConfig()));
+  const [queryClient] = useState(
+    () => new QueryClient({ defaultOptions: previewQueryDefaults }),
+  );
+  return (
+    <WagmiProvider config={config} reconnectOnMount={false}>
+      <QueryClientProvider client={queryClient}>
+        <ConnectionControl />
+      </QueryClientProvider>
+    </WagmiProvider>
+  );
+}
