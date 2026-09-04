@@ -11,6 +11,9 @@ kill_timeout = "10s"
 [deploy]
   strategy = "immediate"
 
+[experimental]
+  cmd = ["setpriv", "--no-new-privs", "node", "src/decoder-server.mjs"]
+
 [[vm]]
   cpu_kind = "shared"
   cpus = 1
