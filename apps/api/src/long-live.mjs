@@ -68,7 +68,8 @@ export function readLongLiveConfig(env) {
     }
     const assetOrigin = env.LAUNCH_ASSET_SERVICE_ORIGIN;
     const url = new URL(assetOrigin);
-    if (url.origin !== assetOrigin || url.username || url.password || url.protocol !== "https:") fail("long_configuration");
+    if (url.origin !== assetOrigin || url.username || url.password || !(url.protocol === "https:"
+      || (url.protocol === "http:" && /^[a-z][a-z0-9-]{0,62}\.internal$/.test(url.hostname) && url.port === "8790"))) fail("long_configuration");
     return { profile, guards, assetOrigin };
   } catch { fail("long_configuration", 503); }
 }

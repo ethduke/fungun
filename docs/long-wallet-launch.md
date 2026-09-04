@@ -86,7 +86,8 @@ API-only settings: `LONG_WALLET_LAUNCH`, `LONG_LAUNCH_PROFILE_JSON`,
 `LONG_LAUNCH_GUARDS_JSON`, `LAUNCH_ASSET_SERVICE_ORIGIN`. The profile uses the existing
 strict unsigned-builder format. Each quote's guards contain `tokenBeacon`,
 `tokenImplementation`, `oracleAggregator` (address/runtime hash) and a reviewed
-`heartbeatSeconds` between 1 and 86,400. The asset origin is a pinned HTTPS origin.
+`heartbeatSeconds` between 1 and 86,400. The asset origin is a pinned HTTPS origin or the existing Fly private
+`http://<asset-app>.internal:8790` service.
 Enablement requires the existing RPC and read budget. No credentials enter client
 build variables; only public deployment information accompanies an unsigned plan.
 
