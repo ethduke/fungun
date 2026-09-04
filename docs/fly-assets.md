@@ -20,6 +20,10 @@ provider keys and the persistent volume never enter its request or container.
 An allowlisted peer is not network sandboxing. The current app-level `.internal`
 destination also requires exactly one reviewed decoder Machine; inspect its image
 digest and effective configuration after every replacement or scale operation.
+The decoder permits only the exact `FLY_PRIVATE_IP` platform field with a valid
+Fly 6PN IPv6 value; credential-like environment names remain rejected. Recheck the
+asset peer's current 6PN address after every reboot or host migration too: Fly
+private IPs are not permanent Machine identifiers.
 
 ## Local verification
 
@@ -53,7 +57,9 @@ Fly performance is not verified.
    values. Confirm decoder command, image digest, nonroot identity, readonly source,
    memory/CPU limits and absence of volume, public/Flycast services and credentials.
    Pin `DECODER_ALLOWED_CLIENT` to the asset Machine's 6PN IP; update deliberately
-   after Machine replacement. Verify another private peer is rejected.
+   after Machine replacement, reboot or host migration if its address changed.
+   Verify another private peer is rejected. Keep the decoder fail-closed until
+   the pinned peer is deliberately updated.
 3. Apply and verify outbound network isolation on the real decoder Machine. Prove
    outbound IPv4, IPv6, DNS and unnecessary private-network connections are blocked
    while the approved request/response still works. Do not assume an empty rule
@@ -99,4 +105,5 @@ permanent token metadata that depends on an untested single-volume recovery path
 References: [Sharp security and resource limits](https://sharp.pixelplumbing.com/security/),
 [Alpine releases](https://alpinelinux.org/releases/),
 [Fly network-policy scope](https://fly.io/docs/machines/guides-examples/network-policies/),
+[Fly private-network identity](https://fly.io/docs/networking/private-networking/),
 [Fly volume overview](https://fly.io/docs/volumes/overview/).

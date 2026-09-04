@@ -7,6 +7,19 @@ import {
   constants,
   existsSync,
 } from "node:fs";
+import { isIP } from "node:net";
+
+export function verifyDecoderEnvironment(env = process.env) {
+  for (const [name, value] of Object.entries(env)) {
+    if (name === "FLY_PRIVATE_IP") {
+      if (typeof value !== "string" || isIP(value) !== 6 || !/^fdaa:/i.test(value) || value.includes("%"))
+        throw new Error("Invalid decoder platform metadata.");
+      continue;
+    }
+    if (/(?:SECRET|PRIVATE|SIGNATURE|MNEMONIC|RPC|KEY|TOKEN|PASSWORD|AUTH|CREDENTIAL|WALLET|SEED)/i.test(name))
+      throw new Error("Unexpected decoder credentials.");
+  }
+}
 
 export function verifyDecoderExecutable(path = process.execPath) {
   const file = openSync(path, "r");
@@ -69,10 +82,5 @@ export function verifyDecoderRuntime() {
     }
     if (writable) throw new Error("Writable decoder source.");
   }
-  if (
-    Object.keys(process.env).some((name) =>
-      /(?:SECRET|PRIVATE|SIGNATURE|MNEMONIC|RPC|API_KEY|ACCESS_TOKEN|AUTH_TOKEN)/i.test(name),
-    )
-  )
-    throw new Error("Unexpected decoder credentials.");
+  verifyDecoderEnvironment();
 }
