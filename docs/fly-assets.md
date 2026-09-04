@@ -68,6 +68,13 @@ Fly performance is not verified.
    second directory on the same volume is not an independent backup. Establish
    a maintenance window or reconciliation procedure so restored quotas cannot
    silently refund post-backup publications.
+   The offline `npm run assets:snapshot -- backup` tool performs a dry run by
+   default; writes additionally require `--execute --service-stopped`. It writes
+   only to a new private directory and prints a manifest SHA-256 that must be
+   recorded separately. `verify` requires that digest. `restore --execute
+   --service-stopped` copies into another new directory that remains quarantined;
+   the HTTP runtime and write maintenance refuse it. There is intentionally no
+   activation command until post-backup state reconciliation is implemented.
 6. Verify public HTTPS hash URLs return the approved bytes, including through the
    Long indexer/frontend. Confirm immutable cache headers and refusal to serve
    partial writes. Test storage-full and missing-volume failures.
@@ -78,7 +85,13 @@ Fly performance is not verified.
    policy before broad access. Neither wallet generation nor Origin checks stop
    automated upload abuse. Keep publication and launch readiness separately gated.
 
-Backups and uploads are not automatically enabled by the templates. The final
+Backups and uploads are not automatically enabled by the templates. A same-disk
+local export is useful for testing but is not independent protection. Fly volume
+snapshots restore to a new volume and can supplement—not replace—an encrypted,
+offsite export and periodic restore drill. See the
+[SQLite backup API](https://www.sqlite.org/backup.html),
+[Node backup API](https://nodejs.org/api/sqlite.html#sqlitebackupsource-db-path-options)
+and [Fly volume snapshots](https://fly.io/docs/volumes/snapshots/). The final
 backup destination and target-host checks are still outstanding. Do not release
 permanent token metadata that depends on an untested single-volume recovery path.
 

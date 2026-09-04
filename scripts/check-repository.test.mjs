@@ -31,6 +31,12 @@ test('rejects binary sensitive files and generated artifacts', () => {
   }
 });
 
+test('rejects snapshot manifests and backup directories even when force-staged', () => {
+  for (const path of ['backup.manifest.json', 'nested/backup.manifest.json', 'asset-backups/image.webp', 'asset-restores/data.json']) {
+    assert.ok(scan(path, '{}').includes('forbidden-sensitive-or-generated-path'), path);
+  }
+});
+
 test('enforces limits including binary blobs and the lockfile exception', () => {
   assert.ok(scan('asset.bin', '\0', 1024 * 1024 + 1).includes('file-size-limit'));
   assert.deepEqual(scan('package-lock.json', '{}', 3 * 1024 * 1024), []);

@@ -25,7 +25,7 @@ export function maintenanceArguments(args) {
   };
 }
 
-function inspect(db, now) {
+export function inspectAssetDatabase(db, now = Date.now) {
   if (db.prepare("PRAGMA quick_check").get().quick_check !== "ok")
     throw new ServiceError("asset_storage_unavailable");
   const setting = (name) =>
@@ -102,7 +102,9 @@ export function maintainAssets({
       db.exec("BEGIN IMMEDIATE");
       transaction = true;
     }
-    const before = inspect(db, now);
+    if (execute && db.prepare("SELECT 1 FROM settings WHERE name = 'asset-restore-state'").get())
+      throw new ServiceError("asset_restore_quarantined");
+    const before = inspectAssetDatabase(db, now);
     if (mode === "expire-pending" && before.schema !== 2)
       throw new ServiceError("asset_migration_required");
     let changed = 0;
@@ -123,7 +125,7 @@ export function maintainAssets({
       }
       db.prepare("UPDATE settings SET value = ? WHERE name = 'clock'").run(String(before.cutoff));
     }
-    const after = inspect(db, () => before.cutoff);
+    const after = inspectAssetDatabase(db, () => before.cutoff);
     if (execute) {
       db.exec("COMMIT");
       transaction = false;

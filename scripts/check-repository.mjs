@@ -8,12 +8,14 @@ const forbiddenDirectories = new Set([
   'secrets', 'credentials', 'keys', 'wallets', 'keystore', 'keystores',
   'uploads', 'captures', 'recordings', 'traces', 'test-results', 'playwright-report',
   'coverage', 'node_modules', 'dist', 'build', 'target', '.cache', '.next',
+  'asset-backups', 'asset-restores',
 ]);
 
 function forbiddenPath(path) {
   const parts = path.toLowerCase().split('/');
   const name = parts.at(-1);
   return parts.slice(0, -1).some((part) => forbiddenDirectories.has(part))
+    || name === 'backup.manifest.json'
     || (/^\.env(?:\.|$)/.test(name) && name !== '.env.example')
     || /^(?:\.envrc|\.npmrc|\.netrc|\.pypirc)$/.test(name)
     || /\.(?:pem|key|p12|pfx|jks|keystore|secret|seed|log|sqlite3?|db|dump|zip|7z|tar|gz|dmg)$/i.test(name)

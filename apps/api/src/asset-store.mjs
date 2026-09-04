@@ -17,6 +17,7 @@ import {
 } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { createHash, createHmac, randomBytes } from "node:crypto";
+import { DatabaseSync } from "node:sqlite";
 import { recoverMessageAddress, isAddress, zeroAddress } from "viem";
 import { Budget } from "./budget.mjs";
 import { ServiceError } from "./errors.mjs";
@@ -30,7 +31,7 @@ const minimumFree = 256 * 1024 * 1024;
 const digest = (bytes) => createHash("sha256").update(bytes).digest("hex");
 const filenamePattern = /^[a-f0-9]{64}\.(?:webp|json)$/;
 
-function checkRoot(root, production) {
+export function checkAssetRoot(root, production = false) {
   if (
     !root ||
     resolve(root) !== root ||
@@ -50,7 +51,7 @@ function checkRoot(root, production) {
 }
 
 export function checkAssetStorage(root, production = false) {
-  checkRoot(root, production);
+  checkAssetRoot(root, production);
   for (const [name, directory] of [["assets.sqlite", false], ["objects", true]]) {
     const path = join(root, name);
     const stat = lstatSync(path);
@@ -63,7 +64,7 @@ export function checkAssetStorage(root, production = false) {
 }
 
 export function initializeAssetStore(root, production = false, now = Date.now) {
-  checkRoot(root, production);
+  checkAssetRoot(root, production);
   if (existsSync(join(root, "objects")))
     throw new ServiceError("asset_storage_already_initialized");
   const file = openSync(join(root, "assets.sqlite"), "wx", 0o600);
@@ -83,7 +84,7 @@ export function initializeAssetStore(root, production = false, now = Date.now) {
   }
 }
 
-function syncDirectory(path) {
+export function syncDirectory(path) {
   const fd = openSync(path, constants.O_RDONLY | constants.O_DIRECTORY | constants.O_NOFOLLOW);
   try {
     fsyncSync(fd);
@@ -92,8 +93,9 @@ function syncDirectory(path) {
   }
 }
 
-function readExact(path, limit, sync = false) {
-  const fd = openSync(path, constants.O_RDONLY | constants.O_NOFOLLOW);
+export function readExact(path, limit, sync = false) {
+  if (!lstatSync(path).isFile()) throw new ServiceError("asset_integrity_failed");
+  const fd = openSync(path, constants.O_RDONLY | constants.O_NOFOLLOW | constants.O_NONBLOCK);
   try {
     const stat = fstatSync(fd);
     if (!stat.isFile() || stat.nlink !== 1 || stat.size < 1 || stat.size > limit)
@@ -147,6 +149,11 @@ function validOrigin(value) {
 export class AssetStore {
   constructor({ root, publicOrigin, appOrigin, production = false, now = Date.now }) {
     checkAssetStorage(root, production);
+    const inspection = new DatabaseSync(join(root, "assets.sqlite"), { readOnly: true });
+    try {
+      if (inspection.prepare("SELECT 1 FROM settings WHERE name = 'asset-restore-state'").get())
+        throw new ServiceError("asset_restore_quarantined");
+    } finally { inspection.close(); }
     if (
       !validOrigin(publicOrigin) ||
       (!validOrigin(appOrigin) &&
@@ -163,6 +170,8 @@ export class AssetStore {
     try {
       const setting = (name) =>
         this.db.prepare("SELECT value FROM settings WHERE name = ?").get(name)?.value;
+      if (setting("asset-restore-state") !== undefined)
+        throw new ServiceError("asset_restore_quarantined");
       const used = Number(setting("asset-bytes"));
       if (setting("asset-schema") === "1") throw new ServiceError("asset_migration_required");
       const reserved = this.db

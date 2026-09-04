@@ -6,6 +6,7 @@
     "setup": "npm --prefix apps/web ci && npm --prefix apps/api ci --ignore-scripts && git config --local core.hooksPath .githooks",
     "dev": "npm --prefix apps/web run dev -- --hostname 127.0.0.1 --port 3000",
     "dev:api": "npm --prefix apps/api start",
+    "assets:snapshot": "node scripts/asset-snapshots.mjs",
     "build": "npm --prefix apps/web run build",
     "build:fly": "npm --prefix apps/web run build:fly",
     "lint": "npm --prefix apps/web run lint && apps/web/node_modules/.bin/oxlint apps/api/src",

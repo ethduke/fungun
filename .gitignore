@@ -44,6 +44,9 @@ screenshots/
 test-results/
 playwright-report/
 artifacts/
+asset-backups/
+asset-restores/
+backup.manifest.json
 tmp/
 *.log
 *.har

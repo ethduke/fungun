@@ -6,7 +6,7 @@ Fee reads/claims are owned by a separate task and are not assessed here.
 | Step | Status | Implemented | Remaining |
 | --- | --- | --- | --- |
 | 1. Live data | Partial | Server-only environment allowlists; bounded/cached read service; O1 catalogs; Long ticker checks | Complete contract/pairing verification and O1 ticker checks; fee coverage tracked separately |
-| 2. Image and metadata storage | In progress | Content validation; isolated decoder packaging; write-once Fly asset service; explicit inline preview and wallet publication; read-only status; offline terminal expiry for unreserved approvals | Real Fly isolation/resource verification; independent backup/restore; reserved/partial-write recovery; public retrieval and Long display verification |
+| 2. Image and metadata storage | In progress | Content validation; isolated decoder packaging; write-once Fly asset service; explicit inline preview and wallet publication; read-only status; offline terminal expiry; verified offline backup and quarantined restore tooling | Choose independent encrypted backup storage and test it; reconcile restored state before activation; reserved/partial-write recovery; public retrieval and Long display verification |
 | 3. Launch preparation | Partial | Ordinary Long unsigned builder and cost model, tested offline | Live simulation and trustworthy ETH/USD totals; O1 builder; verified metadata attachment |
 | 4. Wallet execution | Next | Wallet connection exists; artwork approval is not launch execution | Explicit launch approval, per-launchpad progress, receipt checks and durable duplicate-submission protection |
 | 5. Paid Grok | Partial | System prompt builder and editable ticker-populated prompt | One-time payment approval, spend limits, paid generation and output validation |
@@ -26,13 +26,21 @@ unlocks the browser; pending, reserved and unknown results remain blocked.
 Tests cover signature races, expiry boundaries, clock rollback, restart,
 unchanged quotas/files and bounded retained history. No real store was migrated.
 
+Offline backup now uses SQLite's live backup API behind an explicit stopped-service
+write fence, validates every committed object and preserves bounded interrupted-
+write evidence. Verification requires a separately recorded manifest SHA-256.
+Restore creates a new quarantined store and cannot overwrite or start as the live
+service; no activation bypass exists. The tool is recovery plumbing, not an
+independent backup until an encrypted destination and restore drill are configured.
+
 Publication stays disabled by default. Storage receipts explicitly carry
 `launchReady: false`; a stored image is not proof that a token is safe to launch.
 See [launch-assets.md](launch-assets.md) and [fly-assets.md](fly-assets.md).
 
 ## Next implementation boundary
 
-Finish durable backup/restore and reserved/partial-write recovery, then verify the
+Finish reserved/partial-write recovery, choose independent backup storage and run
+a restore drill, then verify the
 dedicated Fly asset stack before enabling uploads. Afterwards connect ordinary
 Long's prepared metadata to read-only live simulation and explicit wallet launch.
 Do not use the Telegram bot's runtime, secrets or volume for this service.
