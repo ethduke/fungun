@@ -62,10 +62,13 @@ const signAsset = async (approval: AssetApproval, isCurrent: () => boolean) =>
 
 function ConnectionControl({
   onAccountChange,
+  open,
+  onOpenChange,
 }: {
   onAccountChange: (account: ConnectedAccount) => void;
+  open: boolean;
+  onOpenChange: (open: boolean) => void;
 }) {
-  const [open, setOpen] = useState(true);
   const connection = useConnection();
   const connectors = useConnectors();
   const connect = useConnect();
@@ -80,13 +83,13 @@ function ConnectionControl({
   }, [address, connection.chainId, connection.isConnected, onAccountChange]);
   return (
     <>
-      <Button className="wallet-button" onClick={() => setOpen(true)}>
+      <Button className="wallet-button" onClick={() => onOpenChange(true)}>
         <Wallet size={16} />
         {address
           ? `${address.slice(0, 6)}…${address.slice(-4)}`
           : 'Connect wallet'}
       </Button>
-      <Dialog open={open} onOpenChange={setOpen}>
+      <Dialog open={open} onOpenChange={onOpenChange}>
         <DialogContent className="app-dialog">
           <DialogHeader>
             <span className="dialog-icon">
@@ -132,7 +135,7 @@ function ConnectionControl({
                   onClick={() =>
                     connect.mutate(
                       { connector },
-                      { onSuccess: () => setOpen(false) },
+                      { onSuccess: () => onOpenChange(false) },
                     )
                   }
                 >
@@ -184,8 +187,12 @@ function ConnectionControl({
 
 export default function WalletConnection({
   onAccountChange,
+  open,
+  onOpenChange,
 }: {
   onAccountChange: (account: ConnectedAccount) => void;
+  open: boolean;
+  onOpenChange: (open: boolean) => void;
 }) {
   const [config] = useState(() => (configuration ??= createPreviewConfig()));
   const [queryClient] = useState(
@@ -194,7 +201,11 @@ export default function WalletConnection({
   return (
     <WagmiProvider config={config} reconnectOnMount={false}>
       <QueryClientProvider client={queryClient}>
-        <ConnectionControl onAccountChange={onAccountChange} />
+        <ConnectionControl
+          onAccountChange={onAccountChange}
+          open={open}
+          onOpenChange={onOpenChange}
+        />
       </QueryClientProvider>
     </WagmiProvider>
   );

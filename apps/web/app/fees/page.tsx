@@ -71,14 +71,21 @@ export default function Fees() {
             FEES<span>.</span>
           </h1>
         </div>
-        <Empty className="fees-panel fee-connect">
+        <Button
+          render={<Empty />}
+          nativeButton={false}
+          variant="ghost"
+          className="fees-panel fee-connect h-auto w-full cursor-pointer whitespace-normal"
+          aria-haspopup="dialog"
+          onClick={account.openWallet}
+        >
           <EmptyHeader>
             <EmptyMedia>
               <Wallet size={24} aria-hidden="true" />
             </EmptyMedia>
             <EmptyTitle>Connect your wallet to show fees.</EmptyTitle>
           </EmptyHeader>
-        </Empty>
+        </Button>
       </main>
     );
   return <ConnectedFees key={address} address={address} />;

@@ -14,10 +14,15 @@ const WalletConnection = lazy(() => import('@/components/connect-panel'));
 export function AppShell({ children }: { children: ReactNode }) {
   const pathname = usePathname();
   const [walletStarted, setWalletStarted] = useState(false);
+  const [walletOpen, setWalletOpen] = useState(false);
   const [account, setAccount] = useState<ConnectedAccount>({});
+  const openWallet = () => {
+    setWalletStarted(true);
+    setWalletOpen(true);
+  };
 
   return (
-    <AccountContext value={account}>
+    <AccountContext value={{ ...account, openWallet }}>
       <div className="site-shell">
         <header className="site-header">
           <Link
@@ -60,12 +65,16 @@ export function AppShell({ children }: { children: ReactNode }) {
                   </Button>
                 }
               >
-                <WalletConnection onAccountChange={setAccount} />
+                <WalletConnection
+                  onAccountChange={setAccount}
+                  open={walletOpen}
+                  onOpenChange={setWalletOpen}
+                />
               </Suspense>
             ) : (
               <Button
                 className="wallet-button"
-                onClick={() => setWalletStarted(true)}
+                onClick={openWallet}
               >
                 <Wallet size={16} />
                 Connect wallet
