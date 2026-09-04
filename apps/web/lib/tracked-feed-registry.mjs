@@ -1,5 +1,7 @@
 const REGISTRY_URL =
   'https://docs.o1.exchange/launchpad/reference/launch-contract-suites.json';
+const ASSET_REGISTRY_URL =
+  'https://docs.o1.exchange/launchpad/reference/production-deployments.json';
 const DAY_MS = 86_400_000;
 const RETRY_MS = 300_000;
 const MAX_BYTES = 65_536;
@@ -37,18 +39,55 @@ export function parseO1Hooks(payload) {
   return hooks;
 }
 
-export function createO1HookRegistry({
-  fetcher = (url, options) => fetch(url, options),
-  now = () => performance.now(),
-} = {}) {
-  let hooks = null,
+export function parseStableAssets(payload) {
+  if (
+    payload?.schemaVersion !== 4 ||
+    payload.project !== 'o1 Launchpad' ||
+    payload.environment !== 'production' ||
+    !Array.isArray(payload.chains)
+  )
+    throw new Error('Invalid asset registry');
+  const assets = new Set();
+  for (const chain of payload.chains) {
+    if (chain.chainId !== 4663) continue;
+    if (!Array.isArray(chain.quotes)) throw new Error('Invalid quote registry');
+    for (const quote of chain.quotes) {
+      // Symbols select entries only in the official registry, never feed rows.
+      if (
+        !['USDG', 'USDC', 'USDT', 'DAI', 'USDS', 'PYUSD'].includes(
+          quote?.symbol,
+        )
+      )
+        continue;
+      if (
+        typeof quote.address !== 'string' ||
+        !/^0x[0-9a-f]{40}$/i.test(quote.address) ||
+        /^0x0{40}$/i.test(quote.address)
+      )
+        throw new Error('Invalid stablecoin address');
+      assets.add(`${chain.chainId}:${quote.address.toLowerCase()}`);
+    }
+  }
+  if (!assets.size) throw new Error('Missing stablecoin registry');
+  return assets;
+}
+
+function createRegistry(
+  url,
+  parse,
+  {
+    fetcher = (url, options) => fetch(url, options),
+    now = () => performance.now(),
+  } = {},
+) {
+  let value = null,
     nextReadAt = 0,
     pending = null;
   async function refresh() {
     const controller = new AbortController();
     const timeout = setTimeout(() => controller.abort(), 2000);
     try {
-      const response = await fetcher(REGISTRY_URL, {
+      const response = await fetcher(url, {
         signal: controller.signal,
         redirect: 'manual',
         headers: { Accept: 'application/json' },
@@ -79,18 +118,18 @@ export function createO1HookRegistry({
       } finally {
         reader.releaseLock();
       }
-      hooks = parseO1Hooks(JSON.parse(body));
+      value = parse(JSON.parse(body));
       nextReadAt = now() + DAY_MS;
     } catch {
-      // Preserve historical recognition when the documentation host is down.
+      // Preserve the last verified registry when the documentation host is down.
       nextReadAt = now() + RETRY_MS;
     } finally {
       clearTimeout(timeout);
     }
-    return hooks;
+    return value;
   }
-  return function getHooks() {
-    if (now() < nextReadAt) return Promise.resolve(hooks);
+  return function getRegistry() {
+    if (now() < nextReadAt) return Promise.resolve(value);
     pending ??= refresh().finally(() => {
       pending = null;
     });
@@ -98,4 +137,13 @@ export function createO1HookRegistry({
   };
 }
 
+export function createO1HookRegistry(options = {}) {
+  return createRegistry(REGISTRY_URL, parseO1Hooks, options);
+}
+
+export function createStableAssetRegistry(options = {}) {
+  return createRegistry(ASSET_REGISTRY_URL, parseStableAssets, options);
+}
+
 export const getO1Hooks = createO1HookRegistry();
+export const getStableAssets = createStableAssetRegistry();

@@ -22,6 +22,8 @@ does not supply artwork; choose an image separately.
 Compact venue labels include O1 RWA, UniV3 and UniV4. O1 hooks are recognized
 using a daily server cache of the official current and historical suite registry,
 with no RPC enrichment. Migration labels require explicit upstream provenance.
+Canonical stablecoins are excluded as tracked tokens before counts/popularity.
+Stablecoin quote assets remain valid for otherwise eligible nonstable tokens.
 
 Only one chain can be selected at a time: Robinhood Chain (default) supports
 Long and O1; Base supports O1. Selecting both launchpads represents separate

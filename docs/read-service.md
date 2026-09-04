@@ -75,6 +75,12 @@ All results are advisory and can change before a transaction.
   before retrying. Previously recognized historical hooks remain available during
   outages. Registry failure never prevents the market feed from loading. No RPC
   enrichment, per-token requests or runtime addresses are added to source control.
+- Stablecoin exclusions use the official production asset snapshot through the
+  same daily-cache, coalescing, timeout, size-limit and failure-cooldown policy.
+  The last valid address set survives registry outages. Without an initial valid
+  set, feed reads pause for five minutes rather than serving unfiltered rows.
+  This adds one daily public HTTP registry read per active isolate, with zero RPC
+  calls; it does not change tracking performed inside the external feed service.
 - One shared catalog per chain, cached five minutes, with concurrent reads coalesced.
 - Ticker responses cached 15 seconds; no automatic polling/retries. Failed reads back
   off at least 15 seconds. Chain checks cache five minutes; block reads five seconds;

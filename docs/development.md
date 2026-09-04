@@ -41,6 +41,12 @@ Run `npm run dev:api` in a second terminal for the read service. See
   from the feed; unidentified hooks retain an explanatory tooltip. O1 Mig.
   requires an explicit upstream migration label. An older suite or a quote token
   such as USDG does not establish migration or launchpad provenance.
+- Canonical stablecoins are excluded when they occupy the tracked-token side,
+  including stable/stable and USDG/stock rows. Nonstable launch tokens merely
+  quoted in a stablecoin remain eligible under the feed's quote-kind filters.
+  Address matching uses the official production asset snapshot, cached daily;
+  token names and tickers cannot trigger exclusions. Filtering precedes cards,
+  counts and popularity. Currently the Robinhood registry lists canonical USDG.
 - COPY transfers the selected token's name and ticker into the launch form and
   jumps to the coin details immediately. It clears old artwork and invalidates
   pending uploads so another token's image cannot carry over. The current public

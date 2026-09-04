@@ -4,7 +4,8 @@ import {
   retryAfterMs,
 } from './tracked-feed-policy.mjs';
 import { identifyO1Launchpad } from './tracked-feed-labels.mjs';
-import { getO1Hooks } from './tracked-feed-registry.mjs';
+import { getO1Hooks, getStableAssets } from './tracked-feed-registry.mjs';
+import { isTrackedStablecoin } from './tracked-feed-assets.mjs';
 
 const UPSTREAM = 'https://rh-monitor.fly.dev/api';
 const fields = [
@@ -27,7 +28,11 @@ const headers = {
   'Cache-Control': 'no-store',
 };
 
-export function projectTrackedPayload(payload, hooks = null) {
+export function projectTrackedPayload(
+  payload,
+  hooks = null,
+  stableAssets = null,
+) {
   if (!payload || !Array.isArray(payload.pools))
     throw new Error('Invalid upstream feed');
   return {
@@ -37,7 +42,8 @@ export function projectTrackedPayload(payload, hooks = null) {
         (row) =>
           row &&
           Number(row.chain_id ?? 4663) === 4663 &&
-          ['eth', 'shares'].includes(row.quote_kind),
+          ['eth', 'shares'].includes(row.quote_kind) &&
+          !isTrackedStablecoin(row, stableAssets),
       )
       .map((row) => {
         const out = Object.fromEntries(
@@ -66,6 +72,7 @@ export function createTrackedFeedHandler({
   fetcher = (url, options) => fetch(url, options),
   now = () => performance.now(),
   loadHookRegistry = async () => null,
+  loadStableRegistry = null,
 } = {}) {
   // Shared only within this server process / Worker isolate, never per URL/user.
   let snapshot = null;
@@ -78,6 +85,18 @@ export function createTrackedFeedHandler({
     const timeout = setTimeout(() => controller.abort(), 8000);
     let retryAfter = 0;
     try {
+      const stableAssets = loadStableRegistry
+        ? await loadStableRegistry()
+        : null;
+      if (
+        loadStableRegistry &&
+        !(stableAssets instanceof Set && stableAssets.size)
+      ) {
+        // Do not show unfiltered rows or repeatedly fetch the feed while the
+        // initial address registry is unavailable. Its cache retries in 5 min.
+        retryAfter = 300_000;
+        throw new Error('Asset classification unavailable');
+      }
       // Read the daily registry alongside the feed, with its own two-second
       // timeout. Await both so the Worker lifetime covers all started work.
       const [feed, registry] = await Promise.allSettled([
@@ -99,7 +118,7 @@ export function createTrackedFeedHandler({
       }
       const hooks = registry.status === 'fulfilled' ? registry.value : null;
       const body = JSON.stringify(
-        projectTrackedPayload(await upstream.json(), hooks),
+        projectTrackedPayload(await upstream.json(), hooks, stableAssets),
       );
       snapshot = { body, expiresAt: now() + FEED_INTERVAL_MS };
       failures = 0;
@@ -155,4 +174,5 @@ export function createTrackedFeedHandler({
 // Demand-driven singleton: no timer or upstream request without a GET.
 export const handleTrackedFeed = createTrackedFeedHandler({
   loadHookRegistry: getO1Hooks,
+  loadStableRegistry: getStableAssets,
 });

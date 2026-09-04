@@ -76,6 +76,11 @@ COPY fills the coin name and ticker and jumps to the launch form immediately.
 It clears prior artwork and pending uploads. This source does not provide a token
 image or metadata URL; upload artwork separately.
 
+Canonical stablecoins do not appear as tracked tokens, including stable/stable
+and USDG/stock pairs. A nonstable token may still use a stablecoin as its quote.
+Exclusions match addresses from the daily-cached official asset registry, never
+user-supplied token names or tickers, and apply before counts and popularity.
+
 Labels use Long, O1, O1 RWA, UniV3 and UniV4. O1 identification matches the
 pool's hook and chain against the official current and historical contract-suite
 registry, cached daily on the server without RPC calls. Historical does not mean
