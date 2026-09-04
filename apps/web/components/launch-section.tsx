@@ -2,10 +2,22 @@
 
 import Image from 'next/image';
 import { useEffect, useState, type ReactNode } from 'react';
-import { ImagePlus, LockKeyhole, TriangleAlert } from 'lucide-react';
+import {
+  Check,
+  ChevronDown,
+  ImagePlus,
+  LockKeyhole,
+  TriangleAlert,
+} from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Checkbox } from '@/components/ui/checkbox';
 import { Skeleton } from '@/components/ui/skeleton';
+import {
+  Collapsible,
+  CollapsibleContent,
+  CollapsibleTrigger,
+} from '@/components/ui/collapsible';
+import { BulletProgress, LaunchGun } from '@/components/launch-motion';
 import {
   chainName,
   draftStatus,
@@ -30,6 +42,7 @@ import {
   type UsdRate,
 } from '@/lib/launch-cost';
 import './launch-cost.css';
+import './launch-section.css';
 
 export function LaunchSection({
   name,
@@ -105,6 +118,15 @@ export function LaunchSection({
     complete: 'Draft complete',
   }[status];
 
+  const hasUsd = usdTotal !== 'USD unavailable';
+  const costMessage = !destinations.length
+    ? 'Select a launchpad to see its fees.'
+    : costs.reason === 'not_ready'
+      ? 'Fees appear before wallet approval.'
+      : costs.reason
+        ? costNotice(costs.reason)
+        : '';
+
   return (
     <section className="launch-section" aria-labelledby="launch-heading">
       <header className="launch-heading">
@@ -126,8 +148,8 @@ export function LaunchSection({
         ) : image ? (
           <Image
             unoptimized
-            width={52}
-            height={52}
+            width={48}
+            height={48}
             src={image.url}
             alt="Coin preview"
           />
@@ -136,112 +158,78 @@ export function LaunchSection({
             <ImagePlus size={22} />
           </span>
         )}
-        <div>
-          <strong>{name.trim() || 'Coin name'}</strong>
-          <span>{ticker ? `$${ticker}` : 'Ticker'}</span>
+        <div className="launch-identity-copy">
+          <div className="launch-name-row">
+            <strong>{name.trim() || 'Coin name'}</strong>
+            <span>{ticker ? `$${ticker}` : 'Ticker'}</span>
+          </div>
+          <div className="launch-chain">{chainName(chainId)}</div>
         </div>
       </div>
-      {children}
       {destinations.length ? (
         <div className="launch-destinations">
-          {destinations.map((pad) => (
-            <div key={pad.id} className="launch-destination">
-              <div>
-                <strong>{launchpadName(pad.id)}</strong>
-                <span>{chainName(pad.chainId)}</span>
-              </div>
-              <dl>
-                <div>
-                  <dt>Pairing</dt>
-                  <dd>
-                    {(pad.id === 'longbow'
-                      ? undefined
-                      : catalog?.pads[pad.id]?.pairs.find(
-                          (pair) => pair.id === pad.pairId,
-                        )?.symbol) ?? pairingName(pad.pairId)}
-                    {pad.pairId.startsWith('sample-') ? ' · sample' : ''}
-                  </dd>
+          {destinations.map((pad) => {
+            const pairing =
+              (pad.id === 'longbow'
+                ? undefined
+                : catalog?.pads[pad.id]?.pairs.find(
+                    (pair) => pair.id === pad.pairId,
+                  )?.symbol) ?? pairingName(pad.pairId);
+            const reservation =
+              pad.id === 'longbow'
+                ? 'Not supported yet'
+                : checking
+                  ? 'Checking…'
+                  : tickerLabel(tickerCheck?.results[pad.id], now);
+            return (
+              <div key={pad.id} className="launch-destination">
+                <div className="launch-route">
+                  <strong>
+                    {launchpadName(pad.id)} / {pairing}
+                  </strong>
+                  {pad.pairId.startsWith('sample-') && (
+                    <span>Sample pairing</span>
+                  )}
+                  {pad.chainId !== chainId && (
+                    <span>{chainName(pad.chainId)}</span>
+                  )}
                 </div>
-                <div>
-                  <dt>Metadata</dt>
-                  <dd>
-                    {pad.id === 'o1' ? (
-                      <label
-                        className="metadata-option"
-                        htmlFor="o1-editable-metadata"
-                      >
-                        <Checkbox
-                          id="o1-editable-metadata"
-                          checked={pad.editableMetadata}
-                          onCheckedChange={(editableMetadata) =>
-                            onChange({ ...pad, editableMetadata })
-                          }
-                        />
-                        Allow updates
-                      </label>
-                    ) : (
-                      'Immutable'
+                <div className="launch-facts">
+                  {pad.id === 'o1' ? (
+                    <label
+                      className="metadata-option"
+                      htmlFor="o1-editable-metadata"
+                    >
+                      <Checkbox
+                        id="o1-editable-metadata"
+                        checked={pad.editableMetadata}
+                        onCheckedChange={(editableMetadata) =>
+                          onChange({ ...pad, editableMetadata })
+                        }
+                      />
+                      Allow metadata updates
+                    </label>
+                  ) : (
+                    <span>
+                      <LockKeyhole size={14} aria-hidden="true" />
+                      Immutable metadata
+                    </span>
+                  )}
+                  <span>
+                    {reservation === 'Unreserved' && (
+                      <Check size={14} aria-hidden="true" />
                     )}
-                  </dd>
+                    Ticker: {reservation.toLowerCase()}
+                  </span>
                 </div>
-                <div>
-                  <dt>Launchpad fee</dt>
-                  <dd className="cost-amount">
-                    {formatEth(costs.pads[pad.id]?.launchpadWei)}
-                    <span>
-                      {formatUsd(
-                        costs.pads[pad.id]?.launchpadWei,
-                        usdRate,
-                        costNow,
-                      )}
-                    </span>
-                  </dd>
-                </div>
-                <div>
-                  <dt>Network fees · estimated</dt>
-                  <dd className="cost-amount">
-                    {formatEth(costs.pads[pad.id]?.networkWei)}
-                    <span>
-                      {formatUsd(
-                        costs.pads[pad.id]?.networkWei,
-                        usdRate,
-                        costNow,
-                      )}
-                    </span>
-                  </dd>
-                </div>
-                {!!costs.pads[pad.id]?.otherValueWei && (
-                  <div>
-                    <dt>Other transaction value</dt>
-                    <dd className="cost-amount">
-                      {formatEth(costs.pads[pad.id]?.otherValueWei)}
-                      <span>
-                        {formatUsd(
-                          costs.pads[pad.id]?.otherValueWei,
-                          usdRate,
-                          costNow,
-                        )}
-                      </span>
-                    </dd>
-                  </div>
-                )}
-                <div>
-                  <dt>Ticker</dt>
-                  <dd>
-                    {pad.id === 'longbow'
-                      ? 'Not supported yet'
-                      : checking
-                        ? 'Checking…'
-                        : tickerLabel(tickerCheck?.results[pad.id], now)}
-                  </dd>
-                </div>
-              </dl>
-            </div>
-          ))}
+              </div>
+            );
+          })}
         </div>
       ) : (
         <p className="launch-empty">Select a launchpad above.</p>
       )}
+      {imagePending && <BulletProgress label="Checking image…" />}
       {status === 'incomplete' && (
         <output className="launch-validation">
           {Object.values(errors)[0]}
@@ -249,7 +237,7 @@ export function LaunchSection({
       )}
       {destinations.length > 1 && (
         <p className="launch-note">
-          Separate token deployments; one can succeed while another fails.
+          Separate deployments; each launch can succeed or fail independently.
         </p>
       )}
       {gasWarning && (
@@ -258,40 +246,95 @@ export function LaunchSection({
           {gasWarning}
         </p>
       )}
+      {children}
       <footer className="launch-footer">
         <div>
-          <span className="eyebrow">ESTIMATED TOTAL</span>
-          <output className="total-price" aria-live="polite">
-            {formatEth(costs.total?.totalWei)} <span>{usdTotal}</span>
-          </output>
-          <p className="cost-caption">
-            Launchpad + network fees
-            {costs.total?.otherValueWei ? ' + other transaction value' : ''}
-            {costs.total
-              ? ` · ${costs.total.transactions} transaction${costs.total.transactions === 1 ? '' : 's'}`
-              : ''}
-          </p>
-          {usdTotal !== 'USD unavailable' && usdRate && (
-            <p className="cost-caption">
-              ETH/USD: {usdRate.sourceLabel} ·{' '}
-              {Math.max(0, Math.floor((costNow - usdRate.quotedAt) / 1000))}s
-              ago
+          <div className="launch-cost-summary">
+            <div>
+              <span className="launch-total-label">Estimated total</span>
+              <p className="launch-total-note">
+                Launch fee + network gas
+                {costs.total?.otherValueWei ? ' + transaction value' : ''}
+              </p>
+            </div>
+            <output
+              className="total-price"
+              data-pending={!costs.total}
+              aria-live="polite"
+            >
+              {costs.total ? formatEth(costs.total.totalWei) : 'Pending'}
+              {hasUsd && <span>≈ {usdTotal}</span>}
+            </output>
+          </div>
+          {costMessage && (
+            <p id="launch-preview-notice" className="launch-note">
+              {costMessage}
             </p>
           )}
-          <p id="launch-preview-notice" className="launch-note">
-            {destinations.length
-              ? costNotice(costs.reason)
-              : 'Select a launchpad to see its launch costs.'}
-          </p>
+          {!!destinations.length && (
+            <Collapsible className="launch-fees">
+              <CollapsibleTrigger className="launch-fee-toggle">
+                Fee breakdown <ChevronDown size={14} aria-hidden="true" />
+              </CollapsibleTrigger>
+              <CollapsibleContent className="launch-fee-panel">
+                {destinations.map((pad) => {
+                  const amount = costs.pads[pad.id];
+                  return (
+                    <div key={pad.id} className="launch-fee-pad">
+                      <strong>{launchpadName(pad.id)}</strong>
+                      <dl>
+                        <div>
+                          <dt>Launch fee</dt>
+                          <dd>
+                            {amount
+                              ? formatEth(amount.launchpadWei)
+                              : 'Pending'}
+                          </dd>
+                        </div>
+                        <div>
+                          <dt>Estimated gas</dt>
+                          <dd>
+                            {amount ? formatEth(amount.networkWei) : 'Pending'}
+                          </dd>
+                        </div>
+                        {!!amount?.otherValueWei && (
+                          <div>
+                            <dt>Transaction value</dt>
+                            <dd>{formatEth(amount.otherValueWei)}</dd>
+                          </div>
+                        )}
+                        {amount && (
+                          <div>
+                            <dt>Transactions</dt>
+                            <dd>{amount.transactions}</dd>
+                          </div>
+                        )}
+                      </dl>
+                    </div>
+                  );
+                })}
+                {hasUsd && usdRate && (
+                  <p className="launch-rate-source">
+                    ETH/USD: {usdRate.sourceLabel} ·{' '}
+                    {Math.max(
+                      0,
+                      Math.floor((costNow - usdRate.quotedAt) / 1000),
+                    )}
+                    s ago
+                  </p>
+                )}
+                {costs.total && (
+                  <p className="launch-rate-source">
+                    Fees may change. Your wallet shows the final request.
+                  </p>
+                )}
+              </CollapsibleContent>
+            </Collapsible>
+          )}
         </div>
-        <Button
-          type="button"
-          className="launch-button"
-          disabled
-          aria-describedby="launch-preview-notice"
-        >
-          <LockKeyhole size={16} />
-          Launch coin
+        <Button type="button" className="launch-button" disabled>
+          <span>Launch coin</span>
+          <LaunchGun />
         </Button>
       </footer>
     </section>

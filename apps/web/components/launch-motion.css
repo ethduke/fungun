@@ -1,0 +1,134 @@
+.launch-gun {
+  display: inline-flex;
+  position: relative;
+  align-items: center;
+  flex: 0 0 78px;
+  height: 32px;
+  color: #edce87;
+}
+.launch-gun img {
+  width: 30px;
+  height: 30px;
+  border-radius: 8px;
+  object-fit: contain;
+  transition: transform 180ms ease;
+}
+.launch-gun-trail {
+  width: 32px;
+  height: 2px;
+  margin-left: 7px;
+  background: linear-gradient(90deg, currentColor, transparent);
+  opacity: 0.55;
+}
+.launch-gun-coin {
+  position: absolute;
+  right: 0;
+  display: grid;
+  place-items: center;
+  width: 24px;
+  height: 24px;
+  border-radius: 50%;
+  background: #edce87;
+  color: #35482c;
+  font-size: 14px;
+  font-weight: 600;
+  animation: launch-coin-arrive 600ms ease-out both;
+}
+.launch-gun[data-confirmed='true'] img {
+  animation: launch-gun-recoil 350ms ease-out;
+}
+.launch-button:hover:not(:disabled) .launch-gun img {
+  transform: rotate(-6deg) translateX(-2px);
+}
+.bullet-progress {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  width: 100%;
+  min-width: 0;
+  color: #46613e;
+  font-size: 14px;
+  line-height: 1.5;
+}
+.bullet-progress-label {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+.bullet-progress-track {
+  position: relative;
+  display: block;
+  flex: 0 0 76px;
+  height: 12px;
+  margin-left: auto;
+  overflow: hidden;
+}
+.bullet-progress-track::before {
+  content: '';
+  position: absolute;
+  inset: 5px 0 auto;
+  height: 2px;
+  background: #d1dcc3;
+  border-radius: 2px;
+}
+.bullet-progress-round {
+  position: absolute;
+  left: 32px;
+  top: 3px;
+  width: 14px;
+  height: 6px;
+  background: currentColor;
+  border-radius: 1px 6px 6px 1px;
+}
+.bullet-progress-round::before {
+  content: '';
+  position: absolute;
+  right: 16px;
+  top: 2px;
+  width: 20px;
+  height: 2px;
+  background: linear-gradient(90deg, transparent, currentColor);
+}
+.bullet-progress[data-active='true'] .bullet-progress-round {
+  animation: launch-bullet-flow 1200ms linear infinite;
+}
+.bullet-progress[data-complete='true'] svg {
+  flex-shrink: 0;
+  margin-left: auto;
+}
+@keyframes launch-bullet-flow {
+  from {
+    transform: translateX(-48px);
+  }
+  to {
+    transform: translateX(58px);
+  }
+}
+@keyframes launch-gun-recoil {
+  25% {
+    transform: translateX(-5px) rotate(-10deg);
+  }
+  100% {
+    transform: none;
+  }
+}
+@keyframes launch-coin-arrive {
+  from {
+    opacity: 0;
+    transform: translateX(-28px) rotate(-90deg) scale(0.65);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .launch-gun img,
+  .launch-gun-coin,
+  .bullet-progress-round {
+    animation: none !important;
+    transition: none !important;
+  }
+  .launch-button:hover:not(:disabled) .launch-gun img {
+    transform: none;
+  }
+}

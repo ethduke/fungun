@@ -23,6 +23,7 @@ import {
 } from '@/components/ui/collapsible';
 import { LaunchpadCard } from '@/components/launchpad-card';
 import { LaunchSection } from '@/components/launch-section';
+import { BulletProgress } from '@/components/launch-motion';
 import { AssetPublication } from '@/components/asset-publication';
 import { ImageGeneration } from '@/components/image-generation';
 import {
@@ -301,7 +302,9 @@ export default function Home() {
                       </>
                     )}
                     {imagePending && (
-                      <output className="image-pending">Checking image…</output>
+                      <span className="image-pending">
+                        <BulletProgress label="Checking image…" />
+                      </span>
                     )}
                   </button>
                   {image && (

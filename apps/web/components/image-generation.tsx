@@ -5,6 +5,7 @@ import Image from 'next/image';
 import { formatUnits } from 'viem';
 import { Sparkles } from 'lucide-react';
 import { Button } from '@/components/ui/button';
+import { BulletProgress } from '@/components/launch-motion';
 import {
   Dialog,
   DialogContent,
@@ -156,7 +157,7 @@ export function ImageGeneration({
   async function check() {
     if (flight.current || !record) return;
     flight.current = true;
-    setBusy('Checking saved request…');
+    setBusy('Checking image status…');
     setError('');
     const revision = latest.current;
     try {
@@ -198,7 +199,7 @@ export function ImageGeneration({
     )
       return;
     flight.current = true;
-    setBusy('Getting the USDG price…');
+    setBusy('Getting USDG price…');
     setError('');
     setJob(null);
     setResult(null);
@@ -230,7 +231,7 @@ export function ImageGeneration({
     )
       return;
     flight.current = true;
-    setBusy('Review the USDG authorization in your wallet…');
+    setBusy('Approve image payment in wallet…');
     setError('');
     const revision = latest.current;
     let next = record;
@@ -260,7 +261,7 @@ export function ImageGeneration({
   async function resume() {
     if (flight.current || !record?.proof) return;
     flight.current = true;
-    setBusy('Recovering the same authorization…');
+    setBusy('Recovering payment…');
     setError('');
     try {
       const status = await requestImage(record, 'GET');
@@ -286,12 +287,14 @@ export function ImageGeneration({
     !record.completed &&
     !['failed', 'unknown'].includes(job?.status || '');
   const statusText: Record<string, string> = {
-    authorized: 'Payment authorized. Waiting to generate…',
-    generating: 'Grok is drawing your image…',
-    generated: 'Checking and saving your image…',
-    settlement_pending: 'Your image is saved. Confirming the USDG payment…',
-    completed: 'Your image is ready and saved with this request.',
+    authorized: 'Payment authorized…',
+    generating: 'Generating artwork…',
+    generated: 'Saving artwork…',
+    settlement_pending: 'Confirming USDG payment…',
+    completed: 'Image ready.',
   };
+  const progressText = busy || (!error && job && statusText[job.status]);
+  const progressing = !!busy || ['authorized', 'generating', 'generated', 'settlement_pending'].includes(job?.status || '');
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="app-dialog">
@@ -340,15 +343,18 @@ export function ImageGeneration({
             Request: {record.input.requestId}
           </small>
         )}
-        {job && (
+        {progressText && (
+          <BulletProgress
+            label={progressText}
+            active={progressing}
+            complete={!busy && job?.status === 'completed'}
+          />
+        )}
+        {job && !progressText && (
           <output aria-live="polite">
-            {statusText[job.status] ||
-              imageErrorText(
-                new ImageGenerationError(job.error || 'unavailable'),
-              )}
+            {imageErrorText(new ImageGenerationError(job.error || 'unavailable'))}
           </output>
         )}
-        {busy && <output aria-live="polite">{busy}</output>}
         {error && (
           <p role="alert" className="field-error">
             {error}

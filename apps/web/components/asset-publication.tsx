@@ -10,6 +10,7 @@ import {
   useSyncExternalStore,
 } from 'react';
 import { Button } from '@/components/ui/button';
+import { BulletProgress } from '@/components/launch-motion';
 import { useConnectedAccount } from '@/lib/account-context';
 import { useDraftCache } from '@/lib/launch-draft';
 import {
@@ -347,11 +348,11 @@ export function AssetPublication({
       )}
       {recovery ? (
         <>
-          {progress && (
-            <output>
-              Image: {progressLabel(progress.progress.image)} · Metadata: {progressLabel(progress.progress.metadata)}
-              {progress.issue ? ' · Verification is delayed; check again in a minute.' : ''}
-            </output>
+          {progress && !busy && !error && (
+            <BulletProgress
+              label={`Image ${progressLabel(progress.progress.image)} · Metadata ${progressLabel(progress.progress.metadata)}`}
+              active={!progress.issue}
+            />
           )}
           <p>
             Previous publication needs a status check. Connect the same wallet;
@@ -440,7 +441,7 @@ export function AssetPublication({
           </Button>
         </>
       )}
-      {busy && <output>{busy}</output>}
+      {busy && <BulletProgress label={busy} />}
       {recoveryNotice && <output>{recoveryNotice}</output>}
       {recoveryBlocked && (
         <p className="field-error" role="alert">

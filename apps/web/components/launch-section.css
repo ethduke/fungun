@@ -1,0 +1,348 @@
+.launch-section {
+  width: 100%;
+  max-width: 660px;
+  margin: 28px auto 0;
+  padding: 24px;
+  background: #edf1e4;
+  border: 1px solid #d7e0cb;
+  border-radius: 18px;
+}
+.launch-heading {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  margin-bottom: 20px;
+}
+.launch-heading .section-heading {
+  margin: 0;
+}
+.launch-heading .section-heading h2 {
+  font-size: 18px;
+}
+.launch-status {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  color: #62734f;
+  font-size: 13px;
+}
+.launch-status::before {
+  content: '';
+  width: 6px;
+  height: 6px;
+  flex-shrink: 0;
+  border-radius: 50%;
+  background: currentColor;
+}
+.launch-status[data-state='complete'] {
+  color: #315637;
+}
+.launch-identity {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+.launch-identity img,
+.launch-image {
+  width: 48px;
+  height: 48px;
+  flex-shrink: 0;
+  object-fit: contain;
+  border-radius: 10px;
+}
+.launch-image {
+  display: grid;
+  place-items: center;
+  color: #738663;
+  background: #dfe7d2;
+}
+.launch-identity-copy {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+.launch-name-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 4px 9px;
+}
+.launch-name-row strong {
+  font-size: 22px;
+  font-weight: 600;
+  line-height: 1.2;
+}
+.launch-name-row span {
+  font-size: 14px;
+  color: #62734f;
+}
+.launch-chain {
+  margin-top: 4px;
+  color: #62734f;
+  font-size: 14px;
+}
+.launch-destinations {
+  display: grid;
+  gap: 14px;
+  margin-top: 16px;
+}
+.launch-destination {
+  min-width: 0;
+}
+.launch-destination + .launch-destination {
+  border-top: 1px solid #d5dec7;
+  padding-top: 14px;
+}
+.launch-route {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 5px 8px;
+  align-items: baseline;
+  font-size: 15px;
+}
+.launch-route span {
+  color: #62734f;
+  font-size: 13px;
+}
+.launch-facts {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 18px;
+  margin-top: 8px;
+  color: #5c704c;
+  font-size: 13px;
+}
+.launch-facts > span {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+}
+.launch-facts svg {
+  flex-shrink: 0;
+}
+.launch-facts .metadata-option {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+.launch-footer {
+  display: grid;
+  gap: 14px;
+  margin-top: 18px;
+  padding-top: 18px;
+  border-top: 1px solid #d5dec7;
+}
+.launch-cost-summary {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+.launch-total-label {
+  font-size: 14px;
+}
+.launch-total-note {
+  color: #62734f;
+  font-size: 13px;
+  line-height: 1.5;
+  margin: 3px 0 0;
+}
+.total-price {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  flex-shrink: 0;
+  gap: 2px;
+  font-size: 24px;
+  line-height: 1.2;
+  font-variant-numeric: tabular-nums;
+}
+.total-price > span {
+  font-size: 13px;
+  color: #62734f;
+}
+.total-price[data-pending='true'] {
+  font-size: 17px;
+  color: #62734f;
+}
+.launch-fee-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 4px 0;
+  border: 0;
+  color: #526946;
+  background: transparent;
+  font-size: 13px;
+  cursor: pointer;
+}
+.launch-fee-toggle svg {
+  transition: transform 150ms;
+}
+.launch-fee-toggle[data-panel-open] svg {
+  transform: rotate(180deg);
+}
+.launch-fee-panel {
+  margin-top: 8px;
+  padding: 12px 14px;
+  border-radius: 10px;
+  background: #e3ead9;
+}
+.launch-fee-pad + .launch-fee-pad {
+  margin-top: 12px;
+  padding-top: 12px;
+  border-top: 1px solid #ccd8be;
+}
+.launch-fee-pad > strong {
+  font-size: 14px;
+  font-weight: 500;
+}
+.launch-fee-pad dl {
+  display: grid;
+  gap: 7px;
+  margin: 8px 0 0;
+}
+.launch-fee-pad dl > div {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  font-size: 13px;
+}
+.launch-fee-pad dt {
+  color: #526946;
+}
+.launch-fee-pad dd {
+  margin: 0;
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+.launch-rate-source {
+  margin-top: 10px;
+  font-size: 12px;
+  color: #526946;
+}
+.launch-section .launch-button {
+  display: flex;
+  justify-content: space-between;
+  width: 100%;
+  height: auto;
+  min-height: 54px;
+  gap: 12px;
+  margin: 0;
+  padding: 10px 16px;
+  border-radius: 11px;
+  font-size: 16px;
+  white-space: normal;
+  text-align: left;
+}
+.launch-note,
+.launch-empty,
+.launch-validation {
+  display: block;
+  margin: 10px 0 0;
+  color: #62734f;
+  font-size: 14px;
+  line-height: 1.5;
+}
+.launch-validation {
+  color: #914532;
+}
+.launch-footer .launch-note {
+  margin: 6px 0 0;
+}
+.launch-section .cost-warning {
+  margin-top: 14px;
+  padding: 10px 12px;
+  font-size: 14px;
+}
+.launch-section .long-launch {
+  display: grid;
+  width: 100%;
+  min-width: 0;
+  gap: 10px;
+}
+.long-launch .launch-disclosure {
+  margin: 0;
+  text-align: center;
+  color: #5b704b;
+  font-size: 13px;
+  line-height: 1.5;
+}
+.long-launch .launch-feedback {
+  margin: 0;
+  font-size: 14px;
+  line-height: 1.5;
+  overflow-wrap: anywhere;
+}
+.long-launch .launch-feedback[role='alert'] {
+  color: #914532;
+}
+.long-launch details {
+  font-size: 14px;
+  line-height: 1.5;
+}
+.long-launch details summary {
+  cursor: pointer;
+  color: #526946;
+}
+.long-launch details p {
+  margin-top: 8px;
+}
+.long-launch .launch-recovery {
+  display: grid;
+  gap: 10px;
+  font-size: 14px;
+  line-height: 1.5;
+}
+.long-launch .launch-recovery label {
+  display: grid;
+  gap: 6px;
+}
+.long-launch .launch-recovery-links {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 16px;
+}
+.long-launch .launch-recovery a {
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+.launch-confirmed {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 12px;
+  border-radius: 11px;
+  padding: 12px 16px;
+  background: #274331;
+  color: #f0f3e7;
+  font-size: 16px;
+}
+.launch-confirmed strong {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+@media (max-width: 480px) {
+  .launch-section {
+    padding: 18px;
+    border-radius: 14px;
+  }
+  .launch-name-row strong {
+    font-size: 20px;
+  }
+  .launch-facts {
+    gap: 7px 12px;
+  }
+  .total-price {
+    font-size: 20px;
+  }
+  .launch-cost-summary {
+    flex-wrap: wrap;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .launch-fee-toggle svg {
+    transition: none;
+  }
+}

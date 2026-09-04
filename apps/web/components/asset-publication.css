@@ -19,6 +19,10 @@
   font-size: 1rem;
   line-height: 1.5;
 }
+.asset-publication .bullet-progress {
+  display: flex;
+  font-size: 14px;
+}
 .asset-publication p,
 .asset-publication-heading span {
   font-size: 1rem;
