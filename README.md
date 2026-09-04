@@ -14,6 +14,15 @@ This milestone is a local, clickable webview. Live deployments, ticker lookups,
 RPC services and paid image generation remain disabled until their adapters
 and safeguards are verified. Telegram integration is out of scope.
 
+## Agent documentation
+
+The public [llms.txt scaffold](apps/web/public/llms.txt) is served at `/llms.txt`,
+with a linked [agent guide](apps/web/public/agent-guide.md) and HTML discovery link.
+It follows the [llms.txt proposal](https://llmstxt.org/); it is context, not an
+authorization policy. Keep both files aligned with implemented capabilities.
+Use same-origin links until a production domain is configured. These files are
+public assets: no credentials, operational addresses or private examples belong here.
+
 ## Repository policy
 
 - Never commit credentials, private keys, wallet data, signatures or real transaction captures.
