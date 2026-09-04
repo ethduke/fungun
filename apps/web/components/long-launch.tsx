@@ -31,7 +31,7 @@ export function LongLaunch({ enabled, ready, pairId, name, ticker, description, 
   const [receipt, setReceipt] = useState<{ status: string; hash?: string; asset?: string; paidGasWei?: string } | null>(null);
   const [recoveryHash, setRecoveryHash] = useState('');
   const [expired, setExpired] = useState(false);
-  const [cooldown, setCooldown] = useState(false);
+  const [cooldown, setCooldown] = useState(0);
   const flight = useRef(false);
   const current = useRef(contextKey);
   const mounted = useRef(false);
@@ -55,7 +55,7 @@ export function LongLaunch({ enabled, ready, pairId, name, ticker, description, 
   }, [plan]);
   useEffect(() => {
     if (!cooldown) return;
-    const timer = setTimeout(() => setCooldown(false), 60000);
+    const timer = setTimeout(() => setCooldown(0), cooldown);
     return () => clearTimeout(timer);
   }, [cooldown]);
   const isReady = ready && !!account.address && account.chainId === 4663 && !!account.sendLong
@@ -94,7 +94,7 @@ export function LongLaunch({ enabled, ready, pairId, name, ticker, description, 
       await launch(checked, context);
     } catch (e) {
       setError(e instanceof AssetError ? assetErrorText(e) : launchMessage(e));
-      setCooldown(e instanceof AssetError ? e.retryAfter > 0 : e instanceof Error && ['busy', 'rate_limited'].includes(e.message));
+      setCooldown(e instanceof AssetError ? e.retryAfter * 1000 : e instanceof Error && ['busy', 'rate_limited'].includes(e.message) ? 60000 : 0);
     }
     finally { flight.current = false; setBusy(''); }
   }
@@ -137,8 +137,8 @@ export function LongLaunch({ enabled, ready, pairId, name, ticker, description, 
         : result.status === 'failed' ? 'The transaction failed onchain. Gas was spent; no successful launch was verified.'
         : result.status === 'prepared' ? 'No wallet submission was recorded, but this browser attempt remains locked. Contact support before retrying.'
         : 'Confirmation is still pending. Check your wallet history; do not submit again.');
-      setCooldown(true);
-    } catch (e) { setError(launchMessage(e)); setCooldown(true); }
+      setCooldown(60000);
+    } catch (e) { setError(launchMessage(e)); setCooldown(60000); }
     finally { flight.current = false; setBusy(''); }
   }
   if (!enabled && !recovery) return null;
@@ -149,7 +149,7 @@ export function LongLaunch({ enabled, ready, pairId, name, ticker, description, 
       {!recovery.hash && <label htmlFor="launch-recovery-hash">Transaction hash from wallet history (if submitted)
         <Input id="launch-recovery-hash" value={recoveryHash} onChange={(e) => setRecoveryHash(e.target.value)} maxLength={66} autoComplete="off" spellCheck={false} />
       </label>}
-      {!receipt || !['confirmed','failed'].includes(receipt.status) ? <Button type="button" variant="outline" disabled={!!busy || cooldown} onClick={check}>Check launch</Button> : null}
+      {!receipt || !['confirmed','failed'].includes(receipt.status) ? <Button type="button" variant="outline" disabled={!!busy || !!cooldown} onClick={check}>Check launch</Button> : null}
       {receipt?.hash && <a href={`https://robinhoodchain.blockscout.com/tx/${receipt.hash}`} target="_blank" rel="noopener noreferrer">View transaction</a>}
       {receipt?.asset && <a href={`https://robinhoodchain.blockscout.com/address/${receipt.asset}`} target="_blank" rel="noopener noreferrer">View token on explorer</a>}
       {receipt?.paidGasWei && <p>Gas paid: {formatEth(wei(receipt.paidGasWei))}</p>}
@@ -162,7 +162,7 @@ export function LongLaunch({ enabled, ready, pairId, name, ticker, description, 
         <a href={`https://robinhoodchain.blockscout.com/address/${validPlan.transaction.to}?tab=contract`} target="_blank" rel="noopener noreferrer">Verified launch contract</a>
         <p>Your wallet displays the full transaction. Gas and availability can change before it is mined.</p>
       </details>}
-      <Button type="button" disabled={!!busy || cooldown || blocked || !hydrated || (Boolean(account.address) && (!ready || !image || pairId !== 'long-NVDA'))} onClick={startLaunch}>
+      <Button type="button" disabled={!!busy || !!cooldown || blocked || !hydrated || (Boolean(account.address) && (!ready || !image || pairId !== 'long-NVDA'))} onClick={startLaunch}>
         {busy || 'Launch coin'}
       </Button>
       <p>Artwork becomes public. You only pay the launch fee and gas.</p>

@@ -120,8 +120,16 @@ records cannot be published through the capability endpoint. Their messages,
 signatures and status recovery remain intact. Browser recovery persists an opaque
 publication ID and hash of the original draft/image/wallet context before the
 write; the upload capability stays in memory only. Lost responses use status
-reads, never automatic publication retries. Normal polling is bounded to twelve
-checks, five seconds apart. A changed draft cannot use an earlier recovery's image.
+reads, never automatic publication retries. Polling continues through delayed
+verification for up to 27 checks: five three-second intervals, then five-second
+intervals (120 seconds of waiting). A timeout retains recovery without imposing
+an extra minute-long button lock. A changed draft cannot use an earlier recovery's image.
+The worker checks for due work every second, retains wakeups received during
+another upload, and retries failed verification after 2, 5, 10, 30, then 60 seconds.
+Provider budget cooldowns take precedence. Already verified objects are not fetched
+again during another object's retry; uncertain uploads still use lookup only.
+Gateway 401/403 responses surface a concise service-unavailable error immediately,
+with recovery retained, rather than asking the user to wait for access to repair itself.
 O1 retains its native pinning path; this wallet release supports Long/NVDA only.
 
 Sources: [Robinhood network configuration](https://docs.robinhood.com/chain/connecting/),

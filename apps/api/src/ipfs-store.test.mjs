@@ -34,7 +34,7 @@ export async function ipfsFixture(t) {
   };
   const fixture = { config, account, image, draft, calls, receipts, publisher,
     get store() { return store; },
-    advance: () => { now += 60001; },
+    advance: (ms = 60001) => { now += ms; },
     reopen: () => { store.close(); store = new IpfsStore(config); },
     worker: (enabled = true) => { const worker = createIpfsWorker(store, publisher, { enabled }); workers.push(worker); return worker; },
     async approval() {
@@ -145,4 +145,55 @@ test("a pinned image resumes verification without a second POST after a gateway 
   f.publisher.verifyObject = verify; f.advance(); worker.kick(); await worker.idle();
   assert.equal(f.store.status(approval).status, "published");
   assert.equal(f.calls.filter(([method]) => method === "POST").length, 2);
+});
+
+test("temporary verification retries in two seconds and retains completed image checks", async (t) => {
+  const f = await ipfsFixture(t), approval = await f.approval();
+  await f.store.accept(approval);
+  const verify = f.publisher.verifyObject;
+  f.publisher.verifyObject = async (content) => {
+    if (content.mime === "application/json") throw new Error("Temporary gateway failure");
+    return verify(content);
+  };
+  const worker = f.worker(); worker.kick(); await worker.idle();
+  assert.equal(f.store.status(approval).progress.image, "verified");
+  assert.equal(f.store.get(approval.id).next_check - f.store.clock(), 2000);
+  const calls = f.calls.length;
+  f.advance(1999); worker.kick(); await worker.idle(); assert.equal(f.calls.length, calls);
+  f.advance(1); f.publisher.verifyObject = verify; worker.kick(); await worker.idle();
+  assert.equal(f.store.status(approval).status, "published");
+  assert.equal(f.calls.filter(([method]) => method === "POST").length, 2);
+  assert.equal(f.calls.filter(([method, cid]) => method === "PIN" && cid === approval.ipfs.imageCid).length, 1);
+  assert.equal(f.calls.filter(([method, cid]) => method === "GET" && cid === approval.ipfs.imageCid).length, 1);
+});
+
+test("provider budget cooldown overrides fast retry and prevents further requests", async (t) => {
+  const f = await ipfsFixture(t), approval = await f.approval();
+  await f.store.accept(approval);
+  f.store.budget.debit([["pinata-requests", 20, 60000]], 20);
+  const worker = f.worker(); worker.kick(); await worker.idle();
+  const next = f.store.get(approval.id).next_check;
+  assert.ok(next >= (Math.floor(f.store.clock() / 60000) + 1) * 60000);
+  f.advance(1000); worker.kick(); await worker.idle();
+  assert.equal(f.calls.length, 0);
+  assert.equal(f.store.get(approval.id).next_check, next);
+});
+
+test("a publication arriving during another upload is drained without waiting for the timer", async (t) => {
+  const f = await ipfsFixture(t), first = await f.approval();
+  await f.store.accept(first);
+  const pin = f.publisher.pinObject;
+  let release, entered;
+  const started = new Promise(resolve => { entered = resolve; });
+  const gate = new Promise(resolve => { release = resolve; });
+  f.publisher.pinObject = async (content) => { entered(); await gate; return pin(content); };
+  const worker = f.worker(); worker.kick(); await started;
+  const other = privateKeyToAccount(generatePrivateKey());
+  const preview = await f.store.challenge(other.address, f.image, { ...draft, name: "Second" });
+  const second = { ...preview, wallet: other.address, image: f.image, draft: { ...draft, name: "Second" },
+    signature: await other.signMessage({ message: preview.message }) };
+  await f.store.accept(second); worker.kick(); release(); await worker.idle();
+  assert.equal(f.store.status(first).status, "published");
+  assert.equal(f.store.status(second).status, "published");
+  assert.equal(f.calls.filter(([method]) => method === "POST").length, 4);
 });

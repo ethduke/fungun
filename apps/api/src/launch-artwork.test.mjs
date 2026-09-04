@@ -25,7 +25,7 @@ async function fixture(t) {
     async inspectPin(){}, async verifyObject(){}, async findPin(){assert.fail('Unexpected retry');},
   }, {enabled:true});
   t.after(async()=>{await worker.stop();store.close();rmSync(root,{recursive:true});});
-  let loseResponse=false;
+  let loseResponse=false, delayedChecks=0, issue='verification_delayed';
   const proxy=createAssetProxy(()=>({appOrigin:origin,serviceOrigin:'https://backend.example.com',publicOrigin:`https://${gateway}`,enabled:true,production:true}),async(url,options)=>{
     const kind=url.pathname.slice('/v1/asset-'.length); requests.push(kind);
     const input=validateAssetInput(kind,JSON.parse(options.body));
@@ -36,12 +36,15 @@ async function fixture(t) {
       if(loseResponse)throw new TypeError('Simulated response loss');
       return Response.json(result);
     }
-    assert.equal(kind,'status');return Response.json(store.status(input));
+    assert.equal(kind,'status');
+    const result=store.status(input);
+    if(delayedChecks-->0)return Response.json({...result,status:'processing',progress:{image:'pinned',metadata:'ready'},issue,retryAt:store.clock()+2000});
+    return Response.json(result);
   });
   const fetcher=(path,options)=>proxy(new Request(origin+path,{...options,headers:{...options.headers,origin}}),path.split('/').at(-1));
   const storage={getItem:key=>records.get(key)??null,setItem:(key,value)=>records.set(key,value),removeItem:key=>records.delete(key)};
   const run=(overrides={})=>ensureLaunchArtwork({bytes:image,wallet,draft,origin,storage,fetcher,isCurrent:()=>true,onProgress:()=>{},pause:async()=>worker.idle(),...overrides});
-  return {run,store,wallet,image,draft,writes,requests,records,setLoseResponse:value=>{loseResponse=value;}};
+  return {run,store,wallet,image,draft,writes,requests,records,setLoseResponse:value=>{loseResponse=value;},setDelayedChecks:value=>{delayedChecks=value;},setIssue:value=>{issue=value;}};
 }
 
 test('one launch click publishes verified artwork with no wallet signature; subsequent clicks only read status',async t=>{
@@ -52,8 +55,39 @@ test('one launch click publishes verified artwork with no wallet signature; subs
 });
 
 test('uncertain upload resumes through status and never repeats a write',async t=>{
- const f=await fixture(t);f.setLoseResponse(true);await assert.rejects(f.run(),{code:'asset_publication_uncertain'});
+ const f=await fixture(t);f.setLoseResponse(true);assert.equal((await f.run()).status,'published');
  f.setLoseResponse(false);assert.equal((await f.run()).status,'published');assert.equal(f.writes.length,2);assert.equal(f.requests.filter(x=>x==='launch-publish').length,1);
+});
+
+test('temporary verification failure continues automatically and checks promptly without another write',async t=>{
+ const f=await fixture(t);f.setDelayedChecks(2);const delays=[];
+ assert.equal((await f.run({pause:async ms=>{delays.push(ms);}})).status,'published');
+ assert.deepEqual(delays,[3000,3000]);assert.equal(f.writes.length,2);
+ assert.equal(f.requests.filter(x=>x==='launch-publish').length,1);
+});
+
+test('prolonged verification stays bounded and leaves recovery available without a forced cooldown',async t=>{
+ const f=await fixture(t);f.setDelayedChecks(30);const delays=[];
+ await assert.rejects(f.run({pause:async ms=>{delays.push(ms);}}),e=>e.code==='asset_publication_uncertain'&&e.retryAfter===0);
+ assert.equal(f.requests.filter(x=>x==='status').length,27);
+ assert.equal(delays.reduce((a,b)=>a+b,0),120000);
+ assert.ok(f.records.get('fungun.asset-publication.v1'));
+ f.setDelayedChecks(0);assert.equal((await f.run()).status,'published');
+ assert.equal(f.requests.filter(x=>x==='launch-publish').length,1);assert.equal(f.writes.length,2);
+});
+
+test('changing the draft during automatic status checks stops the launch',async t=>{
+ const f=await fixture(t);f.setDelayedChecks(2);let current=true;
+ await assert.rejects(f.run({isCurrent:()=>current,pause:async()=>{current=false;}}),{code:'asset_context_changed'});
+ assert.equal(f.requests.filter(x=>x==='status').length,1);assert.equal(f.writes.length,2);
+});
+
+test('gateway access denial reports the service problem immediately and preserves recovery',async t=>{
+ const f=await fixture(t);f.setDelayedChecks(1);f.setIssue('gateway_access_denied');
+ await assert.rejects(f.run({pause:async()=>assert.fail('Do not wait on a configuration problem')}),{code:'asset_gateway_unavailable'});
+ assert.ok(f.records.get('fungun.asset-publication.v1'));
+ assert.equal((await f.run()).status,'published');
+ assert.equal(f.requests.filter(x=>x==='launch-publish').length,1);
 });
 
 test('changed context stops before publication and unavailable recovery storage prevents a write',async t=>{

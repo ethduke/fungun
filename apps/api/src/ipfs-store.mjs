@@ -196,7 +196,7 @@ export class IpfsStore {
     if (row.state === "published") return { ...base, status: "published" };
     const states = Object.fromEntries(this.objects(row.id).map((object) => [object.kind, object.state]));
     return { ...base, status: "processing", progress: { image: states.image, metadata: states.metadata },
-      ...(row.error ? { issue: "verification_delayed", retryAt: row.next_check } : {}) };
+      ...(row.error ? { issue: row.error === "gateway_access_denied" ? "gateway_access_denied" : "verification_delayed", retryAt: row.next_check } : {}) };
   }
   pending() { return this.db.prepare("SELECT * FROM ipfs_publications WHERE state IN ('reserved','published') AND next_check<=? ORDER BY next_check,created LIMIT 30").all(this.clock()); }
   async bundle(row) {
@@ -207,10 +207,15 @@ export class IpfsStore {
       throw new ServiceError("asset_integrity_failed");
     return bundle;
   }
-  defer(id) { this.db.prepare("UPDATE ipfs_publications SET next_check=? WHERE id=? AND state IN ('reserved','published')").run(this.clock() + 60000, id); }
-  failed(id) {
-    this.db.prepare(`UPDATE ipfs_publications SET error='verification_delayed',attempts=attempts+1,
-      next_check=? WHERE id=? AND state='reserved'`).run(this.clock() + 60000, id);
+  defer(id) { this.db.prepare("UPDATE ipfs_publications SET error=NULL,next_check=? WHERE id=? AND state IN ('reserved','published')").run(this.clock() + 60000, id); }
+  failed(id, error) {
+    const row = this.get(id);
+    const backoff = [2000, 5000, 10000, 30000, 60000][Math.min(row?.attempts ?? 0, 4)];
+    const retry = Number.isSafeInteger(error?.retryAfter) && error.retryAfter > 0
+      ? error.retryAfter * 1000 : 0;
+    this.db.prepare(`UPDATE ipfs_publications SET error=?,attempts=attempts+1,
+      next_check=? WHERE id=? AND state='reserved'`).run(error?.code === "ipfs_gateway_access_denied"
+        ? "gateway_access_denied" : "verification_delayed", this.clock() + Math.max(backoff, retry), id);
   }
   staged(id) { this.db.prepare("UPDATE ipfs_objects SET state='ready' WHERE publication_id=? AND state='staging'").run(id); }
   begin(id, kind) {

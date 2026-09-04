@@ -42,7 +42,7 @@ export type ProcessingAsset = Pick<
   launchReady: false;
   ipfs: AssetIpfs;
   progress: { image: 'staging' | 'ready' | 'sending' | 'pinned' | 'verified'; metadata: 'staging' | 'ready' | 'sending' | 'pinned' | 'verified' };
-  issue?: 'verification_delayed';
+  issue?: 'verification_delayed' | 'gateway_access_denied';
   retryAt?: number;
 };
 export type ExpiredAsset = Pick<
@@ -114,7 +114,9 @@ const messages: Record<string, string> = {
   asset_integrity_failed:
     'Stored files could not be verified. Contact support before publishing again.',
   asset_publication_uncertain:
-    'Artwork is still being checked. Click Launch coin again in a minute.',
+    'Artwork is taking longer than expected. Your upload is saved; click Launch coin to resume.',
+  asset_gateway_unavailable:
+    'Artwork service is unavailable. Your upload is saved.',
   ipfs_approval_pending:
     'Previous artwork is pending. Wait a few minutes and try again.',
   ipfs_publication_disabled:
@@ -424,7 +426,7 @@ export function validateProcessingAsset(raw: unknown, expected: AssetApproval | 
     || JSON.stringify(raw.ipfs) !== JSON.stringify(expected.ipfs)
     || !objectFields(raw.progress, ['image','metadata'])
     || !states.includes(String(raw.progress.image)) || !states.includes(String(raw.progress.metadata))
-    || (delayed && (raw.issue !== 'verification_delayed' || !Number.isSafeInteger(raw.retryAt))))
+    || (delayed && (!['verification_delayed', 'gateway_access_denied'].includes(raw.issue as string) || !Number.isSafeInteger(raw.retryAt))))
     throw new AssetError('invalid_asset_response');
   return raw as ProcessingAsset;
 }

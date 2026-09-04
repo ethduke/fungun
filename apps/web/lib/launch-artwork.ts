@@ -22,16 +22,18 @@ export async function ensureLaunchArtwork({ bytes, wallet, draft, origin, storag
     } catch { throw new AssetError('asset_recovery_unavailable'); }
   }
   const wait = async (ticket: AssetRecovery) => {
-    for (let attempt = 0; attempt < 12; attempt++) {
+    // Poll local status only. Provider retries remain durably scheduled by the
+    // worker; a delayed verification must never cause a second upload.
+    for (let attempt = 0; attempt < 27; attempt++) {
       guard();
       const result = await checkAssetStatus(ticket, account, storage, fetcher);
       guard();
       if (result?.status === 'published' || result?.status === 'expired') return result;
-      if (!result || result.issue) throw new AssetError('asset_publication_uncertain', 60);
-      onProgress('Uploading artwork…');
-      if (attempt < 11) await pause(5000);
+      if (result?.issue === 'gateway_access_denied') throw new AssetError('asset_gateway_unavailable');
+      onProgress(result?.progress.image === 'verified' ? 'Finishing artwork…' : 'Uploading artwork…');
+      if (attempt < 26) await pause(attempt < 5 ? 3000 : 5000);
     }
-    throw new AssetError('asset_publication_uncertain', 60);
+    throw new AssetError('asset_publication_uncertain');
   };
   guard();
   const recovery = readAssetRecovery(storage, origin);
@@ -62,9 +64,15 @@ export async function ensureLaunchArtwork({ bytes, wallet, draft, origin, storag
   storage.setItem(bindingKey, JSON.stringify({ id: ticket.id, sourceKey }));
   if (storage.getItem(bindingKey) !== JSON.stringify({ id: ticket.id, sourceKey })) throw new AssetError('asset_recovery_unavailable');
   onProgress('Uploading artwork…');
-  const accepted = await publishLaunchAsset(approval, ticket, storage, isCurrent, fetcher);
+  let accepted;
+  try { accepted = await publishLaunchAsset(approval, ticket, storage, isCurrent, fetcher); }
+  catch (error) {
+    if (!(error instanceof AssetError) || error.code !== 'asset_publication_uncertain') throw error;
+    // The recovery record was saved before the request. Resolve a missing
+    // acknowledgment through status, never by repeating the publication write.
+  }
   guard();
-  if (accepted.status === 'published') return accepted;
+  if (accepted?.status === 'published') return accepted;
   const result = await wait(ticket);
   if (result.status !== 'published') throw new AssetError('asset_approval_expired');
   return result;
