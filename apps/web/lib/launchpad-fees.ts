@@ -22,9 +22,9 @@ const FEE_INFO = {
   longbow: {
     label: 'Your LP fee share',
     creatorPercent: 95,
-    remainder: '5% Doppler',
+    remainder: '5% protocol beneficiary',
     details:
-      'Longbow’s default LongLauncher route allocates 95% of LP fees to you and 5% to Doppler. Separate hook fees are not included in this split. This route also allocates 1% of the token supply to Longbow at launch; that is separate from fee revenue. Longbow’s alternate launch routes use different fee splits.',
+      'Longbow’s default LongLauncher route allocates 95% of LP fees to you and 5% to the protocol beneficiary. Separate hook fees are not included in this split. This route also allocates 1% of the token supply to Longbow at launch; that is separate from fee revenue. Longbow’s alternate launch routes use different fee splits.',
     sourceLabel: 'Longbow default launch route',
     sourceUrl: 'https://longbow.gg/launch?route=long',
   },

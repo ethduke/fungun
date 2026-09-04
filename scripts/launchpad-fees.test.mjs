@@ -37,8 +37,9 @@ test("Longbow scopes its LP share to the default Robinhood RWA route", () => {
   const info = launchpadFeeInfo({ id: "longbow", chainId: 4663, route: "rwa" });
   assert.equal(info.label, "Your LP fee share");
   assert.equal(info.creatorPercent, 95);
-  assert.equal(info.remainder, "5% Doppler");
+  assert.equal(info.remainder, "5% protocol beneficiary");
   assert.match(info.details, /default LongLauncher route/);
+  assert.match(info.details, /protocol beneficiary/);
   assert.match(info.details, /Separate hook fees are not included/);
   assert.match(info.details, /1% of the token supply/);
   assert.match(info.details, /alternate launch routes use different fee splits/);
