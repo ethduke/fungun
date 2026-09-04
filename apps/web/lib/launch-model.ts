@@ -33,6 +33,10 @@ export interface CoinDraft {
   hasImage: boolean;
 }
 
+export function normalizeTicker(ticker: string) {
+  return ticker.replace(/[^A-Za-z]/g, '').toUpperCase();
+}
+
 export function autofillCoinName(
   name: string,
   previousTicker: string,
@@ -211,17 +215,8 @@ export function validateDraft(
   const active = destinations.filter((pad) => pad.selected);
   if (!draft.name.trim() || Array.from(draft.name.trim()).length > 50)
     errors.name = 'Use a name between 1 and 50 characters.';
-  if (
-    !draft.ticker ||
-    Array.from(draft.ticker).length > 11 ||
-    /\s/.test(draft.ticker)
-  )
-    errors.ticker = 'Use 1–11 characters, without spaces.';
-  else if (
-    active.some((pad) => pad.id === 'long' || pad.id === 'longbow') &&
-    !/^[A-Z]+$/.test(draft.ticker)
-  )
-    errors.ticker = 'Ticker contains unsupported characters.';
+  if (!/^[A-Z]{1,11}$/.test(draft.ticker))
+    errors.ticker = 'Use 1–11 English letters.';
   if (new TextEncoder().encode(draft.description).length > DESCRIPTION_LIMIT)
     errors.description = 'Description must be at most 2,000 UTF-8 bytes.';
   if (!draft.hasImage) errors.image = 'Add a coin image to continue.';

@@ -14,6 +14,7 @@ import {
   autofillCoinName,
   DEFAULT_CHAIN_ID,
   DEFAULT_DESTINATIONS,
+  normalizeTicker,
   type ChainId,
   type Destination,
 } from '@/lib/launch-model';
@@ -44,12 +45,12 @@ export function LaunchDraftProvider({ children }: { children: ReactNode }) {
     prompt: '',
     image: null,
   });
-  const uppercaseTicker = draft.ticker.toUpperCase();
-  if (draft.ticker !== uppercaseTicker) {
+  const normalizedTicker = normalizeTicker(draft.ticker);
+  if (draft.ticker !== normalizedTicker) {
     setDraft({
       ...draft,
-      ticker: uppercaseTicker,
-      name: autofillCoinName(draft.name, draft.ticker, uppercaseTicker),
+      ticker: normalizedTicker,
+      name: autofillCoinName(draft.name, draft.ticker, normalizedTicker),
     });
   }
   useEffect(
@@ -75,7 +76,7 @@ export function useDraftField<K extends keyof LaunchDraft>(
           ...current,
           [key]:
             key === 'ticker' && typeof next === 'string'
-              ? next.toUpperCase()
+              ? normalizeTicker(next)
               : next,
         };
       });

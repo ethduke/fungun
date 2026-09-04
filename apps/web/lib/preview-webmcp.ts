@@ -1,5 +1,6 @@
 import { useEffect, useLayoutEffect, useRef } from 'react';
 import { flushSync } from 'react-dom';
+import { normalizeTicker } from '@/lib/launch-model';
 
 type Context = {
   registerTool: (
@@ -48,7 +49,12 @@ export function usePreviewTools(
           type: 'object',
           properties: {
             name: { type: 'string', minLength: 1, maxLength: 50 },
-            ticker: { type: 'string', minLength: 1, maxLength: 11 },
+            ticker: {
+              type: 'string',
+              minLength: 1,
+              maxLength: 11,
+              pattern: '^[A-Za-z]+$',
+            },
           },
           required: ['name', 'ticker'],
           additionalProperties: false,
@@ -66,14 +72,14 @@ export function usePreviewTools(
             !values.name.trim() ||
             Array.from(values.name).length > 50 ||
             typeof values.ticker !== 'string' ||
-            !/^[A-Z]{1,11}$/.test(values.ticker.toUpperCase())
+            !/^[A-Za-z]{1,11}$/.test(values.ticker)
           )
             throw new Error(
-              'Use a name of 1–50 characters and a ticker of 1–11 letters.',
+              'Use a name of 1–50 characters and a ticker of 1–11 English letters.',
             );
           const value = {
             name: values.name,
-            ticker: values.ticker.toUpperCase(),
+            ticker: normalizeTicker(values.ticker),
           };
           flushSync(() => current.current.stage(value));
           return current.current.read();

@@ -38,6 +38,7 @@ import {
   imageFileError,
   imageKind,
   isWebviewChain,
+  normalizeTicker,
   readablePads,
   selectChain,
   supportsChain,
@@ -387,7 +388,7 @@ export default function Home() {
                 </div>
                 <div className="field">
                   <label htmlFor="coin-ticker">
-                    Ticker <span>1–11 characters</span>
+                    Ticker <span>1–11 English letters</span>
                   </label>
                   <div className="ticker-input">
                     <span>$</span>
@@ -400,7 +401,7 @@ export default function Home() {
                       spellCheck={false}
                       autoCapitalize="characters"
                       onChange={(event) => {
-                        const nextTicker = event.target.value.toUpperCase();
+                        const nextTicker = normalizeTicker(event.target.value);
                         setName((current) =>
                           autofillCoinName(current, ticker, nextTicker),
                         );

@@ -157,13 +157,14 @@ await test('name and ticker limits use characters, not bytes', () => {
     assert.ok(validateDraft({ ...draft, ticker }, destinations()).ticker);
 });
 
-await test('O1 has independent ticker and chain rules', () => {
+await test('O1 uses the same ticker restriction and validates its chain', () => {
   const o1: Destination = {
     ...DEFAULT_DESTINATIONS[1],
     selected: true,
     chainId: 4663,
   };
-  assert.deepEqual(validateDraft({ ...draft, ticker: 'MOON1' }, [o1]), {});
+  assert.deepEqual(validateDraft(draft, [o1]), {});
+  assert.ok(validateDraft({ ...draft, ticker: 'MOON1' }, [o1]).ticker);
   assert.ok(validateDraft({ ...draft, ticker: 'MO ON' }, [o1]).ticker);
   assert.ok(validateDraft(draft, [{ ...o1, chainId: 1 as 8453 }]).destinations);
 });
