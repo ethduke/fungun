@@ -66,12 +66,15 @@ export function usePreviewTools(
             !values.name.trim() ||
             Array.from(values.name).length > 50 ||
             typeof values.ticker !== 'string' ||
-            !/^[A-Z]{1,11}$/.test(values.ticker)
+            !/^[A-Z]{1,11}$/.test(values.ticker.toUpperCase())
           )
             throw new Error(
-              'Use a name of 1–50 characters and a ticker of 1–11 uppercase letters.',
+              'Use a name of 1–50 characters and a ticker of 1–11 letters.',
             );
-          const value = { name: values.name, ticker: values.ticker };
+          const value = {
+            name: values.name,
+            ticker: values.ticker.toUpperCase(),
+          };
           flushSync(() => current.current.stage(value));
           return current.current.read();
         },

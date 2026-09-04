@@ -221,7 +221,7 @@ export function validateDraft(
     active.some((pad) => pad.id === 'long' || pad.id === 'longbow') &&
     !/^[A-Z]+$/.test(draft.ticker)
   )
-    errors.ticker = 'Long and Longbow require uppercase letters A–Z only.';
+    errors.ticker = 'Ticker contains unsupported characters.';
   if (new TextEncoder().encode(draft.description).length > DESCRIPTION_LIMIT)
     errors.description = 'Description must be at most 2,000 UTF-8 bytes.';
   if (!draft.hasImage) errors.image = 'Add a coin image to continue.';

@@ -11,6 +11,7 @@ import {
   type SetStateAction,
 } from 'react';
 import {
+  autofillCoinName,
   DEFAULT_CHAIN_ID,
   DEFAULT_DESTINATIONS,
   type ChainId,
@@ -43,6 +44,14 @@ export function LaunchDraftProvider({ children }: { children: ReactNode }) {
     prompt: '',
     image: null,
   });
+  const uppercaseTicker = draft.ticker.toUpperCase();
+  if (draft.ticker !== uppercaseTicker) {
+    setDraft({
+      ...draft,
+      ticker: uppercaseTicker,
+      name: autofillCoinName(draft.name, draft.ticker, uppercaseTicker),
+    });
+  }
   useEffect(
     () => () => {
       if (draft.image) URL.revokeObjectURL(draft.image.url);
@@ -60,10 +69,16 @@ export function useDraftField<K extends keyof LaunchDraft>(
   const { draft, setDraft } = context;
   const setValue = useCallback(
     (value: SetStateAction<LaunchDraft[K]>) => {
-      setDraft((current) => ({
-        ...current,
-        [key]: typeof value === 'function' ? value(current[key]) : value,
-      }));
+      setDraft((current) => {
+        const next = typeof value === 'function' ? value(current[key]) : value;
+        return {
+          ...current,
+          [key]:
+            key === 'ticker' && typeof next === 'string'
+              ? next.toUpperCase()
+              : next,
+        };
+      });
     },
     [key, setDraft],
   );

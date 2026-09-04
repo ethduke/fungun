@@ -398,8 +398,9 @@ export default function Home() {
                       maxLength={30}
                       autoComplete="off"
                       spellCheck={false}
+                      autoCapitalize="characters"
                       onChange={(event) => {
-                        const nextTicker = event.target.value;
+                        const nextTicker = event.target.value.toUpperCase();
                         setName((current) =>
                           autofillCoinName(current, ticker, nextTicker),
                         );
