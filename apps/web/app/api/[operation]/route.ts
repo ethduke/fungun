@@ -1,4 +1,4 @@
-const operations = new Set(['catalog', 'ticker']);
+const operations = new Set(['catalog', 'ticker', 'fees', 'claim-prepare']);
 
 export async function POST(
   request: Request,

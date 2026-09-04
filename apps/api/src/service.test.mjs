@@ -3,6 +3,8 @@ import test from "node:test";
 import { createServer } from "node:http";
 import { Budget } from "./budget.mjs";
 import { createHandler } from "./service.mjs";
+import { Fees } from "./fees.mjs";
+import { readConfig } from "./config.mjs";
 
 test("HTTP boundary rejects spoofing, excess input and leaks while keeping reads bounded", async (t) => {
   const budget = new Budget(":memory:");
@@ -72,4 +74,46 @@ test("HTTP boundary rejects spoofing, excess input and leaks while keeping reads
   assert.equal(limited.status, 429);
   assert.ok(Number(limited.headers.get("retry-after")) > 0);
   assert.equal(calls, 7);
+});
+
+test("fee HTTP endpoints remain non-signing and reject arbitrary calldata", async (t) => {
+  const budget = new Budget(":memory:");
+  const config = readConfig({});
+  const fees = new Fees(config, {
+    json() {
+      assert.fail("Disabled fees cannot contact providers");
+    },
+  });
+  const server = createServer(createHandler(config, budget, {}, fees));
+  await new Promise((resolve, reject) => {
+    server.once("error", reject);
+    server.listen(0, "127.0.0.1", resolve);
+  });
+  t.after(async () => {
+    server.closeAllConnections();
+    await new Promise((resolve) => server.close(resolve));
+    budget.close();
+  });
+  const post = (kind, input) =>
+    fetch(`http://127.0.0.1:${server.address().port}/v1/${kind}`, {
+      method: "POST",
+      headers: {
+        origin: config.origin,
+        "content-type": "application/json",
+        "x-fungun-intent": kind,
+      },
+      body: JSON.stringify(input),
+    });
+  const address = `0x${"a".repeat(40)}`;
+  const listed = await post("fees", { address, chainId: 4663, padId: "long" });
+  assert.equal(listed.status, 200);
+  assert.equal((await listed.json()).status, "unavailable");
+  assert.equal(
+    (await post("claim-prepare", { address, positionId: "a".repeat(64), data: "0x1234" })).status,
+    400,
+  );
+  const prepared = await post("claim-prepare", { address, positionId: "a".repeat(64) });
+  assert.equal(prepared.status, 503);
+  assert.deepEqual(await prepared.json(), { error: "not_configured" });
+  assert.equal((await post("claim-send", { address })).status, 404);
 });

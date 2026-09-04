@@ -46,7 +46,9 @@ export class Budget {
     this.lastPrune = 0;
   }
 
-  debit(rules) {
+  debit(rules, units = 1) {
+    if (!Number.isInteger(units) || units < 1 || units > 30)
+      throw new ServiceError("invalid_budget_units");
     this.db.exec("BEGIN IMMEDIATE");
     try {
       const previous = Number(
@@ -69,7 +71,7 @@ export class Budget {
       }));
       for (const bucket of buckets) {
         const row = this.db.prepare("SELECT used FROM counters WHERE scope = ?").get(bucket.scope);
-        if ((row?.used ?? 0) >= bucket.limit)
+        if ((row?.used ?? 0) + units > bucket.limit)
           throw new ServiceError(
             "rate_limited",
             429,
@@ -79,9 +81,9 @@ export class Budget {
       for (const bucket of buckets)
         this.db
           .prepare(
-            "INSERT INTO counters VALUES (?, ?, 1) ON CONFLICT(scope) DO UPDATE SET used = used + 1",
+            "INSERT INTO counters VALUES (?, ?, ?) ON CONFLICT(scope) DO UPDATE SET used = used + excluded.used",
           )
-          .run(bucket.scope, bucket.expires);
+          .run(bucket.scope, bucket.expires, units);
       this.db.exec("COMMIT");
     } catch (error) {
       this.db.exec("ROLLBACK");
@@ -100,12 +102,15 @@ export class Budget {
     ]);
   }
 
-  upstream(provider) {
-    this.debit([
-      ["upstream", 30, MINUTE],
-      ["upstream", 2000, DAY],
-      [`provider:${provider}`, provider === "o1" ? 600 : 1400, DAY],
-    ]);
+  upstream(provider, units = 1) {
+    this.debit(
+      [
+        ["upstream", 60, MINUTE],
+        ["upstream", 2000, DAY],
+        [`provider:${provider}`, provider === "o1" ? 600 : 1400, DAY],
+      ],
+      units,
+    );
   }
 
   close() {

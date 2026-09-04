@@ -36,10 +36,10 @@ export class Upstream {
     this.providers = new Map();
   }
 
-  async json(provider, url, options = {}, maxBytes = 512 * 1024) {
+  async json(provider, url, options = {}, maxBytes = 512 * 1024, units = 1) {
     if (this.active >= 4 || (this.providers.get(provider) ?? 0) >= 2)
       throw new ServiceError("busy", 429, 5);
-    this.budget.upstream(provider);
+    this.budget.upstream(provider, units);
     this.active += 1;
     this.providers.set(provider, (this.providers.get(provider) ?? 0) + 1);
     try {

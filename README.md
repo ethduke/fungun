@@ -15,8 +15,9 @@ working controls, deliberate limitations, tests and the Fly backend boundary.
 
 This milestone is a local webview with a guarded read-service backend. Configured
 adapters can load Long/O1 catalogs and check Long ticker reservations; O1 ticker
-availability stays unverified. Transactions, fees/claims and paid image generation
-remain disabled. Telegram integration is out of scope.
+availability stays unverified. Configured fee adapters support bounded live reads
+and explicit wallet claims; see [fee setup and coverage](docs/fee-claims.md).
+Launch transactions and paid image generation remain disabled. Telegram is out of scope.
 
 ## Agent documentation
 
@@ -38,6 +39,7 @@ public assets: no credentials, operational addresses or private examples belong 
 
 ## Development boundary
 
-Wallet connection does not authorize a signature or transaction. No transaction
-may be submitted by this scaffold. Public on-chain data is not secret, but
+Wallet connection does not authorize a signature or transaction. Claims require a
+verified preflight, a separate confirmation and wallet approval; the backend never
+signs or sends. Public on-chain data is not secret, but
 operational copies do not belong in this repository.

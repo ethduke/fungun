@@ -3,6 +3,8 @@ export type ErrorContext =
   | 'disconnect'
   | 'catalog'
   | 'ticker'
+  | 'fees'
+  | 'claim_review'
   | 'estimate'
   | 'launch'
   | 'claim';
@@ -20,24 +22,31 @@ export class AppError extends Error {
 }
 
 const messages: Record<string, string> = {
+  wrong_account: 'Connect the wallet that owns these fees before claiming.',
+  quote_expired:
+    'This estimate expired. Refresh the fees and review a new claim.',
+  nothing_to_claim:
+    'There are no fees to claim now. The balance may have changed; refresh the list.',
+  contract_unverified:
+    'This fee contract is not verified for claims here yet. No wallet request was made.',
   rejected: 'You cancelled the wallet request. Try again when you’re ready.',
   unauthorized:
     'Allow this site to connect to your account in your wallet, then try again.',
   disconnected: 'Your wallet is disconnected. Open it and reconnect.',
   wrong_chain:
-    'Your wallet is on a different network. Switch to the selected launch network, then try again.',
+    'Your wallet is on a different network. Switch to the selected network, then try again.',
   unsupported:
     'Your wallet does not support this request. Try another compatible wallet.',
   pending:
     'Your wallet is busy. Check for an open request and finish or cancel it before trying again.',
   insufficient_funds:
-    'There isn’t enough ETH on the selected network for the launch and network fees. Add ETH on that network or wait for lower fees.',
+    'There isn’t enough ETH on the selected network for this transaction and network fees. Add ETH on that network or wait for lower fees.',
   fee_changed:
     'Network fees changed and this quote is too low. Refresh the estimate, or wait for lower fees.',
   invalid_fee:
     'The wallet’s fee settings could not be used. Restore its suggested fees and refresh the estimate.',
   gas_limit:
-    'This transaction exceeds the allowed gas limit. Do not increase it blindly; review the launch settings and estimate again.',
+    'This transaction exceeds the allowed gas limit. Do not increase it blindly; review the transaction settings and estimate again.',
   gas_limit_low:
     'The proposed gas limit is too low for this transaction. Refresh the estimate instead of guessing a higher limit.',
   reverted:
@@ -138,6 +147,9 @@ export function describeError(error: unknown, context: ErrorContext): string {
       catalog: 'Pairings could not be loaded. Try refreshing them shortly.',
       ticker:
         'The ticker could not be checked. Try again shortly; availability is still unknown.',
+      fees: 'Fees could not be loaded. Balances are unknown, not zero. Try refreshing shortly.',
+      claim_review:
+        'This claim could not be safely estimated. No wallet request was made. Refresh the fees and try again.',
       estimate:
         'The launch cost could not be estimated. Refresh the quote before continuing.',
       launch: 'The launch could not be confirmed.',

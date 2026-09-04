@@ -1,6 +1,7 @@
 import { resolve } from "node:path";
 import { isAddress, isHex, size } from "viem";
 import { ServiceError } from "./errors.mjs";
+import { readFeeContracts } from "./fee-contracts.mjs";
 
 export function readConfig(env = process.env) {
   const { O1_API_KEY: o1Key = "" } = env;
@@ -28,6 +29,9 @@ export function readConfig(env = process.env) {
   const rpcUrl = env.ROBINHOOD_RPC || env.ROBINHOOD_RPC_URL || "";
   if (rpcUrl && new URL(rpcUrl).protocol !== "https:")
     throw new ServiceError("invalid_rpc_configuration");
+  const baseRpcUrl = env.BASE_RPC_URL || "";
+  if (baseRpcUrl && new URL(baseRpcUrl).protocol !== "https:")
+    throw new ServiceError("invalid_rpc_configuration");
   const registry = env.LONG_TICKER_REGISTRY_ADDRESS || "";
   const codeHash = env.LONG_TICKER_REGISTRY_CODE_HASH || "";
   const longQuotes = (env.LONG_RWA_ALLOWLIST || "")
@@ -50,6 +54,10 @@ export function readConfig(env = process.env) {
     readsEnabled: env.READ_UPSTREAMS === "true",
     o1Key,
     rpcUrl,
+    baseRpcUrl,
+    feesEnabled: env.READ_FEES === "true",
+    claimsEnabled: env.WALLET_CLAIMS === "true",
+    feeContracts: readFeeContracts(env.FEE_CONTRACTS_JSON),
     registry,
     codeHash,
     longQuotes: new Set(longQuotes.map((value) => value.toLowerCase())),

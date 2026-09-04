@@ -1,7 +1,29 @@
 import { isIP } from "node:net";
 import { ServiceError, safeError } from "./errors.mjs";
+import { validAddress } from "./fee-contracts.mjs";
 
 export function validateInput(kind, input) {
+  if (kind === "fees" || kind === "claim-prepare") {
+    const fields = kind === "fees" ? ["address", "chainId", "padId"] : ["address", "positionId"];
+    if (
+      !input ||
+      typeof input !== "object" ||
+      Array.isArray(input) ||
+      Object.keys(input).length !== fields.length ||
+      Object.keys(input).some((key) => !fields.includes(key)) ||
+      !validAddress(input.address)
+    )
+      throw new ServiceError("invalid_request", 400);
+    if (
+      kind === "fees"
+        ? ![4663, 8453].includes(input.chainId) ||
+          !["long", "o1"].includes(input.padId) ||
+          (input.padId === "long" && input.chainId !== 4663)
+        : typeof input.positionId !== "string" || !/^[a-f0-9]{64}$/.test(input.positionId)
+    )
+      throw new ServiceError("invalid_request", 400);
+    return { ...input, address: input.address.toLowerCase() };
+  }
   const keys = kind === "catalog" ? ["chainId"] : ["chainId", "ticker", "pads"];
   if (
     !input ||
@@ -52,7 +74,7 @@ async function readBody(request) {
   }
 }
 
-export function createHandler(config, budget, adapters) {
+export function createHandler(config, budget, adapters, fees) {
   let active = 0;
   return async (request, response) => {
     response.setHeader("content-type", "application/json; charset=utf-8");
@@ -81,8 +103,9 @@ export function createHandler(config, budget, adapters) {
         request.headers["sec-fetch-site"] === "cross-site"
       )
         throw new ServiceError("origin_denied", 403);
-      const kind =
-        request.url === "/v1/catalog" ? "catalog" : request.url === "/v1/ticker" ? "ticker" : null;
+      const kind = ["catalog", "ticker", "fees", "claim-prepare"].find(
+        (operation) => request.url === `/v1/${operation}`,
+      );
       if (!kind || request.method !== "POST" || request.headers["x-fungun-intent"] !== kind)
         throw new ServiceError("not_found", 404);
       // Forwarded headers are deliberately ignored; the durable global cap is authoritative.
@@ -91,9 +114,13 @@ export function createHandler(config, budget, adapters) {
       budget.request(ip, kind === "ticker");
       const input = validateInput(kind, await readBody(request));
       const value =
-        kind === "catalog"
-          ? await adapters.catalog(input.chainId)
-          : await adapters.ticker(input.chainId, input.ticker, input.pads);
+        kind === "fees"
+          ? await fees.list(input)
+          : kind === "claim-prepare"
+            ? await fees.prepare(input)
+            : kind === "catalog"
+              ? await adapters.catalog(input.chainId)
+              : await adapters.ticker(input.chainId, input.ticker, input.pads);
       send(200, { ...value, serverTime: Date.now() });
     } catch (error) {
       const safe = safeError(error);

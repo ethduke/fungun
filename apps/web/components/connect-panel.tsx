@@ -1,6 +1,8 @@
 'use client';
 
 import { useEffect, useState } from 'react';
+import { getConnection } from 'wagmi/actions';
+import type { EIP1193Provider } from 'viem';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import {
   WagmiProvider,
@@ -20,9 +22,37 @@ import {
 } from '@/components/ui/dialog';
 import { createPreviewConfig, previewQueryDefaults } from '@/lib/preview-web3';
 import type { ConnectedAccount } from '@/lib/account-context';
-import { describeError } from '@/lib/user-error';
+import { AppError, describeError } from '@/lib/user-error';
+import { sendWalletClaim, checkWalletClaim } from '@/lib/claim-wallet';
+import type { ClaimQuote } from '@/lib/fee-service';
 
 let configuration: ReturnType<typeof createPreviewConfig> | undefined;
+async function walletProvider() {
+  if (!configuration) throw new AppError('disconnected');
+  const connection = getConnection(configuration);
+  if (!connection.isConnected || !connection.connector)
+    throw new AppError('disconnected');
+  const provider =
+    (await connection.connector.getProvider()) as EIP1193Provider;
+  return {
+    request: (args) => {
+      const current = getConnection(configuration!);
+      if (
+        !current.isConnected ||
+        current.connector?.uid !== connection.connector?.uid ||
+        current.address !== connection.address
+      )
+        throw new AppError('wrong_account');
+      return provider.request(
+        args as Parameters<EIP1193Provider['request']>[0],
+      );
+    },
+  } as EIP1193Provider;
+}
+const sendClaim = async (quote: ClaimQuote) =>
+  sendWalletClaim(await walletProvider(), quote);
+const checkClaim = async (positionId: string) =>
+  checkWalletClaim(await walletProvider(), positionId);
 
 function ConnectionControl({
   onAccountChange,
@@ -37,7 +67,9 @@ function ConnectionControl({
   const address = connection.address;
   useEffect(() => {
     onAccountChange(
-      connection.isConnected ? { address, chainId: connection.chainId } : {},
+      connection.isConnected
+        ? { address, chainId: connection.chainId, sendClaim, checkClaim }
+        : {},
     );
   }, [address, connection.chainId, connection.isConnected, onAccountChange]);
   return (
@@ -58,8 +90,8 @@ function ConnectionControl({
               {connection.isConnected ? 'Your wallet' : 'Connect your wallet'}
             </DialogTitle>
             <DialogDescription>
-              Connect to preview your account. No signature, payment or network
-              switch is requested.
+              Connect your account. No signature, payment or network switch is
+              requested.
             </DialogDescription>
           </DialogHeader>
           {connection.isConnected ? (

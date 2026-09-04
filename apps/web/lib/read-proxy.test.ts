@@ -131,3 +131,53 @@ await test('proxy cancels an unfinished body before contacting the backend', asy
     else process.env.READ_SERVICE_ORIGIN = previousBackend;
   }
 });
+
+await test('fee and claim preparation use fixed backend routes without forwarded credentials', async () => {
+  const previousOrigin = process.env.APP_ORIGIN;
+  const previousBackend = process.env.READ_SERVICE_ORIGIN;
+  const originalFetch = globalThis.fetch;
+  const origin = 'https://app.example.invalid';
+  try {
+    process.env.APP_ORIGIN = origin;
+    process.env.READ_SERVICE_ORIGIN = 'https://backend.example.invalid';
+    for (const operation of ['fees', 'claim-prepare']) {
+      const body =
+        operation === 'fees'
+          ? { address: `0x${'a'.repeat(40)}`, chainId: 4663, padId: 'long' }
+          : { address: `0x${'a'.repeat(40)}`, positionId: 'a'.repeat(64) };
+      globalThis.fetch = async (url, options) => {
+        assert.equal(
+          (url as URL).href,
+          `https://backend.example.invalid/v1/${operation}`,
+        );
+        assert.equal(new Headers(options?.headers).get('cookie'), null);
+        assert.equal(
+          new Headers(options?.headers).get('x-fungun-intent'),
+          operation,
+        );
+        return Response.json({ status: 'unavailable' });
+      };
+      const response = await POST(
+        new Request(`${origin}/api/${operation}`, {
+          method: 'POST',
+          headers: {
+            origin,
+            'content-type': 'application/json',
+            'x-fungun-intent': operation,
+            cookie: 'private=EXAMPLE',
+          },
+          body: JSON.stringify(body),
+        }),
+        { params: Promise.resolve({ operation }) },
+      );
+      assert.equal(response.status, 200);
+      assert.equal(response.headers.get('cache-control'), 'no-store');
+    }
+  } finally {
+    globalThis.fetch = originalFetch;
+    if (previousOrigin === undefined) delete process.env.APP_ORIGIN;
+    else process.env.APP_ORIGIN = previousOrigin;
+    if (previousBackend === undefined) delete process.env.READ_SERVICE_ORIGIN;
+    else process.env.READ_SERVICE_ORIGIN = previousBackend;
+  }
+});

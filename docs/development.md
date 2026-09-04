@@ -60,26 +60,29 @@ Run `npm run dev:api` in a second terminal for the read service. See
 - Open FEE from the header: one payout-coin table, no console tabs.
 - FEE follows the connected account or a manually entered address after a 500 ms debounce.
 
-Fee reads and claims remain a local scaffold: missing integrations show unknown
-balances, never fabricated zero balances. No address is sent to a backend,
-stored in browser storage, or added to a URL. Wallet connection stays mounted
+Fee reads and wallet claims are implemented behind runtime configuration; see
+[fee setup and coverage](fee-claims.md). Missing integrations show unknown balances,
+never fabricated zero balances. Lookup addresses are sent to the fee backend and
+providers, not stored in browser storage or added to the browser URL. Wallet connection stays mounted
 when navigating between Launch and FEE; disconnecting clears the automatic address.
 The launch draft and uploaded image also survive navigation in layout-owned memory;
 refreshing or closing the page clears them. Nothing is persisted to disk.
 
-Live integration needs a guarded backend for the source readers and a separately
-verified claim builder. O1 fee positions are shared escrow balances by payout
+O1 fee positions are shared escrow balances by payout
 asset, not per-token lifetime revenue. Long's reader covers locked-LP fees only;
 custom-hook payouts remain unknown. Group by chain and asset identity, with a
 launchpad breakdown, never by ticker alone. Claims must verify the connected
 beneficiary, chain, fresh amount and target contract before wallet simulation
-and explicit user approval. The existing read-only `collectFees` simulation
-must not be reused as a claim transaction.
+and explicit user approval. Verified Long manager source confirms that direct
+`collectFees` pays the caller's beneficiary share. Its simulation return values
+are pool-wide, not the caller's payout; confirmed payouts require `Release` events.
 
 ## Deliberately disabled
 
-No signing, transactions, paid generation, live quotes, balance reads, block
+No server signing, launch transactions, paid generation, live launch quotes, block
 subscriptions, arbitrary RPC proxy, or server upload endpoint is implemented.
+Configured fee adapters can read balances and prepare explicitly approved wallet
+claims; the browser never automatically signs, submits or retries a claim.
 The read service implements guarded catalogs and Long reservation checks, off
 until runtime credentials and verified contract identity are configured.
 WalletConnect QR support requires a later opt-in relay configuration. No wallet

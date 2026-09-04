@@ -78,7 +78,7 @@ test("request fairness limits and provider caps do not store raw client IPs", ()
         "synthetic-client",
       ),
     );
-    for (let i = 0; i < 30; i++) budget.upstream("o1");
+    for (let i = 0; i < 60; i++) budget.upstream("o1");
     assert.throws(() => budget.upstream("rpc"), { status: 429 });
   } finally {
     budget.close();

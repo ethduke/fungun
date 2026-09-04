@@ -7,6 +7,7 @@ import { Upstream } from "./upstream.mjs";
 import { Adapters } from "./adapters.mjs";
 import { createHandler } from "./service.mjs";
 import { verifyProductionStorage } from "./storage.mjs";
+import { Fees } from "./fees.mjs";
 
 process.umask(0o077);
 try {
@@ -14,8 +15,13 @@ try {
   if (!config.production) mkdirSync(dirname(config.databasePath), { recursive: true, mode: 0o700 });
   if (config.production) verifyProductionStorage(config.databasePath);
   const budget = new Budget(config.databasePath, Date.now, !config.production);
-  const adapters = new Adapters(config, new Upstream(budget));
-  const server = createServer({ maxHeaderSize: 8192 }, createHandler(config, budget, adapters));
+  const upstream = new Upstream(budget);
+  const adapters = new Adapters(config, upstream);
+  const fees = new Fees(config, upstream);
+  const server = createServer(
+    { maxHeaderSize: 8192 },
+    createHandler(config, budget, adapters, fees),
+  );
   server.requestTimeout = 10_000;
   server.headersTimeout = 5000;
   server.keepAliveTimeout = 5000;

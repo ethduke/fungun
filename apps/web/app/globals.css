@@ -284,6 +284,42 @@ tracked-market-feed {
 .fee-claim-notice svg {
   flex-shrink: 0;
 }
+.fee-row-detail {
+  display: block;
+  margin-top: 5px;
+  color: #687a56;
+  font-size: 12px;
+}
+.fee-review {
+  margin-top: 24px;
+  padding: 24px;
+  background: #edf2e3;
+  border: 1px solid #dce4cf;
+  border-radius: 10px;
+}
+.fee-review h2 {
+  margin: 0 0 12px;
+  font-size: 24px;
+}
+.fee-review p {
+  margin: 10px 0;
+  line-height: 1.6;
+  overflow-wrap: anywhere;
+}
+.fee-payout {
+  font-size: 20px;
+  font-weight: 500;
+}
+.fee-review-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  margin-top: 20px;
+}
+.fees-table .fee-muted {
+  white-space: normal;
+  max-width: 340px;
+}
 .intro {
   display: flex;
   align-items: center;

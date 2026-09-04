@@ -10,7 +10,7 @@ was performed for this milestone.
 Use Node 24.4 or newer. Run `npm run setup`, then `npm run dev` and
 `npm run dev:api` in separate terminals. The webview remains at
 http://127.0.0.1:3000; its development proxy forwards `/api/catalog` and
-`/api/ticker` to the local read service on port 8787. The public market feed's
+`/api/ticker`, `/api/fees` and `/api/claim-prepare` to the local service on port 8787. The public market feed's
 `GET /api/tracked-feed` route runs in the web server. SQLite runtime files live in ignored
 `apps/api/local/`; never delete them to reset a spent quota.
 
@@ -41,7 +41,7 @@ The browser sends same-origin JSON POSTs with `x-fungun-intent` equal to the ope
   Backend route: `/v1/ticker`. Unsupported chains/pads, extra fields and malformed
   tickers are rejected. O1-only tickers keep their case; Long requires uppercase A–Z.
 
-These are bounded anonymous reads, not authenticated financial operations. Origin
+The catalog/ticker routes above are bounded anonymous reads, not authenticated financial operations. Origin
 and intent headers deter browser cross-site requests; direct clients can forge them.
 No arbitrary URL, address, method, calldata, cookie, signature or forwarding-header
 parameter is accepted. Wallet addresses, images and prompts are not sent by these reads.
@@ -85,7 +85,8 @@ All results are advisory and can change before a transaction.
   only updates labels; it never automatically sends another request.
 - Every upstream attempt is debited before the request, even on timeout/failure.
   SQLite transactions persist caps across restarts and prevent clock rollback refill.
-- Hard caps: 30 upstream attempts/minute, 2,000/day total, 600/day O1 and 1,400/day RPC.
+- Hard caps: 60 upstream units/minute, 2,000/day total, 600/day O1 and 1,400/day RPC.
+  Each fee RPC method is charged, including batched methods; O1 fee pages cost three units.
   Four concurrent upstream requests total, two per provider; eight pending cache keys,
   256 cache entries; no unbounded work queue.
 - API caps: 300 requests/minute globally, 30/minute per socket IP and six ticker
@@ -134,7 +135,10 @@ modify existing DNS before the API and its storage/configuration checks pass.
 
 ## Remaining work
 
-Live adapter verification with operator-supplied runtime configuration; verified
-fee readers and claim builders; noncustodial launch transaction preparation,
+Fee reads and wallet-only claim preparation are implemented behind separate runtime
+switches; see [fee coverage, configuration and safety](fee-claims.md). The backend never signs or sends.
+
+Remaining work: live adapter verification with operator-supplied runtime configuration;
+noncustodial launch transaction preparation,
 simulation and explicit wallet approval; image storage; separately authorized
-x402 payment/generation jobs. There is no transaction endpoint or signing path.
+x402 payment/generation jobs. Launch transaction preparation remains unavailable.

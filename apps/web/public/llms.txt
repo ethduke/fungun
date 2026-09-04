@@ -1,11 +1,13 @@
 # Fungun
 
-> Noncustodial launchpad composer for Long and O1, with a guarded optional read service. Launches, claims and payments are not enabled.
+> Noncustodial launchpad composer for Long and O1, with optional guarded fee reads and wallet claims. Launches and paid image generation remain disabled.
 
 Agents can help prepare a coin draft and explain its validation. Configured
 backends can load RWA catalogs and check Long ticker reservations on explicit
 request. External reads default to disabled; O1 ticker availability remains
-unverified. Fee reads, live quotes and paid image generation are not enabled.
+unverified. FEE supports configured Long locked-pool claims and verified current
+O1 Base escrow claims. Other O1 positions remain indexed, not claim-ready.
+Live launch quotes and paid image generation are not enabled.
 An unavailable balance is unknown, not zero. A reservation check is not proof
 of global ticker uniqueness or launch readiness.
 
@@ -39,4 +41,4 @@ Links beginning with `/` resolve against the origin serving this file.
 ## Optional
 
 - [Launch composer](/): Interactive local draft, image upload, launchpad selection and inline validation.
-- [FEE](/fees): Address-driven fee-view scaffold; live balances and claims are unavailable.
+- [FEE](/fees): Address-driven fee balances and explicit wallet claim reviews where configured; coverage is partial and missing balances are unknown.
