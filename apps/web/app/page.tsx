@@ -18,6 +18,8 @@ import {
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Textarea } from '@/components/ui/textarea';
+import { Checkbox } from '@/components/ui/checkbox';
+import { RadioGroup, RadioGroupItem } from '@/components/ui/radio-group';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import {
   Collapsible,
@@ -34,11 +36,15 @@ import {
 import { LaunchpadCard } from '@/components/launchpad-card';
 import {
   chainName,
+  DEFAULT_CHAIN_ID,
   DEFAULT_DESTINATIONS,
   IMAGE_LIMIT,
   imageFileError,
   pairingName,
+  selectChain,
+  supportsChain,
   validateDraft,
+  type ChainId,
   type Destination,
 } from '@/lib/launch-model';
 import { usePreviewTools } from '@/lib/preview-webmcp';
@@ -47,8 +53,11 @@ const WalletConnection = lazy(() => import('@/components/connect-panel'));
 type ImagePreview = { url: string; size: number };
 
 export default function Home() {
-  const [destinations, setDestinations] =
-    useState<Destination[]>(DEFAULT_DESTINATIONS);
+  const [selection, setSelection] = useState({
+    chainId: DEFAULT_CHAIN_ID,
+    destinations: DEFAULT_DESTINATIONS,
+  });
+  const { chainId, destinations } = selection;
   const [name, setName] = useState('');
   const [ticker, setTicker] = useState('');
   const [description, setDescription] = useState('');
@@ -68,6 +77,7 @@ export default function Home() {
   const errors = validateDraft(
     { name, ticker, description, hasImage: !!image },
     destinations,
+    chainId,
   );
   const imageBytes = image
     ? `${Math.max(1, Math.round(image.size / 1024))} KB`
@@ -142,9 +152,29 @@ export default function Home() {
   }
 
   function updateDestination(destination: Destination) {
-    setDestinations((current) =>
-      current.map((pad) => (pad.id === destination.id ? destination : pad)),
-    );
+    setSelection((current) => {
+      if (
+        destination.chainId !== current.chainId ||
+        !supportsChain(destination.id, current.chainId)
+      )
+        return current;
+      return {
+        ...current,
+        destinations: current.destinations.map((pad) =>
+          pad.id === destination.id ? destination : pad,
+        ),
+      };
+    });
+    setTickerNotice(false);
+  }
+
+  function updateChain(nextChainId: ChainId) {
+    if (nextChainId === chainId) return;
+    setSelection((current) => ({
+      chainId: nextChainId,
+      destinations: selectChain(current.destinations, nextChainId),
+    }));
+    setReviewOpen(false);
     setTickerNotice(false);
   }
 
@@ -475,31 +505,39 @@ export default function Home() {
               <div className="section-heading">
                 <span className="step-number">02</span>
                 <h2 id="launchpads-heading">Choose your launchpads</h2>
-                <span className="count-pill">{active.length} selected</span>
               </div>
-              <p className="panel-caption">
-                One launchpad, or both. Each launch is independent.
-              </p>
-              {destinations.map((pad) => (
-                <LaunchpadCard
-                  key={pad.id}
-                  destination={pad}
-                  onChange={updateDestination}
-                />
-              ))}
+              <RadioGroup
+                className="chain-filter"
+                aria-label="Launch chain"
+                value={String(chainId)}
+                onValueChange={(value) => {
+                  if (value === '4663' || value === '8453')
+                    updateChain(Number(value) as ChainId);
+                }}
+              >
+                <label className="chain-choice" htmlFor="chain-robinhood">
+                  <RadioGroupItem id="chain-robinhood" value="4663" />
+                  Robinhood
+                </label>
+                <label className="chain-choice" htmlFor="chain-base">
+                  <RadioGroupItem id="chain-base" value="8453" />
+                  Base
+                </label>
+              </RadioGroup>
+              {destinations
+                .filter((pad) => supportsChain(pad.id, chainId))
+                .map((pad) => (
+                  <LaunchpadCard
+                    key={pad.id}
+                    destination={pad}
+                    onChange={updateDestination}
+                  />
+                ))}
               {attempted && errors.destinations && (
                 <p role="alert" className="field-error">
                   {errors.destinations}
                 </p>
               )}
-              <div className="launchpad-note">
-                <ShieldCheck size={17} />
-                <p>
-                  You approve every deployment in your wallet.
-                  <br />
-                  Nothing is signed in this preview.
-                </p>
-              </div>
             </section>
           </div>
           <div className="review-bar">
@@ -581,7 +619,25 @@ export default function Home() {
                   </div>
                   <div>
                     <dt>Metadata</dt>
-                    <dd>{pad.editableMetadata ? 'Editable' : 'Immutable'}</dd>
+                    <dd>
+                      {pad.id === 'o1' ? (
+                        <label
+                          className="metadata-option"
+                          htmlFor="o1-editable-metadata"
+                        >
+                          <Checkbox
+                            id="o1-editable-metadata"
+                            checked={pad.editableMetadata}
+                            onCheckedChange={(editableMetadata) =>
+                              updateDestination({ ...pad, editableMetadata })
+                            }
+                          />
+                          Allow updates
+                        </label>
+                      ) : (
+                        'Immutable'
+                      )}
+                    </dd>
                   </div>
                   <div>
                     <dt>Deployment fee</dt>

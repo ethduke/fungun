@@ -21,6 +21,7 @@ export interface CoinDraft {
 
 export const IMAGE_LIMIT = 2 * 1024 * 1024;
 export const DESCRIPTION_LIMIT = 2000;
+export const DEFAULT_CHAIN_ID: ChainId = 4663;
 export const SAMPLE_PAIRS = [
   { id: 'sample-nvda', symbol: 'NVDA', label: 'NVIDIA' },
   { id: 'sample-aapl', symbol: 'AAPL', label: 'Apple' },
@@ -50,13 +51,39 @@ export function chainName(id: ChainId) {
   return id === 4663 ? 'Robinhood Chain' : 'Base';
 }
 
+export function supportsChain(id: PadId, chainId: ChainId) {
+  return chainId === 4663 || (id === 'o1' && chainId === 8453);
+}
+
+export function selectChain(destinations: Destination[], chainId: ChainId) {
+  const next = destinations.map((pad) => {
+    if (!supportsChain(pad.id, chainId)) return { ...pad, selected: false };
+    if (pad.chainId === chainId) return { ...pad };
+    return {
+      ...pad,
+      chainId,
+      route: 'standard' as const,
+      pairId: 'native' as const,
+    };
+  });
+  if (!next.some((pad) => pad.selected)) {
+    const fallback = next.find((pad) => pad.id === 'o1');
+    if (fallback) fallback.selected = true;
+  }
+  return next;
+}
+
 export function pairingName(id: PairId) {
   return id === 'native'
     ? 'Native / standard'
     : (SAMPLE_PAIRS.find((pair) => pair.id === id)?.symbol ?? 'Unselected');
 }
 
-export function validateDraft(draft: CoinDraft, destinations: Destination[]) {
+export function validateDraft(
+  draft: CoinDraft,
+  destinations: Destination[],
+  chainId?: ChainId,
+) {
   const errors: Record<string, string> = {};
   const active = destinations.filter((pad) => pad.selected);
   if (!draft.name.trim() || Array.from(draft.name.trim()).length > 50)
@@ -76,6 +103,15 @@ export function validateDraft(draft: CoinDraft, destinations: Destination[]) {
     errors.description = 'Description must be at most 2,000 UTF-8 bytes.';
   if (!draft.hasImage) errors.image = 'Add a coin image to continue.';
   if (!active.length) errors.destinations = 'Select at least one launchpad.';
+  if (new Set(active.map((pad) => pad.chainId)).size > 1)
+    errors.destinations = 'Select launchpads on one chain at a time.';
+  if (
+    chainId !== undefined &&
+    active.some(
+      (pad) => pad.chainId !== chainId || !supportsChain(pad.id, chainId),
+    )
+  )
+    errors.destinations = 'Choose launchpads available on the selected chain.';
   for (const pad of active) {
     if (
       pad.id === 'long' &&

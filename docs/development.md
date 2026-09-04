@@ -16,9 +16,10 @@ installed to test wallet connection; embedded browsers may have no injected wall
 
 - Upload/drop a PNG, JPEG, WebP or GIF, preview and remove it. Files stay in memory.
 - Enter name, ticker and optional description; review per-launchpad validation.
-- Select Long, O1 or both, change supported networks and pairing routes.
+- Choose one chain: Robinhood (default) offers Long and O1; Base offers O1.
+- Select launchpads and pairings. Changing chains clears incompatible selections.
 - Choose clearly labeled sample stock symbols; these are not a live RWA catalog.
-- Review independent deployment rows and immutable/editable metadata options.
+- Review independent deployment rows; O1's metadata-update toggle is in review.
 - Open the Grok/x402 flow preview; no image generation or payment occurs.
 - Explicitly connect/disconnect a discovered EIP-6963 wallet using wagmi/viem.
 

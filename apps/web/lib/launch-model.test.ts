@@ -2,9 +2,12 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import {
   DEFAULT_DESTINATIONS,
+  DEFAULT_CHAIN_ID,
   IMAGE_LIMIT,
   imageFileError,
   imageKind,
+  selectChain,
+  supportsChain,
   validateDraft,
   type Destination,
 } from './launch-model.ts';
@@ -82,6 +85,68 @@ await test('multi-launch validates every selected destination', () => {
   );
   pads[1].pairId = 'sample-nvda';
   assert.ok(validateDraft(draft, pads).destinations);
+});
+
+await test('Robinhood is the default chain with both launchpads available', () => {
+  assert.equal(DEFAULT_CHAIN_ID, 4663);
+  assert.ok(
+    destinations().every((pad) => supportsChain(pad.id, DEFAULT_CHAIN_ID)),
+  );
+  assert.deepEqual(
+    destinations()
+      .filter((pad) => pad.selected)
+      .map((pad) => pad.id),
+    ['long'],
+  );
+});
+
+await test('switching to Base removes Long and resets O1 pairing without mutating the draft', () => {
+  const before = destinations().map((pad) => ({ ...pad, selected: true }));
+  before[1].route = 'rwa';
+  before[1].pairId = 'sample-aapl';
+  const after = selectChain(before, 8453);
+  assert.deepEqual(
+    after.filter((pad) => supportsChain(pad.id, 8453)).map((pad) => pad.id),
+    ['o1'],
+  );
+  assert.deepEqual(after[0], { ...before[0], selected: false });
+  assert.deepEqual(after[1], {
+    ...before[1],
+    chainId: 8453,
+    route: 'standard',
+    pairId: 'native',
+  });
+  assert.equal(before[0].selected, true);
+  assert.equal(before[1].chainId, 4663);
+  assert.equal(before[1].pairId, 'sample-aapl');
+  assert.deepEqual(validateDraft(draft, after), {});
+});
+
+await test('chain switch selects O1 if needed and never restores hidden Long selection', () => {
+  const base = selectChain(destinations(), 8453);
+  assert.equal(base[0].selected, false);
+  assert.equal(base[1].selected, true);
+  const robinhood = selectChain(base, 4663);
+  assert.equal(robinhood[0].selected, false);
+  assert.equal(robinhood[1].selected, true);
+  assert.equal(robinhood[1].chainId, 4663);
+  assert.deepEqual(validateDraft(draft, robinhood), {});
+});
+
+await test('review rejects selected launchpads across different chains', () => {
+  const mixed = destinations().map((pad) => ({ ...pad, selected: true }));
+  mixed[1].chainId = 8453;
+  assert.equal(
+    validateDraft(draft, mixed).destinations,
+    'Select launchpads on one chain at a time.',
+  );
+});
+
+await test('review rejects a single stale selection that disagrees with the chain filter', () => {
+  assert.ok(validateDraft(draft, destinations(), 8453).destinations);
+  const base = selectChain(destinations(), 8453);
+  assert.ok(validateDraft(draft, base, 4663).destinations);
+  assert.deepEqual(validateDraft(draft, base, 8453), {});
 });
 
 await test('description has a UTF-8 byte limit', () => {

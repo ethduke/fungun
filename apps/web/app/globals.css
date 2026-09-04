@@ -355,48 +355,48 @@ h2 {
   gap: 7px;
   margin-top: 13px;
 }
-.count-pill {
-  margin-left: auto;
-  padding: 4px 8px;
-  border-radius: 5px;
-  color: #62734d;
-  background: #f0f5e5;
-  font-size: 12px;
-  white-space: nowrap;
+.chain-filter {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 24px;
+  padding-bottom: 20px;
+  border-bottom: 1px solid #e0e4d9;
 }
-.panel-caption {
-  font-size: 14px;
-  color: #74816a;
-  margin: -8px 0 22px;
-  line-height: 1.6;
+.chain-choice {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  min-height: 32px;
+  font-size: 15px;
+  cursor: pointer;
 }
 .launchpad-card {
-  border: 1px solid #e0e4d9;
-  border-radius: 8px;
-  margin-bottom: 14px;
-  background: #fff;
-  padding: 18px;
-  transition:
-    border-color 0.15s,
-    background 0.15s;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 12px;
+  min-height: 80px;
+  padding: 18px 0;
+  border-bottom: 1px solid #e0e4d9;
 }
-.launchpad-card.is-selected {
-  border-color: #9daf84;
-  background: #fafcf4;
-  box-shadow: 0 0 0 1px #bed19c25;
+.launchpad-card:last-of-type {
+  border-bottom: none;
 }
 .launchpad-top {
   display: flex;
   align-items: center;
-  gap: 13px;
+  flex: 1;
+  min-width: 120px;
+  min-height: 40px;
+  gap: 10px;
   cursor: pointer;
 }
 .pad-logo {
   display: grid;
   place-items: center;
-  width: 43px;
-  height: 43px;
-  border-radius: 10px;
+  width: 34px;
+  height: 34px;
+  border-radius: 8px;
   flex-shrink: 0;
 }
 .pad-logo.long {
@@ -412,61 +412,13 @@ h2 {
   padding-right: 3px;
 }
 .pad-title {
-  display: flex;
-  flex-direction: column;
-  gap: 5px;
-  flex: 1;
-}
-.pad-title strong {
   font-size: 17px;
   font-weight: 600;
-}
-.pad-title > span {
-  font-size: 13px;
-  color: #728164;
 }
 .launchpad-top [data-slot='checkbox'] {
   width: 20px;
   height: 20px;
   border-radius: 5px;
-}
-.pad-meta {
-  display: flex;
-  align-items: center;
-  gap: 7px;
-  font-size: 12px;
-  color: #768468;
-  margin-top: 18px;
-  flex-wrap: wrap;
-}
-.network-dot {
-  width: 6px;
-  height: 6px;
-  background: #8e9c79;
-  border-radius: 50%;
-  flex-shrink: 0;
-}
-.meta-divider {
-  height: 10px;
-  width: 1px;
-  background: #dce1d3;
-  margin: 0 4px;
-}
-.launchpad-note {
-  display: flex;
-  align-items: flex-start;
-  gap: 10px;
-  color: #738162;
-  margin-top: 22px;
-}
-.launchpad-note svg {
-  margin-top: 2px;
-  flex-shrink: 0;
-}
-.launchpad-note p {
-  margin: 0;
-  font-size: 13px;
-  line-height: 1.8;
 }
 .review-bar {
   display: flex;
@@ -600,38 +552,15 @@ h2 {
   text-align: center;
   margin-top: 12px;
 }
-.pad-options {
-  margin-top: 18px;
-  padding-top: 15px;
-  border-top: 1px solid #e1e7d7;
-}
-.option-row {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  gap: 12px;
-  margin-bottom: 10px;
-}
-.option-row > span {
-  color: #718163;
-  font-size: 13px;
-}
-.option-select {
-  min-height: 36px;
+.pair-select {
+  min-height: 40px;
   background: #fff;
-  font-size: 13px;
-  min-width: 185px;
+  font-size: 14px;
+  width: 180px;
+  max-width: 100%;
   padding: 5px 10px;
   border-color: #dce4ce;
   box-shadow: none;
-}
-.stock-dot {
-  width: 15px;
-  height: 15px;
-  border-radius: 4px;
-  background: #9ab967;
-  display: inline-block;
-  margin-right: 3px;
 }
 .sample-tag {
   color: #7a8869;
@@ -647,21 +576,11 @@ h2 {
   line-height: 1.5;
   margin: 8px 0 0;
 }
-.immutable-note {
-  display: flex;
-  align-items: center;
-  gap: 5px;
-  color: #7c896e;
-  font-size: 12px;
-  margin-top: 12px;
-}
 .metadata-option {
   display: flex;
   align-items: center;
   gap: 8px;
-  font-size: 12px;
-  color: #6b7e59;
-  margin-top: 14px;
+  font-size: 14px;
   cursor: pointer;
 }
 .extra-details {
@@ -1116,11 +1035,8 @@ h2 {
   .section-heading {
     flex-wrap: wrap;
   }
-  .option-select {
-    min-width: 167px;
-  }
-  .option-row {
-    gap: 5px;
+  .pair-select {
+    width: 100%;
   }
   .upload-zone small {
     font-size: 11px;
@@ -1128,9 +1044,6 @@ h2 {
   .image-tabs [data-slot='tabs-trigger'] {
     font-size: 12px;
     gap: 5px;
-  }
-  .count-pill {
-    margin-left: 0;
   }
   .app-dialog {
     padding: 22px;
