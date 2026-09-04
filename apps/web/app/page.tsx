@@ -33,6 +33,7 @@ import { LaunchpadCard } from '@/components/launchpad-card';
 import { LaunchSection } from '@/components/launch-section';
 import {
   autofillCoinName,
+  grokPromptPlaceholder,
   IMAGE_LIMIT,
   imageFileError,
   imageKind,
@@ -333,7 +334,7 @@ export default function Home() {
                     </label>
                     <Textarea
                       id="image-prompt"
-                      placeholder="A little moon wearing a very serious business suit…"
+                      placeholder={grokPromptPlaceholder(name, ticker)}
                       maxLength={1000}
                       value={prompt}
                       onChange={(event) => setPrompt(event.target.value)}

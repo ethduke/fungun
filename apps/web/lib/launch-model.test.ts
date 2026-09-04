@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import {
   autofillCoinName,
+  grokPromptPlaceholder,
   DEFAULT_DESTINATIONS,
   DEFAULT_CHAIN_ID,
   IMAGE_LIMIT,
@@ -21,6 +22,37 @@ const draft = {
   hasImage: true,
 };
 const destinations = () => structuredClone(DEFAULT_DESTINATIONS);
+
+await test('Grok placeholder uses the coin name and permits only ticker text', () => {
+  assert.equal(
+    grokPromptPlaceholder('Moon Department', 'MOON'),
+    'Create a bright, simple logo for a memecoin named "Moon Department". Use bold shapes, no small details, and a square composition. The only text should be the ticker "MOON".',
+  );
+  assert.match(
+    grokPromptPlaceholder('Sunny', 'SUN'),
+    /named "Sunny".*ticker "SUN"/,
+  );
+  assert.match(
+    grokPromptPlaceholder('🌙', 'Moon'),
+    /named "🌙".*ticker "Moon"/,
+  );
+});
+
+await test('Grok placeholder handles partial, blank and cleared identity fields', () => {
+  assert.match(
+    grokPromptPlaceholder('   ', ' MOON '),
+    /named "MOON".*ticker "MOON"/,
+  );
+  assert.match(
+    grokPromptPlaceholder(' Moon ', ''),
+    /named "Moon".*Do not include any text\.$/,
+  );
+  assert.equal(
+    grokPromptPlaceholder('', ''),
+    'Create a bright, simple logo for a memecoin. Use bold shapes, no small details, and a square composition. Do not include any text.',
+  );
+  assert.equal(grokPromptPlaceholder(' ', ' '), grokPromptPlaceholder('', ''));
+});
 
 await test('coin name follows ticker typing, replacement and clearing', () => {
   let name = '';

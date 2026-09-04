@@ -33,6 +33,18 @@ export function autofillCoinName(
   return !name.trim() || name === previousTicker ? ticker : name;
 }
 
+export function grokPromptPlaceholder(name: string, ticker: string) {
+  const symbol = ticker.trim();
+  const coinName = name.trim() || symbol;
+  const subject = coinName
+    ? `a memecoin named ${JSON.stringify(coinName)}`
+    : 'a memecoin';
+  const text = symbol
+    ? `The only text should be the ticker ${JSON.stringify(symbol)}.`
+    : 'Do not include any text.';
+  return `Create a bright, simple logo for ${subject}. Use bold shapes, no small details, and a square composition. ${text}`;
+}
+
 export const IMAGE_LIMIT = 2 * 1024 * 1024;
 export const DESCRIPTION_LIMIT = 2000;
 export const DEFAULT_CHAIN_ID: ChainId = 4663;
