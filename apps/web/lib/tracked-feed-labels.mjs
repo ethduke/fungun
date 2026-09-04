@@ -8,6 +8,8 @@ export function feedLaunchpad(row) {
   const venue = protocol ? `UniV${protocol}` : 'Uniswap';
   if (/^long(?: launchpad)?$/i.test(raw))
     return { label: 'Long', title: 'Long Launchpad', isLong: true };
+  if (/^longbow(?: launchpad)?$/i.test(raw))
+    return { label: 'Longbow', title: 'Longbow Launchpad' };
   if (/^o1(?: launchpad)?[\s·:-]+(?:migrated|migration|mig\.?)$/i.test(raw))
     return {
       label: 'O1 Mig.',

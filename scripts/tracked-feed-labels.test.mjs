@@ -63,6 +63,14 @@ test("pool versions shorten to UniV3/UniV4 without inventing O1 migration or ove
   assert.equal(feedLaunchpad({ launchpad: "O1", version: "v4" }).label, "O1");
   assert.equal(feedLaunchpad({ launchpad: "O1 RWA" }).label, "O1 RWA");
   assert.equal(feedLaunchpad({ launchpad: "Long Launchpad", version: "v4" }).isLong, true);
+  assert.deepEqual(feedLaunchpad({ launchpad: "Longbow" }), {
+    label: "Longbow",
+    title: "Longbow Launchpad",
+  });
+  assert.deepEqual(feedLaunchpad({ launchpad: "Longbow Launchpad" }), {
+    label: "Longbow",
+    title: "Longbow Launchpad",
+  });
   assert.equal(feedLaunchpad({ launchpad: "Pons v2", version: "v4" }).label, "Pons v2");
   const unknown = feedLaunchpad({ launchpad: `hook:${address(4)}`, version: "v4" });
   assert.equal(unknown.label, "UniV4");
