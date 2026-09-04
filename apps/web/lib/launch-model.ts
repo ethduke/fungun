@@ -49,7 +49,7 @@ export function buildGrokPrompt(name: string, ticker: string) {
   const symbol = ticker.trim();
   const coinName = name.trim() || symbol;
   const subject = coinName
-    ? `a memecoin named ${JSON.stringify(coinName)}`
+    ? `a memecoin named ${JSON.stringify(coinName)}${symbol ? ` with ticker ${JSON.stringify(symbol)}` : ''}`
     : 'a memecoin';
   const text = symbol
     ? `The only text should be the ticker ${JSON.stringify(symbol)}.`

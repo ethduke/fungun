@@ -31,15 +31,15 @@ const destinations = () => structuredClone(DEFAULT_DESTINATIONS);
 await test('Grok prompt uses the coin name and permits only ticker text', () => {
   assert.equal(
     buildGrokPrompt('Moon Department', 'MOON'),
-    'Create a bright, simple logo for a memecoin named "Moon Department". Use bold shapes, no small details, and a square composition. The only text should be the ticker "MOON".',
+    'Create a bright, simple logo for a memecoin named "Moon Department" with ticker "MOON". Use bold shapes, no small details, and a square composition. The only text should be the ticker "MOON".',
   );
   assert.match(
     buildGrokPrompt('Sunny', 'SUN'),
-    /named "Sunny".*ticker "SUN"/,
+    /named "Sunny" with ticker "SUN"\./,
   );
   assert.match(
     buildGrokPrompt('🌙', 'Moon'),
-    /named "🌙".*ticker "Moon"/,
+    /named "🌙" with ticker "Moon"\./,
   );
 });
 
