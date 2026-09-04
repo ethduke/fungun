@@ -4,9 +4,11 @@ import { LongRpc } from "./long-rpc.mjs";
 import { Upstream } from "./upstream.mjs";
 
 const txHash = `0x${"ab".repeat(32)}`;
+const exampleRpc = "https://rpc.example.invalid";
+const exampleBaseRpc = "https://base-rpc.example.invalid";
 const config = {
-  rpcUrl: "https://rpc.example.invalid",
-  baseRpcUrl: "https://base-rpc.example.invalid",
+  rpcUrl: exampleRpc,
+  baseRpcUrl: exampleBaseRpc,
   rpcBatchRequests: true,
 };
 const extraCalls = [

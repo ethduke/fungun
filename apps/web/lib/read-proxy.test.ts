@@ -257,6 +257,7 @@ await test('launch proxy fixes all routes, strips credentials and enforces the 4
   const previousBackend = process.env.READ_SERVICE_ORIGIN;
   const originalFetch = globalThis.fetch;
   const origin = 'https://app.example.invalid';
+  const exampleHeader = 'Bearer EXAMPLE';
   const calls: string[] = [];
   try {
     process.env.APP_ORIGIN = origin;
@@ -284,7 +285,7 @@ await test('launch proxy fixes all routes, strips credentials and enforces the 4
             'content-type': 'application/json',
             'x-fungun-intent': operation,
             cookie: 'private=EXAMPLE',
-            authorization: 'Bearer EXAMPLE',
+            authorization: exampleHeader,
             'x-forwarded-for': '192.0.2.1',
           },
           body,
