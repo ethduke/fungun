@@ -1,6 +1,6 @@
 'use client';
 
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import {
   WagmiProvider,
@@ -19,16 +19,26 @@ import {
   DialogTitle,
 } from '@/components/ui/dialog';
 import { createPreviewConfig, previewQueryDefaults } from '@/lib/preview-web3';
+import type { ConnectedAccount } from '@/lib/account-context';
 
 let configuration: ReturnType<typeof createPreviewConfig> | undefined;
 
-function ConnectionControl() {
+function ConnectionControl({
+  onAccountChange,
+}: {
+  onAccountChange: (account: ConnectedAccount) => void;
+}) {
   const [open, setOpen] = useState(true);
   const connection = useConnection();
   const connectors = useConnectors();
   const connect = useConnect();
   const disconnect = useDisconnect();
   const address = connection.address;
+  useEffect(() => {
+    onAccountChange(
+      connection.isConnected ? { address, chainId: connection.chainId } : {},
+    );
+  }, [address, connection.chainId, connection.isConnected, onAccountChange]);
   return (
     <>
       <Button className="wallet-button" onClick={() => setOpen(true)}>
@@ -134,7 +144,11 @@ function ConnectionControl() {
   );
 }
 
-export default function WalletConnection() {
+export default function WalletConnection({
+  onAccountChange,
+}: {
+  onAccountChange: (account: ConnectedAccount) => void;
+}) {
   const [config] = useState(() => (configuration ??= createPreviewConfig()));
   const [queryClient] = useState(
     () => new QueryClient({ defaultOptions: previewQueryDefaults }),
@@ -142,7 +156,7 @@ export default function WalletConnection() {
   return (
     <WagmiProvider config={config} reconnectOnMount={false}>
       <QueryClientProvider client={queryClient}>
-        <ConnectionControl />
+        <ConnectionControl onAccountChange={onAccountChange} />
       </QueryClientProvider>
     </WagmiProvider>
   );

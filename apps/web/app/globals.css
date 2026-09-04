@@ -90,6 +90,7 @@ a:focus-visible {
   display: flex;
   align-items: center;
   justify-content: space-between;
+  flex-wrap: wrap;
   border-bottom: 1px solid var(--border);
   gap: 20px;
 }
@@ -116,7 +117,7 @@ a:focus-visible {
 .brand-period {
   color: #8da069;
 }
-.header-context,
+.header-nav,
 .eyebrow,
 .section-aside,
 .workspace-footer {
@@ -125,12 +126,20 @@ a:focus-visible {
   letter-spacing: 1.4px;
   font-weight: 500;
 }
-.header-context {
-  color: #747d71;
+.header-nav {
+  display: flex;
+  align-items: center;
+  gap: 26px;
+  font-size: 14px;
+  color: #647459;
 }
-.header-context span {
-  margin: 0 15px;
-  color: #b6bdaf;
+.header-nav a {
+  padding: 10px 0;
+  border-bottom: 2px solid transparent;
+}
+.header-nav a[aria-current='page'] {
+  border-color: #38583c;
+  color: #29482f;
 }
 .header-actions {
   display: flex;
@@ -169,6 +178,100 @@ a:focus-visible {
   width: min(1190px, 90%);
   margin: 0 auto;
   padding: 48px 0 25px;
+}
+.fees-heading {
+  margin-bottom: 30px;
+}
+.fees-heading h1 {
+  margin: 0;
+}
+.fee-address-bar {
+  display: flex;
+  align-items: end;
+  gap: 14px;
+}
+.fee-address-field {
+  flex: 1;
+  min-width: 0;
+  display: grid;
+  gap: 10px;
+}
+.fee-address-field label {
+  font-size: 14px;
+  font-weight: 500;
+}
+.fee-address-field input {
+  height: 43px;
+  background: #fff;
+  border-color: #dfe4d7;
+  font-size: 15px;
+  box-shadow: none;
+}
+.fee-address-bar > button {
+  min-height: 43px;
+  font-size: 14px;
+}
+.fee-status {
+  display: block;
+  min-height: 24px;
+  margin: 14px 0 26px;
+  font-size: 14px;
+  line-height: 1.6;
+  color: #687a56;
+}
+.fee-status.field-error {
+  color: #a7372d;
+}
+.fees-panel {
+  background: #fff;
+  border: 1px solid #dfe4d7;
+  border-radius: 10px;
+  overflow: hidden;
+}
+.fees-table {
+  min-width: 640px;
+  font-size: 15px;
+}
+.fees-table th {
+  padding: 19px 22px;
+  font-size: 14px;
+  color: #687a56;
+  background: #f2f5e9;
+}
+.fees-table td {
+  padding: 20px 22px;
+}
+.fees-table td:last-child {
+  text-align: right;
+}
+.fees-table .fee-amount {
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+.fees-table .fee-empty {
+  text-align: center;
+  padding: 58px 22px;
+  color: #6c7a5f;
+  white-space: normal;
+}
+.fee-muted {
+  color: #7b876f;
+}
+.fee-skeleton {
+  width: 84px;
+  height: 18px;
+}
+.fee-claim-notice {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 18px;
+  color: #687a56;
+  font-size: 14px;
+  line-height: 1.6;
+}
+.fee-claim-notice svg {
+  flex-shrink: 0;
 }
 .intro {
   display: flex;
@@ -968,9 +1071,6 @@ h2 {
   }
 }
 @media (max-width: 1000px) {
-  .header-context {
-    display: none;
-  }
   .intro-note {
     display: none;
   }
@@ -985,6 +1085,19 @@ h2 {
   }
 }
 @media (max-width: 760px) {
+  .header-nav {
+    order: 3;
+    flex-basis: 100%;
+  }
+  .fee-address-bar {
+    flex-wrap: wrap;
+  }
+  .fee-address-field {
+    flex-basis: 100%;
+  }
+  .fee-claim-notice {
+    align-items: flex-start;
+  }
   .workspace {
     padding-top: 29px;
     width: 92%;

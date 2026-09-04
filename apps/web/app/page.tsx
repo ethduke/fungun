@@ -1,8 +1,7 @@
 'use client';
 
-import { lazy, Suspense, useEffect, useRef, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import Image from 'next/image';
-import Link from 'next/link';
 import {
   ArrowRight,
   Check,
@@ -12,7 +11,6 @@ import {
   ShieldCheck,
   Sparkles,
   Trash2,
-  Wallet,
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -35,8 +33,6 @@ import { LaunchpadCard } from '@/components/launchpad-card';
 import { LaunchSection } from '@/components/launch-section';
 import {
   autofillCoinName,
-  DEFAULT_CHAIN_ID,
-  DEFAULT_DESTINATIONS,
   IMAGE_LIMIT,
   imageFileError,
   imageKind,
@@ -47,27 +43,21 @@ import {
   type Destination,
 } from '@/lib/launch-model';
 import { usePreviewTools } from '@/lib/preview-webmcp';
-
-const WalletConnection = lazy(() => import('@/components/connect-panel'));
-type ImagePreview = { url: string; size: number };
+import { useDraftField } from '@/lib/launch-draft';
 
 export default function Home() {
-  const [selection, setSelection] = useState({
-    chainId: DEFAULT_CHAIN_ID,
-    destinations: DEFAULT_DESTINATIONS,
-  });
+  const [selection, setSelection] = useDraftField('selection');
   const { chainId, destinations } = selection;
-  const [name, setName] = useState('');
-  const [ticker, setTicker] = useState('');
-  const [description, setDescription] = useState('');
-  const [prompt, setPrompt] = useState('');
-  const [image, setImage] = useState<ImagePreview | null>(null);
+  const [name, setName] = useDraftField('name');
+  const [ticker, setTicker] = useDraftField('ticker');
+  const [description, setDescription] = useDraftField('description');
+  const [prompt, setPrompt] = useDraftField('prompt');
+  const [image, setImage] = useDraftField('image');
   const [imageError, setImageError] = useState('');
   const [imagePending, setImagePending] = useState(false);
   const [dragging, setDragging] = useState(false);
   const [tickerNotice, setTickerNotice] = useState(false);
   const [generationOpen, setGenerationOpen] = useState(false);
-  const [walletStarted, setWalletStarted] = useState(false);
   const fileInput = useRef<HTMLInputElement>(null);
   const imageSequence = useRef(0);
   const active = destinations.filter((pad) => pad.selected);
@@ -80,12 +70,6 @@ export default function Home() {
     ? `${Math.max(1, Math.round(image.size / 1024))} KB`
     : '';
 
-  useEffect(
-    () => () => {
-      if (image) URL.revokeObjectURL(image.url);
-    },
-    [image],
-  );
   useEffect(
     () => () => {
       imageSequence.current += 1;
@@ -176,48 +160,7 @@ export default function Home() {
   }
 
   return (
-    <div className="site-shell">
-      <header className="site-header">
-        <Link
-          href="/"
-          prefetch={false}
-          className="brand"
-          aria-label="Fungun home"
-        >
-          <span className="brand-mark" aria-hidden="true">
-            f
-          </span>
-          fungun<span className="brand-period">.</span>
-        </Link>
-        <span className="header-context">
-          LAUNCH STUDIO <span>/</span> 01
-        </span>
-        <div className="header-actions">
-          <span className="preview-pill">
-            <span />
-            Local preview
-          </span>
-          {walletStarted ? (
-            <Suspense
-              fallback={
-                <Button className="wallet-button" disabled>
-                  Loading wallets…
-                </Button>
-              }
-            >
-              <WalletConnection />
-            </Suspense>
-          ) : (
-            <Button
-              className="wallet-button"
-              onClick={() => setWalletStarted(true)}
-            >
-              <Wallet size={16} />
-              Connect wallet
-            </Button>
-          )}
-        </div>
-      </header>
+    <>
       <main className="workspace">
         <div className="intro">
           <div>
@@ -582,6 +525,6 @@ export default function Home() {
           </Button>
         </DialogContent>
       </Dialog>
-    </div>
+    </>
   );
 }

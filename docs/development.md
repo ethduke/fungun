@@ -24,6 +24,24 @@ installed to test wallet connection; embedded browsers may have no injected wall
 - Image checks show an inline loading state; O1's metadata-update toggle stays in the launch section.
 - Open the Grok/x402 flow preview; no image generation or payment occurs.
 - Explicitly connect/disconnect a discovered EIP-6963 wallet using wagmi/viem.
+- Open FEE from the header: one payout-coin table, no console tabs.
+- FEE follows the connected account or a manually entered address after a 500 ms debounce.
+
+Fee reads and claims remain a local scaffold: missing integrations show unknown
+balances, never fabricated zero balances. No address is sent to a backend,
+stored in browser storage, or added to a URL. Wallet connection stays mounted
+when navigating between Launch and FEE; disconnecting clears the automatic address.
+The launch draft and uploaded image also survive navigation in layout-owned memory;
+refreshing or closing the page clears them. Nothing is persisted to disk.
+
+Live integration needs a guarded backend for the source readers and a separately
+verified claim builder. O1 fee positions are shared escrow balances by payout
+asset, not per-token lifetime revenue. Long's reader covers locked-LP fees only;
+custom-hook payouts remain unknown. Group by chain and asset identity, with a
+launchpad breakdown, never by ticker alone. Claims must verify the connected
+beneficiary, chain, fresh amount and target contract before wallet simulation
+and explicit user approval. The existing read-only `collectFees` simulation
+must not be reused as a claim transaction.
 
 ## Deliberately disabled
 
