@@ -1,8 +1,10 @@
 import { isIP } from "node:net";
 import { ServiceError, safeError } from "./errors.mjs";
 import { validAddress } from "./fee-contracts.mjs";
+import { validatePriceInput } from "./tracked-prices.mjs";
 
 export function validateInput(kind, input) {
+  if (kind === "tracked-prices") return validatePriceInput(input);
   if (kind === "fees" || kind === "claim-prepare") {
     const fields = kind === "fees" ? ["address", "chainId", "padId"] : ["address", "positionId"];
     if (
@@ -74,7 +76,7 @@ async function readBody(request) {
   }
 }
 
-export function createHandler(config, budget, adapters, fees) {
+export function createHandler(config, budget, adapters, fees, trackedPrices) {
   let active = 0;
   return async (request, response) => {
     response.setHeader("content-type", "application/json; charset=utf-8");
@@ -103,7 +105,7 @@ export function createHandler(config, budget, adapters, fees) {
         request.headers["sec-fetch-site"] === "cross-site"
       )
         throw new ServiceError("origin_denied", 403);
-      const kind = ["catalog", "ticker", "fees", "claim-prepare"].find(
+      const kind = ["catalog", "ticker", "fees", "claim-prepare", "tracked-prices"].find(
         (operation) => request.url === `/v1/${operation}`,
       );
       if (!kind || request.method !== "POST" || request.headers["x-fungun-intent"] !== kind)
@@ -114,13 +116,17 @@ export function createHandler(config, budget, adapters, fees) {
       budget.request(ip, kind === "ticker");
       const input = validateInput(kind, await readBody(request));
       const value =
-        kind === "fees"
-          ? await fees.list(input)
-          : kind === "claim-prepare"
-            ? await fees.prepare(input)
-            : kind === "catalog"
-              ? await adapters.catalog(input.chainId)
-              : await adapters.ticker(input.chainId, input.ticker, input.pads);
+        kind === "tracked-prices"
+          ? await trackedPrices.list(input, {
+              shouldContinue: () => !response.destroyed && !response.writableEnded,
+            })
+          : kind === "fees"
+            ? await fees.list(input)
+            : kind === "claim-prepare"
+              ? await fees.prepare(input)
+              : kind === "catalog"
+                ? await adapters.catalog(input.chainId)
+                : await adapters.ticker(input.chainId, input.ticker, input.pads);
       send(200, { ...value, serverTime: Date.now() });
     } catch (error) {
       const safe = safeError(error);

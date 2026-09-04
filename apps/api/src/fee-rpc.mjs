@@ -6,6 +6,7 @@ const methods = new Set([
   "eth_chainId",
   "eth_blockNumber",
   "eth_getCode",
+  "eth_getLogs",
   "eth_getStorageAt",
   "eth_call",
   "eth_estimateGas",

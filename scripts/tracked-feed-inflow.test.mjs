@@ -1,6 +1,10 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { gmgnTokenUrl, TrackedInflowQueue } from "../apps/web/lib/tracked-feed-inflow.mjs";
+import {
+  gmgnTokenUrl,
+  inflowPriceChange,
+  TrackedInflowQueue,
+} from "../apps/web/lib/tracked-feed-inflow.mjs";
 
 const address = (n) => `0x${n.toString(16).padStart(40, "0")}`;
 const row = (n, overrides = {}) => ({
@@ -12,6 +16,8 @@ const row = (n, overrides = {}) => ({
   ...overrides,
 });
 const tickers = (items) => items.map(({ ticker }) => ticker);
+const priceRow = (n, overrides = {}) =>
+  row(n, { pool: `0x${n.toString(16).padStart(64, "0")}`, version: "v4", ...overrides });
 
 test("inflow admission requires strictly over 10 ETH, a ticker and a Robinhood chart", () => {
   const queue = new TrackedInflowQueue();
@@ -76,4 +82,116 @@ test("qualifiers join when observed; missing snapshots and metadata updates pres
   assert.equal(queue.items[0].flow, 25);
   assert.deepEqual(tickers(queue.update([row(2, { total_in: 9 })])), ["RENAMED", "T1"]);
   assert.deepEqual(new TrackedInflowQueue().update([]), []);
+});
+
+test("price returns use a fixed entry baseline and wait two minutes between observations", () => {
+  let now = 0;
+  const queue = new TrackedInflowQueue({ now: () => now, wallNow: () => 1000 });
+  queue.update([priceRow(1)]);
+  const first = queue.takePriceRequests();
+  const price = (value, observedAt) => ({
+    ...first[0],
+    value,
+    observedAt,
+    quote: address(500),
+    source: address(600),
+  });
+  assert.equal(first.length, 1);
+  assert.deepEqual(queue.takePriceRequests(), []);
+  queue.applyPrices(first, [price(200, 1000)]);
+  assert.equal(queue.items[0].entryPrice, 200);
+  assert.equal(queue.items[0].priceChange, null, "entry shows ticker only");
+  now = 119999;
+  assert.deepEqual(queue.takePriceRequests(), []);
+  now = 120000;
+  queue.applyPrices(queue.takePriceRequests(), [price(220, 121000)]);
+  assert.equal(queue.items[0].priceChange, 10);
+  now = 240000;
+  queue.applyPrices(queue.takePriceRequests(), [price(180, 241000)]);
+  assert.equal(queue.items[0].priceChange, -10, "still compares with 200, not 220");
+  assert.equal(queue.items[0].entryPrice, 200);
+});
+
+test("price gaps, cached observations and quote changes cannot reset the entry baseline", () => {
+  let now = 0;
+  const queue = new TrackedInflowQueue({ now: () => now, wallNow: () => 1000 });
+  queue.update([priceRow(1)]);
+  const first = queue.takePriceRequests();
+  const sample = {
+    ...first[0],
+    value: 100,
+    observedAt: 1000,
+    quote: address(500),
+    source: address(600),
+  };
+  queue.applyPrices(first, [sample]);
+  for (const prices of [
+    [],
+    [sample],
+    [{ ...sample, observedAt: 500 }],
+    [{ ...sample, value: 0, observedAt: 999999 }],
+    [{ ...sample, quote: address(501), observedAt: 999999 }],
+  ]) {
+    now += 120000;
+    queue.applyPrices(queue.takePriceRequests(), prices);
+    assert.equal(queue.items[0].priceStale, true);
+    assert.equal(queue.items[0].entryPrice, 100);
+    assert.equal(queue.items[0].priceChange, null);
+    assert.deepEqual(queue.takePriceRequests(), [], "failures retain the two-minute deadline");
+  }
+  queue.update([row(1, { pool: address(999), total_in: 30 })]);
+  assert.equal(queue.items[0].pool, first[0].pool, "price source stays pinned to entry pool");
+  now += 120000;
+  queue.applyPrices(queue.takePriceRequests(), [{ ...sample, value: 125, observedAt: 999999 }]);
+  assert.equal(queue.items[0].priceChange, 25);
+  assert.equal(queue.items[0].priceStale, false);
+});
+
+test("invalid prices cannot create misleading zero or infinite returns", () => {
+  for (const value of [undefined, null, 0, -1, NaN, Infinity, "10"])
+    assert.equal(inflowPriceChange(value, 10), null);
+  for (const value of [undefined, null, 0, -1, NaN, Infinity, "10"])
+    assert.equal(inflowPriceChange(10, value), null);
+  assert.equal(inflowPriceChange(10, 10), 0);
+  assert.equal(inflowPriceChange(100, 50), -50);
+  assert.equal(inflowPriceChange(Number.MIN_VALUE, Number.MAX_VALUE), null);
+});
+
+test("a quote cached before admission cannot become the entry baseline", () => {
+  let now = 0;
+  const queue = new TrackedInflowQueue({ now: () => now, wallNow: () => 5000 });
+  queue.update([priceRow(1)]);
+  const first = queue.takePriceRequests();
+  const sample = {
+    ...first[0],
+    value: 100,
+    observedAt: 4000,
+    quote: address(500),
+    source: address(600),
+  };
+  queue.applyPrices(first, [sample]);
+  assert.equal(queue.items[0].entryPrice, null);
+  now = 120000;
+  queue.applyPrices(queue.takePriceRequests(), [{ ...sample, observedAt: 125000 }]);
+  assert.equal(queue.items[0].entryPrice, 100);
+  assert.equal(queue.items[0].priceChange, null);
+  now += 120000;
+  queue.applyPrices(queue.takePriceRequests(), [
+    { ...sample, value: 200, observedAt: 245000, source: address(601) },
+  ]);
+  assert.equal(queue.items[0].priceChange, null, "manager changes cannot mix baselines");
+});
+
+test("server-relative admission freshness tolerates a skewed browser clock", () => {
+  let now = 0;
+  const queue = new TrackedInflowQueue({ now: () => now, wallNow: () => 1000000000 });
+  queue.update([priceRow(1)]);
+  const requests = queue.takePriceRequests();
+  now = 100;
+  queue.applyPrices(
+    requests,
+    [{ ...requests[0], value: 10, observedAt: 1000, quote: address(500), source: address(600) }],
+    1100,
+  );
+  assert.equal(queue.items[0].entryPrice, 10);
 });

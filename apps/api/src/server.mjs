@@ -8,6 +8,7 @@ import { Adapters } from "./adapters.mjs";
 import { createHandler } from "./service.mjs";
 import { verifyProductionStorage } from "./storage.mjs";
 import { Fees } from "./fees.mjs";
+import { TrackedPrices } from "./tracked-prices.mjs";
 
 process.umask(0o077);
 try {
@@ -18,9 +19,10 @@ try {
   const upstream = new Upstream(budget);
   const adapters = new Adapters(config, upstream);
   const fees = new Fees(config, upstream);
+  const trackedPrices = new TrackedPrices(config, upstream);
   const server = createServer(
     { maxHeaderSize: 8192 },
-    createHandler(config, budget, adapters, fees),
+    createHandler(config, budget, adapters, fees, trackedPrices),
   );
   server.requestTimeout = 10_000;
   server.headersTimeout = 5000;

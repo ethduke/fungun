@@ -23,6 +23,10 @@ const number = (value) =>
   amount(value) === null
     ? '—'
     : Number(value).toLocaleString('en-US', { maximumFractionDigits: 3 });
+const percent = (value) => {
+  const rounded = Number(value.toFixed(1));
+  return `${rounded > 0 ? '+' : ''}${rounded.toFixed(1)}%`;
+};
 const chain = (row) => Number(row.chain_id ?? 4663);
 const token = (row) => String(row.meme || row.token || '');
 const rowKey = (row) => `${chain(row)}:${row.pool || token(row)}`;
@@ -211,7 +215,7 @@ const styles = `
   .popular{display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-top:10px}.popular-label{font-size:11px;letter-spacing:.08em;font-weight:750;color:var(--feed-muted)}
   .popular a{padding:5px 9px;border-radius:6px;border:1px solid var(--feed-border);background:var(--feed-panel);overflow-wrap:anywhere}.popular small{font-size:12px;color:var(--feed-muted);margin-left:6px}
   .inflow{display:flex;align-items:center;gap:8px;margin-top:7px;min-width:0}.inflow>.popular-label{flex-shrink:0}
-  .inflow-tokens{display:flex;align-items:center;gap:6px;min-width:0;overflow-x:auto;padding:3px;white-space:nowrap;scrollbar-width:thin}.inflow-tokens a{flex-shrink:0;max-width:110px;overflow:hidden;text-overflow:ellipsis;padding:4px 7px;border:1px solid var(--feed-border);border-radius:5px;background:var(--feed-panel);font-size:11px;font-weight:600}.inflow-tokens .empty{padding:4px 0;font-size:11px}
+  .inflow-tokens{display:flex;align-items:center;gap:6px;min-width:0;overflow-x:auto;padding:3px;white-space:nowrap;scrollbar-width:thin}.inflow-tokens a{display:inline-flex;align-items:center;gap:5px;flex-shrink:0;padding:4px 7px;border:1px solid var(--feed-border);border-radius:5px;background:var(--feed-panel);font-size:11px;font-weight:600}.inflow-ticker{max-width:110px;overflow:hidden;text-overflow:ellipsis}.price-change{font-variant-numeric:tabular-nums;color:var(--feed-muted)}.price-change[data-direction=up]{color:#268044}.price-change[data-direction=down]{color:#b13b33}.price-change[data-stale=true]{color:var(--feed-muted)}.inflow-tokens .empty{padding:4px 0;font-size:11px}
   .columns{display:grid;grid-template-columns:1fr 1fr;gap:1px;background:var(--feed-border)}.lane{min-width:0;background:var(--feed-bg);padding:10px}
   h3{font-size:12px;letter-spacing:.1em;margin:0 4px 8px}h3 span{font-weight:400;color:var(--feed-muted);letter-spacing:0}
   .list{max-height:320px;overflow:auto;scrollbar-gutter:stable;display:flex;flex-direction:column;gap:8px;overscroll-behavior:contain}
@@ -237,10 +241,12 @@ if (
     constructor() {
       super();
       this.attachShadow({ mode: 'open' });
-      this.shadowRoot.innerHTML = `<style>${styles}</style><section aria-label="Tracked market feed"><div class="top"><div class="heading"><h2>Market feed</h2><span class="status" role="status" aria-live="polite">Connecting…</span></div><div class="popular"></div><div class="inflow"><span class="popular-label">&gt;10 ETH TOTAL INFLOW</span><nav class="inflow-tokens" aria-label="Tokens over 10 ETH total inflow, oldest first"></nav></div></div><div class="columns"><div class="lane"><h3>ETH <span class="count-eth"></span></h3><div class="list" data-kind="eth" tabindex="0" role="region" aria-label="Tracked ETH pairs"></div></div><div class="lane"><h3>SHARES <span class="count-shares"></span></h3><div class="list" data-kind="shares" tabindex="0" role="region" aria-label="Tracked SHARES pairs"></div></div></div></section>`;
+      this.shadowRoot.innerHTML = `<style>${styles}</style><section aria-label="Tracked market feed"><div class="top"><div class="heading"><h2>Market feed</h2><span class="status" role="status" aria-live="polite">Connecting…</span></div><div class="popular"></div><div class="inflow"><span class="popular-label">&gt;10ETH INFL:</span><nav class="inflow-tokens" aria-label="Tokens over 10 ETH total inflow, oldest first"></nav></div></div><div class="columns"><div class="lane"><h3>ETH <span class="count-eth"></span></h3><div class="list" data-kind="eth" tabindex="0" role="region" aria-label="Tracked ETH pairs"></div></div><div class="lane"><h3>SHARES <span class="count-shares"></span></h3><div class="list" data-kind="shares" tabindex="0" role="region" aria-label="Tracked SHARES pairs"></div></div></div></section>`;
       this.rows = [];
       this.inflowQueue = new TrackedInflowQueue();
       this.inflows = [];
+      this.priceController = null;
+      this.priceRetryAt = 0;
       this.receivedAt = null;
       this.inView = false;
       this.pageHidden = false;
@@ -275,6 +281,7 @@ if (
           this.inflows = this.inflowQueue.update(this.rows);
           this.error = false;
           this.render();
+          void this.refreshPrices();
         },
         onError: () => {
           this.error = true;
@@ -340,6 +347,8 @@ if (
       window.removeEventListener('pagehide', this.onPageHide);
       window.removeEventListener('pageshow', this.onPageShow);
       this.poller.setActive(false);
+      this.priceController?.abort();
+      this.priceController = null;
     }
 
     updateActivity() {
@@ -355,7 +364,65 @@ if (
       if (reason === this.pauseReason && active === this.poller.active) return;
       this.pauseReason = reason;
       this.poller.setActive(active);
+      if (!active) {
+        this.priceController?.abort();
+        this.priceController = null;
+      }
       this.render();
+    }
+
+    async refreshPrices() {
+      if (
+        !this.poller.active ||
+        this.priceController ||
+        performance.now() < this.priceRetryAt
+      )
+        return;
+      const pools = this.inflowQueue.takePriceRequests();
+      if (!pools.length) return;
+      const controller = new AbortController();
+      this.priceController = controller;
+      const timeout = setTimeout(() => controller.abort(), 23_000);
+      let prices = [];
+      let serverTime = null;
+      try {
+        const response = await fetch('/api/tracked-prices', {
+          method: 'POST',
+          cache: 'no-store',
+          signal: controller.signal,
+          headers: {
+            'content-type': 'application/json',
+            'x-fungun-intent': 'tracked-prices',
+          },
+          body: JSON.stringify({ pools }),
+        });
+        if (!response.ok) {
+          const retry = response.headers.get('retry-after');
+          if (retry && /^\d{1,5}$/.test(retry))
+            this.priceRetryAt =
+              performance.now() + Math.min(86_400, Number(retry)) * 1000;
+          throw new Error('Prices unavailable');
+        }
+        const body = await response.json();
+        if (Number.isFinite(body.serverTime)) serverTime = body.serverTime;
+        if (Array.isArray(body.prices) && body.prices.length <= 10)
+          prices = body.prices;
+      } catch {
+        // No raw backend/provider errors or fabricated zero-price returns.
+      } finally {
+        clearTimeout(timeout);
+        if (this.priceController === controller) {
+          this.priceController = null;
+          if (this.poller.active) {
+            this.inflows = this.inflowQueue.applyPrices(
+              pools,
+              prices,
+              serverTime,
+            );
+            this.render();
+          }
+        }
+      }
     }
 
     render() {
@@ -394,10 +461,24 @@ if (
       const inflow = this.shadowRoot.querySelector('.inflow-tokens');
       const inflowHTML = this.inflows.length
         ? this.inflows
-            .map(
-              (item) =>
-                `<a href="${esc(item.href)}" target="_blank" rel="noopener noreferrer" title="${esc(item.ticker)} · ${number(item.flow)} ETH total inflow · Open on GMGN">${esc(item.ticker)}</a>`,
-            )
+            .map((item) => {
+              const change =
+                item.priceChange === null ? '' : percent(item.priceChange);
+              const priceHint = item.priceStale
+                ? 'Price update unavailable; last observation retained'
+                : item.entryPrice === null
+                  ? 'Price unavailable'
+                  : change
+                    ? `Change since first quote after entry in ${item.quoteSymbol}; refreshes every 2 min`
+                    : 'First percentage update after 2 min';
+              const observed = item.priceObservedAt
+                ? ` · Price observed ${new Date(item.priceObservedAt).toLocaleTimeString()}`
+                : '';
+              const baseline = item.entryObservedAt
+                ? ` · Baseline ${new Date(item.entryObservedAt).toLocaleTimeString()}`
+                : '';
+              return `<a href="${esc(item.href)}" target="_blank" rel="noopener noreferrer" title="${esc(item.ticker)} · ${number(item.flow)} ETH total inflow · ${esc(priceHint + baseline + observed)} · Open on GMGN"><span class="inflow-ticker">${esc(item.ticker)}</span>${change ? `<span class="price-change" data-direction="${item.priceChange > 0 ? 'up' : item.priceChange < 0 ? 'down' : 'flat'}" data-stale="${item.priceStale}">${change}${item.priceStale ? ' ·' : ''}</span>` : ''}</a>`;
+            })
             .join('')
         : '<span class="empty">Waiting for tokens over 10 ETH</span>';
       if (inflow._html !== inflowHTML) {
