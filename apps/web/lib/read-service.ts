@@ -1,6 +1,8 @@
 import type { ChainId, PadId } from './launch-model';
 import { AppError, retrySeconds } from './user-error.ts';
 
+const CATALOG_MAX_AGE = 6 * 60 * 60 * 1000;
+
 export type CatalogPair = { id: `rwa-${string}`; symbol: string };
 export type CatalogPad = {
   status: 'ready' | 'unavailable';
@@ -37,6 +39,7 @@ export function tickerLabel(result?: TickerResult, now = performance.now()) {
 const records = new Map<string, { expiresAt: number; data: unknown }>();
 const pending = new Map<string, Promise<unknown>>();
 let retryAt = 0;
+const operationRetryAt = new Map<'catalog' | 'ticker', number>();
 
 export function localExpiry(
   expiresAt: number,
@@ -65,15 +68,16 @@ export function expiryDelay(
 }
 
 async function request(kind: 'catalog' | 'ticker', input: object) {
-  if (performance.now() < retryAt)
-    throw new AppError(
-      'rate_limited',
-      Math.ceil((retryAt - performance.now()) / 1000),
-    );
   const key = `${kind}:${JSON.stringify(input)}`;
   const cached = records.get(key);
   if (cached && cached.expiresAt > performance.now()) return cached.data;
   if (pending.has(key)) return pending.get(key);
+  const blockedUntil = Math.max(retryAt, operationRetryAt.get(kind) ?? 0);
+  if (performance.now() < blockedUntil)
+    throw new AppError(
+      'rate_limited',
+      Math.ceil((blockedUntil - performance.now()) / 1000),
+    );
   const job = (async () => {
     const started = performance.now();
     const response = await fetch(`/api/${kind}`, {
@@ -93,10 +97,17 @@ async function request(kind: 'catalog' | 'ticker', input: object) {
     if (!response.ok) {
       if (response.status === 429) {
         const seconds = retrySeconds(response.headers.get('retry-after'));
-        retryAt = Math.max(retryAt, performance.now() + seconds * 1000);
+        const deadline = performance.now() + seconds * 1000;
+        if (response.headers.get('x-fungun-retry-scope') === 'operation')
+          operationRetryAt.set(
+            kind,
+            Math.max(operationRetryAt.get(kind) ?? 0, deadline),
+          );
+        else retryAt = Math.max(retryAt, deadline);
+        const next = Math.max(retryAt, operationRetryAt.get(kind) ?? 0);
         throw new AppError(
           'rate_limited',
-          Math.ceil((retryAt - performance.now()) / 1000),
+          Math.ceil((next - performance.now()) / 1000),
         );
       }
       throw new AppError(
@@ -125,7 +136,7 @@ async function request(kind: 'catalog' | 'ticker', input: object) {
         data.serverTime,
         received,
         received - started,
-        300_000,
+        CATALOG_MAX_AGE,
       );
     else if (data.results && typeof data.results === 'object')
       for (const result of Object.values(data.results) as TickerResult[])
@@ -140,7 +151,7 @@ async function request(kind: 'catalog' | 'ticker', input: object) {
     if (records.size >= 32) records.delete(records.keys().next().value!);
     records.set(key, {
       data,
-      expiresAt: received + (kind === 'catalog' ? 15_000 : 5000),
+      expiresAt: kind === 'catalog' ? data.expiresAt : received + 5000,
     });
     return data;
   })().finally(() => pending.delete(key));

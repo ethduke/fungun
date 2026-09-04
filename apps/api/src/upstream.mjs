@@ -22,7 +22,7 @@ export function withinReadDeadline(load, timeout = 20_000) {
   });
 }
 
-export async function readJson(response, maxBytes) {
+export async function readJson(response, maxBytes, retryScope = "global") {
   if (response.status === 429) {
     const value = response.headers.get("retry-after")?.trim();
     const seconds =
@@ -36,7 +36,7 @@ export async function readJson(response, maxBytes) {
       Math.max(5, Number.isFinite(seconds) ? Math.ceil(seconds) : 30),
     );
     await response.body?.cancel();
-    throw new ServiceError("rate_limited", 429, retryAfter);
+    throw new ServiceError("rate_limited", 429, retryAfter, retryScope);
   }
   const contentType = response.headers.get("content-type") ?? "";
   const cursorProblem =
@@ -92,7 +92,12 @@ export class Upstream {
   checkCooldown(provider) {
     const retryAt = this.retryAt.get(provider) ?? 0;
     if (retryAt > this.now())
-      throw new ServiceError("rate_limited", 429, Math.ceil((retryAt - this.now()) / 1000));
+      throw new ServiceError(
+        "rate_limited",
+        429,
+        Math.ceil((retryAt - this.now()) / 1000),
+        "operation",
+      );
   }
 
   available(provider) {
@@ -123,7 +128,8 @@ export class Upstream {
     checkReadDeadline();
     this.checkCooldown(provider);
     if (this.available(provider)) return Promise.resolve(this.reserve(provider));
-    if (!queued || this.waiting.size >= 12) return Promise.reject(new ServiceError("busy", 429, 5));
+    if (!queued || this.waiting.size >= 12)
+      return Promise.reject(new ServiceError("busy", 429, 5, "operation"));
     return new Promise((resolve, reject) => {
       const entry = { provider, resolve, signal: readScope.getStore()?.signal };
       entry.abort = () => {
@@ -132,7 +138,7 @@ export class Upstream {
       };
       entry.timer = setTimeout(() => {
         this.removeWaiting(entry);
-        reject(new ServiceError("busy", 429, 5));
+        reject(new ServiceError("busy", 429, 5, "operation"));
       }, 6000);
       entry.signal?.addEventListener("abort", entry.abort, { once: true });
       this.waiting.add(entry);
@@ -161,17 +167,21 @@ export class Upstream {
             : timeoutSignal,
         });
         transient = [408, 500, 502, 503, 504].includes(response.status);
-        return await readJson(response, maxBytes);
+        return await readJson(response, maxBytes, "operation");
       } catch (error) {
         const safe = safeError(error);
-        if (safe.status === 429)
+        const scoped =
+          safe.status === 429 && safe.retryScope !== "operation"
+            ? new ServiceError(safe.code, 429, safe.retryAfter, "operation")
+            : safe;
+        if (scoped.status === 429)
           this.retryAt.set(
             provider,
-            Math.max(this.retryAt.get(provider) ?? 0, this.now() + safe.retryAfter * 1000),
+            Math.max(this.retryAt.get(provider) ?? 0, this.now() + scoped.retryAfter * 1000),
           );
         transient ||=
           requested && ["TypeError", "TimeoutError", "AbortError"].includes(error?.name);
-        if (!policy.retry || attempt > 0 || !transient || safe.status === 429) throw safe;
+        if (!policy.retry || attempt > 0 || !transient || scoped.status === 429) throw scoped;
         checkReadDeadline();
       } finally {
         release();
@@ -199,6 +209,7 @@ export class ReadCache {
               entry.error.code,
               429,
               Math.max(1, Math.ceil((entry.expires - this.now()) / 1000)),
+              entry.error.retryScope,
             )
           : entry.error;
       return Promise.reject(error);

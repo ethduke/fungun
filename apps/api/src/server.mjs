@@ -5,6 +5,7 @@ import { readConfig } from "./config.mjs";
 import { Budget } from "./budget.mjs";
 import { Upstream } from "./upstream.mjs";
 import { Adapters } from "./adapters.mjs";
+import { createCatalogRefresher } from "./catalog-refresher.mjs";
 import { createHandler } from "./service.mjs";
 import { verifyProductionStorage } from "./storage.mjs";
 import { Fees } from "./fees.mjs";
@@ -17,7 +18,10 @@ try {
   if (config.production) verifyProductionStorage(config.databasePath);
   const budget = new Budget(config.databasePath, Date.now, !config.production);
   const upstream = new Upstream(budget);
-  const adapters = new Adapters(config, upstream);
+  const adapters = new Adapters(config, upstream, Date.now, budget);
+  const catalogRefresher = createCatalogRefresher(adapters, {
+    enabled: true,
+  });
   const fees = new Fees(config, upstream);
   const trackedPrices = new TrackedPrices(config, upstream);
   const server = createServer(
@@ -33,14 +37,20 @@ try {
     console.error("Read service unavailable.");
     process.exitCode = 1;
   });
-  server.listen(config.port, config.host, () =>
+  server.listen(config.port, config.host, () => {
     console.log(
       `Read service listening on port ${config.port}; upstream reads ${config.readsEnabled ? "enabled" : "disabled"}.`,
-    ),
-  );
+    );
+    catalogRefresher.kick();
+  });
+  let stopping = false;
   for (const signal of ["SIGINT", "SIGTERM"])
     process.once(signal, () => {
-      server.close(() => {
+      if (stopping) return;
+      stopping = true;
+      const stopped = catalogRefresher.stop();
+      server.close(async () => {
+        await stopped;
         budget.close();
         process.exit(0);
       });

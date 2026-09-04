@@ -23,9 +23,13 @@ export function useReadService(
   useLayoutEffect(() => {
     currentKey.current = key;
   }, [key]);
+  const catalogSequence = useRef(0);
   const [catalog, setCatalog] = useState<Catalog | null>(null);
   const [catalogSettled, setCatalogSettled] = useState('');
-  const [catalogRefresh, setCatalogRefresh] = useState(0);
+  const [catalogRequest, setCatalogRequest] = useState<{
+    chainId: ChainId;
+    sequence: number;
+  } | null>(null);
   const [catalogError, setCatalogError] = useState<{
     key: string;
     message: string;
@@ -39,9 +43,33 @@ export function useReadService(
     message: string;
   } | null>(null);
   const [now, setNow] = useState(() => performance.now());
+  const catalogRequestKey =
+    catalogRequest?.chainId === chainId
+      ? `${chainId}:${catalogRequest.sequence}`
+      : '';
+  const needsCatalog = pads.includes('o1');
 
   useEffect(() => {
-    if (!isWebviewChain(chainId)) return;
+    if (
+      !needsCatalog ||
+      !isWebviewChain(chainId) ||
+      catalogRequestKey ||
+      (catalog?.chainId === chainId && catalog.expiresAt > performance.now())
+    )
+      return;
+    catalogSequence.current += 1;
+    setCatalogRequest({ chainId, sequence: catalogSequence.current });
+  }, [
+    catalog?.chainId,
+    catalog?.expiresAt,
+    catalogRequestKey,
+    chainId,
+    needsCatalog,
+  ]);
+
+  useEffect(() => {
+    if (!isWebviewChain(chainId) || catalogRequest?.chainId !== chainId) return;
+    const requestKey = `${chainId}:${catalogRequest.sequence}`;
     let ignore = false;
     void loadCatalog(chainId)
       .then((value) => {
@@ -54,21 +82,21 @@ export function useReadService(
         if (!ignore) {
           setCatalog(null);
           setCatalogError({
-            key: `${chainId}:${catalogRefresh}`,
+            key: requestKey,
             message: describeError(error, 'catalog'),
           });
         }
       })
       .finally(() => {
         if (!ignore) {
-          setCatalogSettled(`${chainId}:${catalogRefresh}`);
+          setCatalogSettled(requestKey);
           setNow(performance.now());
         }
       });
     return () => {
       ignore = true;
     };
-  }, [chainId, catalogRefresh]);
+  }, [chainId, catalogRequest]);
 
   useEffect(() => {
     const delay = expiryDelay(
@@ -106,16 +134,26 @@ export function useReadService(
     }
   }
 
+  function ensureCatalog() {
+    if (
+      (catalog?.chainId === chainId && catalog.expiresAt > performance.now()) ||
+      (catalogRequestKey && catalogSettled !== catalogRequestKey)
+    )
+      return;
+    catalogSequence.current += 1;
+    setCatalogRequest({ chainId, sequence: catalogSequence.current });
+  }
+
   return {
     catalog:
       catalog?.chainId === chainId && catalog.expiresAt > now ? catalog : null,
-    catalogLoading: catalogSettled !== `${chainId}:${catalogRefresh}`,
+    catalogLoading:
+      Boolean(catalogRequestKey) && catalogSettled !== catalogRequestKey,
     catalogError:
-      catalogError?.key === `${chainId}:${catalogRefresh}`
-        ? catalogError.message
-        : null,
+      catalogError?.key === catalogRequestKey ? catalogError.message : null,
     now,
-    refreshCatalog: () => setCatalogRefresh((n) => n + 1),
+    ensureCatalog,
+    refreshCatalog: ensureCatalog,
     check: check?.key === key ? check.data : null,
     checking: pendingKey === key,
     checkError: checkError?.key === key ? checkError.message : null,

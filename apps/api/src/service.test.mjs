@@ -5,6 +5,7 @@ import { Budget } from "./budget.mjs";
 import { createHandler } from "./service.mjs";
 import { Fees } from "./fees.mjs";
 import { readConfig } from "./config.mjs";
+import { ServiceError } from "./errors.mjs";
 
 test("HTTP boundary rejects spoofing, excess input and leaks while keeping reads bounded", async (t) => {
   const budget = new Budget(":memory:");
@@ -15,8 +16,9 @@ test("HTTP boundary rejects spoofing, excess input and leaks while keeping reads
       calls++;
       return { chainId, pads: {} };
     },
-    async ticker() {
+    async ticker(chainId, ticker) {
       calls++;
+      if (ticker === "LIMIT") throw new ServiceError("rate_limited", 429, 120, "operation");
       throw new Error("synthetic private upstream details");
     },
   };
@@ -66,7 +68,14 @@ test("HTTP boundary rejects spoofing, excess input and leaks while keeping reads
   const failure = await post("/v1/ticker", input);
   assert.equal(failure.status, 503);
   assert.deepEqual(await failure.json(), { error: "unavailable" });
-  for (let i = 0; i < 5; i++) await post("/v1/ticker", input);
+  const providerLimited = await post("/v1/ticker", {
+    ...input,
+    ticker: "LIMIT",
+  });
+  assert.equal(providerLimited.status, 429);
+  assert.equal(providerLimited.headers.get("retry-after"), "120");
+  assert.equal(providerLimited.headers.get("x-fungun-retry-scope"), "operation");
+  for (let i = 0; i < 4; i++) await post("/v1/ticker", input);
   const limited = await post("/v1/ticker", input, {
     "x-forwarded-for": "192.0.2.1",
     "fly-client-ip": "192.0.2.2",

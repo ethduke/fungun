@@ -102,6 +102,8 @@ export async function POST(
     output.set('content-type', 'application/json');
     const retry = response.headers.get('retry-after');
     if (retry && /^\d{1,5}$/.test(retry)) output.set('retry-after', retry);
+    if (response.headers.get('x-fungun-retry-scope') === 'operation')
+      output.set('x-fungun-retry-scope', 'operation');
     return new Response(response.body, {
       status: response.status,
       headers: output,

@@ -134,6 +134,8 @@ export function createHandler(config, budget, adapters, fees, trackedPrices) {
     } catch (error) {
       const safe = safeError(error);
       if (safe.retryAfter) response.setHeader("retry-after", String(safe.retryAfter));
+      if (safe.status === 429 && safe.retryScope === "operation")
+        response.setHeader("x-fungun-retry-scope", "operation");
       send(safe.status, { error: safe.code });
     } finally {
       clearTimeout(deadline);

@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { ServiceError } from "./errors.mjs";
-import { checkReadDeadline, Upstream, withinReadDeadline } from "./upstream.mjs";
+import { checkReadDeadline, ReadCache, Upstream, withinReadDeadline } from "./upstream.mjs";
 
 const readPolicy = { queue: true, retry: true };
 const url = "https://example.invalid/fees";
@@ -139,11 +139,32 @@ test("retry still respects budget and provider cooldown without another fetch", 
       throw new TypeError("network unavailable");
     },
   );
-  await assert.rejects(read(upstream), { code: "rate_limited", retryAfter: 60 });
-  await assert.rejects(read(upstream), { code: "rate_limited", retryAfter: 60 });
+  await assert.rejects(read(upstream), {
+    code: "rate_limited",
+    retryAfter: 60,
+    retryScope: "operation",
+  });
+  await assert.rejects(read(upstream), {
+    code: "rate_limited",
+    retryAfter: 60,
+    retryScope: "operation",
+  });
   assert.equal(calls, 1);
   assert.equal(debits, 2);
   assert.equal(upstream.active, 0);
+});
+
+test("cached provider limits preserve their operation scope", async () => {
+  const cache = new ReadCache(() => 1);
+  const load = async () => {
+    throw new ServiceError("rate_limited", 429, 60, "operation");
+  };
+  await assert.rejects(cache.get("provider", 1000, load), {
+    retryScope: "operation",
+  });
+  await assert.rejects(cache.get("provider", 1000, load), {
+    retryScope: "operation",
+  });
 });
 
 test("waiting reads recheck a new provider cooldown before being charged", async () => {

@@ -155,36 +155,62 @@ test("registry verification is repeated at each newly observed block", async () 
 
 test("catalog validates eligibility, deduplicates addresses and hides runtime addresses", async () => {
   let calls = 0;
-  const adapter = new Adapters(config(), {
-    async json(provider, url, options, maxBytes, units) {
-      calls++;
-      assert.equal(provider, "o1");
-      assert.equal(url.origin, "https://api.launch.o1.exchange");
-      assert.equal(url.pathname, "/v1/config");
-      assert.equal(url.searchParams.get("chain_id"), "4663");
-      assert.equal(url.searchParams.get("include"), "chains,suites,quotes");
-      assert.equal(url.searchParams.get("active_only"), "true");
-      assert.equal(units, 20);
-      assert.equal(maxBytes, 512 * 1024);
-      assert.equal(options.headers["x-api-key"], "EXAMPLE");
-      return body([
-        quote(),
-        quote(),
-        quote({ address: address("3"), symbol: "SUN" }),
-        quote({ address: address("4"), selectable: false }),
-      ]);
+  const budget = new Budget(":memory:", () => 1);
+  const adapter = new Adapters(
+    config(),
+    {
+      async json(provider, url, options, maxBytes, units) {
+        calls++;
+        assert.equal(provider, "o1");
+        assert.equal(url.origin, "https://api.launch.o1.exchange");
+        assert.equal(url.pathname, "/v1/config");
+        assert.equal(url.searchParams.get("chain_id"), "4663");
+        assert.equal(url.searchParams.get("include"), "chains,suites,quotes");
+        assert.equal(url.searchParams.get("active_only"), "true");
+        assert.equal(units, 20);
+        assert.equal(maxBytes, 512 * 1024);
+        assert.equal(options.headers["x-api-key"], "EXAMPLE");
+        return body([
+          quote(),
+          quote(),
+          quote({ address: address("3"), symbol: "SUN" }),
+          quote({ address: address("4"), selectable: false }),
+        ]);
+      },
     },
-  });
-  const values = await Promise.all(Array.from({ length: 100 }, () => adapter.catalog(4663)));
-  assert.equal(calls, 1);
-  assert.equal(values[0].pads.o1.pairs.length, 2);
-  assert.equal(values[0].pads.long.pairs.length, 1);
-  assert.ok(!JSON.stringify(values).includes(address("2")));
-  assert.ok(!JSON.stringify(values).includes("EXAMPLE"));
+    () => 1,
+    budget,
+  );
+  try {
+    const before = await Promise.all(Array.from({ length: 100 }, () => adapter.catalog(4663)));
+    assert.equal(calls, 0);
+    assert.equal(before[0].pads.o1.status, "unavailable");
+    await adapter.refreshCatalog(4663);
+    const values = await Promise.all(Array.from({ length: 100 }, () => adapter.catalog(4663)));
+    assert.equal(calls, 1);
+    assert.equal(values[0].pads.o1.pairs.length, 2);
+    assert.equal(values[0].pads.long.pairs.length, 1);
+    assert.ok(!JSON.stringify(values).includes(address("2")));
+    assert.ok(!JSON.stringify(values).includes("EXAMPLE"));
+    for (const disabledConfig of [
+      { ...config(), readsEnabled: false },
+      { ...config(), o1Key: "" },
+    ]) {
+      const disabled = new Adapters(
+        disabledConfig,
+        { json: () => assert.fail("No upstream calls") },
+        () => 1,
+        budget,
+      );
+      assert.equal((await disabled.catalog(4663)).pads.o1.status, "unavailable");
+    }
+  } finally {
+    budget.close();
+  }
 });
 
-test("cached catalogs charge 20 durable O1 units once and cannot exceed the daily budget", async () => {
-  let now = 0;
+test("durable catalog refreshes spend O1 units at most once every six hours", async () => {
+  let now = 1;
   let calls = 0;
   const budget = new Budget(":memory:", () => now);
   const adapter = new Adapters(
@@ -194,9 +220,10 @@ test("cached catalogs charge 20 durable O1 units once and cannot exceed the dail
       return Response.json(body([quote()]));
     }),
     () => now,
+    budget,
   );
   try {
-    await Promise.all(Array.from({ length: 100 }, () => adapter.catalog(4663)));
+    await Promise.all(Array.from({ length: 100 }, () => adapter.refreshCatalog(4663)));
     assert.equal(calls, 1);
     assert.ok(
       budget.db
@@ -204,13 +231,18 @@ test("cached catalogs charge 20 durable O1 units once and cannot exceed the dail
         .all()
         .every((row) => row.used === 20),
     );
-    for (let i = 1; i < 30; i++) {
-      now += 300_001;
-      await adapter.catalog(4663);
+    await Promise.all(Array.from({ length: 100 }, () => adapter.catalog(4663)));
+    assert.equal(calls, 1);
+    for (let i = 1; i < 4; i++) {
+      now += 6 * 60 * 60 * 1000 + 1;
+      await adapter.refreshCatalog(4663);
     }
-    now += 300_001;
-    await assert.rejects(adapter.catalog(4663), { status: 429 });
-    assert.equal(calls, 30);
+    assert.equal(calls, 4);
+    assert.equal(
+      budget.db.prepare("SELECT used FROM counters WHERE scope LIKE 'provider:o1:86400000:%'").get()
+        .used,
+      80,
+    );
   } finally {
     budget.close();
   }
@@ -219,10 +251,11 @@ test("cached catalogs charge 20 durable O1 units once and cannot exceed the dail
 test("provider Retry-After blocks shared catalog retries without leaking its response", async () => {
   let now = 0;
   let calls = 0;
+  const budget = new Budget(":memory:", () => now);
   const adapter = new Adapters(
     config(),
     new Upstream(
-      { upstream() {} },
+      budget,
       async () => {
         calls++;
         return new Response("private provider response", {
@@ -233,15 +266,42 @@ test("provider Retry-After blocks shared catalog retries without leaking its res
       () => now,
     ),
     () => now,
+    budget,
   );
-  await assert.rejects(adapter.catalog(4663), { code: "rate_limited", retryAfter: 120 });
-  await assert.rejects(adapter.catalog(8453), { code: "rate_limited", retryAfter: 120 });
-  now = 119_999;
-  await assert.rejects(adapter.catalog(4663), { message: "rate_limited", retryAfter: 1 });
-  assert.equal(calls, 1);
-  now = 120_000;
-  await assert.rejects(adapter.catalog(4663), { code: "rate_limited" });
-  assert.equal(calls, 2);
+  try {
+    await assert.rejects(adapter.refreshCatalog(4663), {
+      code: "rate_limited",
+      retryAfter: 120,
+    });
+    assert.equal((await adapter.catalog(4663)).pads.o1.status, "unavailable");
+    assert.equal(await adapter.refreshCatalog(4663), false);
+    assert.equal(calls, 1);
+    now = 15 * 60 * 1000;
+    await assert.rejects(adapter.refreshCatalog(4663), { code: "rate_limited" });
+    assert.equal(calls, 2);
+  } finally {
+    budget.close();
+  }
+});
+
+test("disabled catalog reads still remove expired retained mappings", async () => {
+  let now = 1;
+  const budget = new Budget(":memory:", () => now);
+  const active = new Adapters(config(), { json: async () => body([quote()]) }, () => now, budget);
+  try {
+    await active.refreshCatalog(4663);
+    now += 8 * 24 * 60 * 60 * 1000;
+    const disabled = new Adapters(
+      { ...config(), readsEnabled: false },
+      { json: () => assert.fail("No upstream calls") },
+      () => now,
+      budget,
+    );
+    assert.equal((await disabled.catalog(4663)).pads.o1.status, "unavailable");
+    assert.equal(disabled.catalogs.read(4663).quotes, null);
+  } finally {
+    budget.close();
+  }
 });
 
 test("provider cooldown blocks new request keys before spending more quota", async () => {
@@ -255,8 +315,14 @@ test("provider cooldown blocks new request keys before spending more quota", asy
     async () => new Response(null, { status: 429, headers: { "retry-after": "60" } }),
     () => 0,
   );
-  await assert.rejects(upstream.json("o1", "https://example.invalid/first"), { retryAfter: 60 });
-  await assert.rejects(upstream.json("o1", "https://example.invalid/second"), { retryAfter: 60 });
+  await assert.rejects(upstream.json("o1", "https://example.invalid/first"), {
+    retryAfter: 60,
+    retryScope: "operation",
+  });
+  await assert.rejects(upstream.json("o1", "https://example.invalid/second"), {
+    retryAfter: 60,
+    retryScope: "operation",
+  });
   assert.equal(debits, 1);
 });
 

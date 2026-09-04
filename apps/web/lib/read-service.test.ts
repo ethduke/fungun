@@ -7,6 +7,7 @@ import {
   tickerKey,
   tickerLabel,
   checkTicker,
+  loadCatalog,
   tickerNotice,
 } from './read-service.ts';
 import { AppError, describeError } from './user-error.ts';
@@ -131,45 +132,53 @@ await test('read service turns transport and malformed response failures into sa
   );
 });
 
-await test('concurrent 429 responses never shorten cooldown or let subsequent clicks fetch', async (t) => {
-  const resolve: ((response: Response) => void)[] = [];
+await test('provider cooldown preserves catalog reads while global cooldown preserves cache', async (t) => {
   const fetch = t.mock.method(
     globalThis,
     'fetch',
-    () => new Promise<Response>((done) => resolve.push(done)),
-  );
-  const first = assert.rejects(
-    checkTicker(4663, 'LIMITED', ['long']),
-    (error: unknown) => {
-      assert.match(describeError(error, 'ticker'), /45 seconds/);
-      return error instanceof AppError && error.code === 'rate_limited';
+    async (url: string | URL | Request, options?: RequestInit) => {
+      const href =
+        typeof url === 'string' ? url : url instanceof URL ? url.href : url.url;
+      if (href.endsWith('/api/ticker'))
+        return new Response(null, {
+          status: 429,
+          headers: {
+            'retry-after': '21540',
+            'x-fungun-retry-scope': 'operation',
+          },
+        });
+      if (typeof options?.body !== 'string') assert.fail('Expected JSON body');
+      const { chainId } = JSON.parse(options.body);
+      if (chainId === 4663)
+        return Response.json({
+          serverTime: Date.now(),
+          chainId: 4663,
+          expiresAt: Date.now() + 6 * 60 * 60 * 1000,
+          pads: {
+            long: { status: 'ready', pairs: [] },
+            o1: { status: 'ready', pairs: [] },
+          },
+        });
+      return new Response(null, {
+        status: 429,
+        headers: { 'retry-after': '45' },
+      });
     },
   );
-  const second = assert.rejects(
-    checkTicker(4663, 'SHORTLIMIT', ['long']),
-    (error: unknown) =>
-      error instanceof AppError &&
-      error.code === 'rate_limited' &&
-      (error.retrySeconds ?? 0) >= 40,
-  );
-  resolve[0](
-    new Response('private response body', {
-      status: 429,
-      headers: { 'retry-after': '45' },
-    }),
-  );
-  await first;
-  resolve[1](
-    new Response('private response body', {
-      status: 429,
-      headers: { 'retry-after': '5' },
-    }),
-  );
-  await second;
   await assert.rejects(
-    checkTicker(4663, 'BACKOFF', ['long']),
+    checkTicker(4663, 'PROVIDER', ['long']),
     (error: unknown) =>
       error instanceof AppError && error.code === 'rate_limited',
   );
-  assert.equal(fetch.mock.callCount(), 2);
+  const cached = await loadCatalog(4663);
+  assert.ok(cached.expiresAt - performance.now() > 5 * 60 * 60 * 1000);
+  await assert.rejects(loadCatalog(8453), (error: unknown) => {
+    assert.match(describeError(error, 'catalog'), /45 seconds/);
+    return error instanceof AppError && error.code === 'rate_limited';
+  });
+  assert.equal(await loadCatalog(4663), cached);
+  await assert.rejects(loadCatalog(8453), {
+    code: 'rate_limited',
+  });
+  assert.equal(fetch.mock.callCount(), 3);
 });

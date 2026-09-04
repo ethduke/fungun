@@ -1,5 +1,5 @@
-import { createHash } from "node:crypto";
 import { decodeFunctionResult, encodeFunctionData, isAddress, isHex, keccak256 } from "viem";
+import { CatalogSnapshots, catalogPairId } from "./catalog-snapshots.mjs";
 import { ServiceError, safeError } from "./errors.mjs";
 import { ReadCache } from "./upstream.mjs";
 
@@ -91,7 +91,7 @@ export function parseQuotes(body, chainId) {
     const previous = unique.get(address);
     if (previous && (previous.symbol !== quote.symbol || previous.decimals !== quote.decimals))
       throw new ServiceError("invalid_catalog");
-    const id = `rwa-${createHash("sha256").update(`${chainId}:${address}`).digest("hex").slice(0, 24)}`;
+    const id = catalogPairId(chainId, address);
     unique.set(address, { id, address, symbol: quote.symbol, decimals: quote.decimals });
   }
   const values = Array.from(unique.values());
@@ -101,22 +101,36 @@ export function parseQuotes(body, chainId) {
 }
 
 export class Adapters {
-  constructor(config, upstream, now = Date.now) {
+  constructor(config, upstream, now = Date.now, budget = null) {
     this.config = config;
     this.upstream = upstream;
     this.now = now;
     this.cache = new ReadCache(now);
+    this.catalogs = budget ? new CatalogSnapshots(budget.db, now) : null;
   }
 
   async catalog(chainId) {
     const unavailable = { status: "unavailable", pairs: [] };
-    const missing = {
-      chainId,
-      expiresAt: this.now() + 15_000,
-      pads: chainId === 4663 ? { long: unavailable, o1: unavailable } : { o1: unavailable },
-    };
-    if (!this.config.readsEnabled || !this.config.o1Key) return missing;
-    return this.cache.get(`catalog:${chainId}`, 300_000, async () => {
+    if (!this.config.readsEnabled || !this.config.o1Key || !this.catalogs) {
+      this.catalogs?.prune(chainId);
+      return {
+        chainId,
+        expiresAt: this.now() + 300_000,
+        pads: chainId === 4663 ? { long: unavailable, o1: unavailable } : { o1: unavailable },
+      };
+    }
+    return this.catalogs.catalog(chainId, this.config.longQuotes);
+  }
+
+  async refreshCatalog(chainId) {
+    if (!this.catalogs) return false;
+    if (!this.config.readsEnabled || !this.config.o1Key) {
+      this.catalogs.prune(chainId);
+      return false;
+    }
+    const lease = this.catalogs.begin(chainId);
+    if (!lease) return false;
+    try {
       const url = new URL("/v1/config", O1_ORIGIN);
       url.search = new URLSearchParams({
         chain_id: String(chainId),
@@ -131,18 +145,12 @@ export class Adapters {
         512 * 1024,
         20,
       );
-      const quotes = parseQuotes(body, chainId);
-      const project = ({ id, symbol }) => ({ id, symbol });
-      const pads = { o1: { status: "ready", pairs: quotes.map(project) } };
-      if (chainId === 4663)
-        pads.long = this.config.longQuotes.size
-          ? {
-              status: "ready",
-              pairs: quotes.filter((q) => this.config.longQuotes.has(q.address)).map(project),
-            }
-          : unavailable;
-      return { chainId, checkedAt: this.now(), expiresAt: this.now() + 300_000, pads };
-    });
+      return this.catalogs.succeed(chainId, parseQuotes(body, chainId), lease);
+    } catch (error) {
+      const safe = safeError(error);
+      this.catalogs.fail(chainId, lease, safe.retryAfter);
+      throw safe;
+    }
   }
 
   async rpc(method, params) {

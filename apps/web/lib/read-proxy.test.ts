@@ -43,7 +43,11 @@ await test('production proxy allowlists operations and origin without forwarding
         { error: 'rate_limited' },
         {
           status: 429,
-          headers: { 'retry-after': '30', 'set-cookie': 'private=EXAMPLE' },
+          headers: {
+            'retry-after': '30',
+            'x-fungun-retry-scope': 'operation',
+            'set-cookie': 'private=EXAMPLE',
+          },
         },
       );
     };
@@ -56,6 +60,7 @@ await test('production proxy allowlists operations and origin without forwarding
     );
     assert.equal(response.status, 429);
     assert.equal(response.headers.get('retry-after'), '30');
+    assert.equal(response.headers.get('x-fungun-retry-scope'), 'operation');
     assert.equal(response.headers.get('set-cookie'), null);
     assert.equal(
       (
