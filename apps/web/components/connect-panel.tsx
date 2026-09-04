@@ -23,7 +23,11 @@ import {
 import { createPreviewConfig, previewQueryDefaults } from '@/lib/preview-web3';
 import type { ConnectedAccount } from '@/lib/account-context';
 import { AppError, describeError } from '@/lib/user-error';
-import { sendWalletClaim, checkWalletClaim, ensureClaimChain as ensureWalletClaimChain } from '@/lib/claim-wallet';
+import {
+  sendWalletClaim,
+  watchWalletClaim,
+  ensureClaimChain as ensureWalletClaimChain,
+} from '@/lib/claim-wallet';
 import type { ClaimQuote } from '@/lib/fee-service';
 import { signWalletAsset } from '@/lib/asset-wallet';
 import type { AssetApproval } from '@/lib/asset-protocol';
@@ -53,9 +57,17 @@ async function walletProvider() {
 }
 const sendClaim = async (quote: ClaimQuote) =>
   sendWalletClaim(await walletProvider(), quote);
-const checkClaim = async (positionId: string) =>
-  checkWalletClaim(await walletProvider(), positionId);
-const ensureClaimChain = async (address: string, chainId: number, isCurrent: () => boolean) =>
+const watchClaim = async (
+  positionId: string,
+  isCurrent: () => boolean,
+  onError: (error: unknown) => void,
+) =>
+  watchWalletClaim(await walletProvider(), positionId, { isCurrent, onError });
+const ensureClaimChain = async (
+  address: string,
+  chainId: number,
+  isCurrent: () => boolean,
+) =>
   ensureWalletClaimChain(await walletProvider(), address, chainId, isCurrent);
 const signAsset = async (approval: AssetApproval, isCurrent: () => boolean) =>
   signWalletAsset(await walletProvider(), approval, isCurrent);
@@ -77,7 +89,14 @@ function ConnectionControl({
   useEffect(() => {
     onAccountChange(
       connection.isConnected
-        ? { address, chainId: connection.chainId, sendClaim, checkClaim, ensureClaimChain, signAsset }
+        ? {
+            address,
+            chainId: connection.chainId,
+            sendClaim,
+            watchClaim,
+            ensureClaimChain,
+            signAsset,
+          }
         : {},
     );
   }, [address, connection.chainId, connection.isConnected, onAccountChange]);

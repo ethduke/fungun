@@ -1,7 +1,7 @@
 # Fee reads and wallet claims
 
 The Fees page loads fees only for the connected wallet. While disconnected, it
-shows “Connect your wallet to show fees.” and makes no fee lookups. It never polls.
+shows “Connect your wallet to show fees.” and makes no fee lookups. Fee discovery never polls.
 Refresh is explicit; each page is cached for 45 seconds with concurrent work
 coalesced. Missing configuration and failed reads mean **unknown**, not zero.
 The page groups payout balances into one card per launchpad, with one Claim all
@@ -163,7 +163,14 @@ Wallet rejection clears the request; ambiguous writes block further claims.
 After checking wallet activity, the user can acknowledge uncertainty, wait thirty
 seconds and prepare again. This acknowledgment never resends a transaction.
 
-Check receipt is manual, at most once per ten seconds through the connected wallet.
+Submitted transaction receipts are checked automatically through the connected
+wallet after ten seconds, backing off to twenty, thirty and then sixty seconds
+between checks. Concurrent watchers share the same transaction read. Monitoring
+pauses when the page is hidden or the account/network changes, and stops when
+the transaction settles or the page unmounts. There are no idle receipt reads,
+fee-list refreshes or USD lookups from this monitor. The compact claim panel has
+no Check receipt or Cancel button; Refresh or another Claim all can replace a
+prepared or finished queue when no wallet transaction is pending.
 After a verified receipt, the next claim is prepared automatically and still
 requires its own wallet confirmation. Successful status alone does not prove a payout:
 Long and Longbow require a matching `Release`

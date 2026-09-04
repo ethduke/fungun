@@ -1,6 +1,12 @@
 'use client';
 
-import { useEffect, useRef, useState, useSyncExternalStore } from 'react';
+import {
+  useEffect,
+  useEffectEvent,
+  useRef,
+  useState,
+  useSyncExternalStore,
+} from 'react';
 import { formatUnits } from 'viem';
 import { Wallet, RefreshCw } from 'lucide-react';
 import { Button } from '@/components/ui/button';
@@ -61,6 +67,12 @@ const payoutText = (payout: FeePayout) =>
 const ethText = (value: string) => formatEth(BigInt(value));
 const highGas = (value: string) => BigInt(value) >= HIGH_NETWORK_FEE_WEI;
 const localNow = () => performance.now();
+const subscribeVisibility = (listener: () => void) => {
+  document.addEventListener('visibilitychange', listener);
+  return () => document.removeEventListener('visibilitychange', listener);
+};
+const pageVisible = () => document.visibilityState !== 'hidden';
+const hiddenOnServer = () => false;
 
 export default function Fees() {
   const account = useConnectedAccount();
@@ -95,6 +107,7 @@ export default function Fees() {
 
 function ConnectedFees({ address }: { address: string }) {
   const account = useConnectedAccount();
+  const { watchClaim, chainId: walletChainId } = account;
   const [results, setResults] = useState<{
     address: string;
     revision: number;
@@ -105,12 +118,23 @@ function ConnectedFees({ address }: { address: string }) {
   const [reviewing, setReviewing] = useState<string | null>(null);
   const [claimError, setClaimError] = useState<string | null>(null);
   const [sending, setSending] = useState(false);
-  const [checking, setChecking] = useState(false);
   const [queue, setQueue] = useState<ClaimQueue | null>(null);
   const [loadingMore, setLoadingMore] = useState<string | null>(null);
   const [claimedIds, setClaimedIds] = useState<string[]>([]);
   const reviewSequence = useRef(0);
   const scanSequence = useRef({ value: 0 });
+  const seenConfirmations = useRef(
+    new Set(
+      getClaims()
+        .filter((entry) => entry.status === 'confirmed')
+        .map((entry) => entry.quote),
+    ),
+  );
+  const visible = useSyncExternalStore(
+    subscribeVisibility,
+    pageVisible,
+    hiddenOnServer,
+  );
   const activities = useSyncExternalStore(
     subscribeClaims,
     getClaims,
@@ -139,6 +163,9 @@ function ConnectedFees({ address }: { address: string }) {
     !!address && account.address?.toLowerCase() === address;
   const currentActivities = activities.filter(
     (activity) => activity.quote.address.toLowerCase() === address,
+  );
+  const pendingActivity = currentActivities.find(
+    (activity) => activity.status === 'submitted' && activity.hash,
   );
   const queueActivities = currentQueue
     ? claimQueueActivities(currentQueue, currentActivities)
@@ -228,16 +255,106 @@ function ConnectedFees({ address }: { address: string }) {
     return () => clearTimeout(timer);
   }, [quote]);
 
+  async function review(source: FeeSource, position: FeePosition) {
+    if (
+      !address ||
+      !ownerConnected ||
+      !account.ensureClaimChain ||
+      sending ||
+      getClaims().some((activity) =>
+        ['wallet', 'submitted', 'uncertain', 'no_payout'].includes(
+          activity.status,
+        ),
+      ) ||
+      reviewing ||
+      loadingMore
+    )
+      return;
+    const sequence = ++reviewSequence.current;
+    setReviewing(position.id);
+    setQuote(null);
+    setClaimError(null);
+    try {
+      await account.ensureClaimChain(
+        address,
+        source.chainId,
+        () => sequence === reviewSequence.current,
+      );
+      if (sequence !== reviewSequence.current) return;
+      const prepared = await prepareClaim(address, source, position);
+      if (sequence === reviewSequence.current) {
+        setQuote(prepared);
+      }
+    } catch (error) {
+      if (sequence === reviewSequence.current)
+        setClaimError(describeError(error, 'claim_review'));
+    } finally {
+      if (sequence === reviewSequence.current) setReviewing(null);
+    }
+  }
+
+  const advanceQueue = useEffectEvent(() => {
+    const confirmed = currentActivities.filter(
+      (activity) =>
+        activity.status === 'confirmed' &&
+        !seenConfirmations.current.has(activity.quote),
+    );
+    for (const activity of confirmed)
+      seenConfirmations.current.add(activity.quote);
+    if (confirmed.length)
+      setClaimedIds((previous) => [
+        ...new Set([
+          ...previous,
+          ...confirmed.map((activity) => activity.quote.positionId),
+        ]),
+      ]);
+    if (confirmed.length) setClaimError(null);
+    if (!queue) return;
+    const nextQueue = reconcileClaimQueue(queue, activities);
+    if (nextQueue === queue) return;
+    setQueue(nextQueue);
+    const next = nextQueue.items[nextQueue.index];
+    if (nextQueue.status === 'ready' && next)
+      void review(next.source, next.position);
+  });
+  useEffect(() => {
+    advanceQueue();
+  }, [activities]);
+
+  useEffect(() => {
+    if (
+      !visible ||
+      !pendingActivity ||
+      !watchClaim ||
+      !ownerConnected ||
+      walletChainId !== pendingActivity.quote.chainId
+    )
+      return;
+    let cancelled = false;
+    let stop: (() => void) | undefined;
+    void watchClaim(
+      pendingActivity.quote.positionId,
+      () => !cancelled && pageVisible(),
+      (error) => {
+        if (!cancelled) setClaimError(describeError(error, 'claim'));
+      },
+    )
+      .then((cleanup) => {
+        if (cancelled) cleanup();
+        else stop = cleanup;
+      })
+      .catch((error: unknown) => {
+        if (!cancelled) setClaimError(describeError(error, 'claim'));
+      });
+    return () => {
+      cancelled = true;
+      stop?.();
+    };
+  }, [visible, pendingActivity, watchClaim, walletChainId, ownerConnected]);
+
   async function continueScan(entry: SourceResult) {
     const source = entry.source;
-    if (
-      !source?.nextCursor ||
-      !address ||
-      loading ||
-      loadingMore ||
-      locked ||
-      currentQueue
-    )
+    if (!source?.nextCursor || !address || loading || loadingMore || locked)
       return;
     const scanControl = scanSequence.current;
     const sequence = ++scanControl.value;
@@ -288,52 +405,6 @@ function ConnectedFees({ address }: { address: string }) {
   function stopScan() {
     scanSequence.current.value++;
     setLoadingMore(null);
-  }
-
-  function cancelQueue() {
-    reviewSequence.current++;
-    setQueue(null);
-    setQuote(null);
-    setReviewing(null);
-    setClaimError(null);
-  }
-
-  async function review(source: FeeSource, position: FeePosition) {
-    if (
-      !address ||
-      !ownerConnected ||
-      !account.ensureClaimChain ||
-      sending ||
-      getClaims().some((activity) =>
-        ['wallet', 'submitted', 'uncertain', 'no_payout'].includes(
-          activity.status,
-        ),
-      ) ||
-      reviewing ||
-      loadingMore
-    )
-      return;
-    const sequence = ++reviewSequence.current;
-    setReviewing(position.id);
-    setQuote(null);
-    setClaimError(null);
-    try {
-      await account.ensureClaimChain(
-        address,
-        source.chainId,
-        () => sequence === reviewSequence.current,
-      );
-      if (sequence !== reviewSequence.current) return;
-      const prepared = await prepareClaim(address, source, position);
-      if (sequence === reviewSequence.current) {
-        setQuote(prepared);
-      }
-    } catch (error) {
-      if (sequence === reviewSequence.current)
-        setClaimError(describeError(error, 'claim_review'));
-    } finally {
-      if (sequence === reviewSequence.current) setReviewing(null);
-    }
   }
 
   async function claim() {
@@ -387,126 +458,48 @@ function ConnectedFees({ address }: { address: string }) {
 
   function renderActivity(activity: ClaimActivity) {
     return (
-      <div
-        aria-label="Claim status"
-        className="mt-5 border-t border-current/15 pt-4"
-      >
-        <h3 className="font-semibold">
-          {activity.status === 'wallet'
-            ? 'Confirm in your wallet'
-            : activity.status === 'submitted'
-              ? 'Claim submitted'
-              : activity.status === 'confirmed'
-                ? 'Payout recorded'
-                : activity.status === 'failed'
-                  ? 'Claim reverted'
-                  : activity.status === 'reviewed'
-                    ? 'Wallet activity reviewed'
-                    : 'Check wallet activity'}
-        </h3>
-        <p>
-          {chainName(activity.quote.chainId)}
+      <div aria-label="Claim status" className="mt-4 text-sm">
+        <div className="flex flex-wrap items-center gap-3">
+          <span>
+            {activity.status === 'wallet'
+              ? 'Confirm in wallet'
+              : activity.status === 'submitted'
+                ? 'Confirming…'
+                : activity.status === 'confirmed'
+                  ? 'Claimed'
+                  : activity.status === 'failed'
+                    ? 'Failed'
+                    : activity.status === 'reviewed'
+                      ? 'Reviewed'
+                      : 'Check wallet'}
+          </span>
           {activity.hash && (
-            <>
-              {' '}
-              · Transaction{' '}
-              <a
-                href={`${activity.quote.chainId === 4663 ? 'https://robinscan.io' : 'https://basescan.org'}/tx/${activity.hash}`}
-                target="_blank"
-                rel="noopener noreferrer"
-                className="underline underline-offset-4 hover:opacity-70"
-                title={activity.hash}
-                aria-label={`View transaction ${activity.hash} on ${activity.quote.chainId === 4663 ? 'Robinscan' : 'Basescan'}`}
-              >
-                {short(activity.hash)}
-              </a>
-            </>
+            <a
+              href={`${activity.quote.chainId === 4663 ? 'https://robinscan.io' : 'https://basescan.org'}/tx/${activity.hash}`}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="underline underline-offset-4 hover:opacity-70"
+              title={activity.hash}
+              aria-label={`View transaction ${activity.hash}`}
+            >
+              {short(activity.hash)}
+            </a>
           )}
-        </p>
-        {activity.status === 'confirmed' ? (
-          <p>
-            {activity.payouts?.map(payoutText).join(' + ')}. Included on-chain;
-            finality is not guaranteed yet.
-          </p>
-        ) : activity.status === 'failed' ? (
-          <p>No payout was confirmed. Gas may still have been charged.</p>
-        ) : activity.status === 'reviewed' ? (
-          <p>
-            No transaction was resent. Wait 30 seconds, then refresh fees for a
-            new review. Never retry while a claim is pending in your wallet.
-          </p>
-        ) : activity.status === 'uncertain' ||
-          activity.status === 'no_payout' ? (
-          <p>
-            Do not send again until you check your wallet.{' '}
-            {activity.status === 'no_payout'
-              ? 'The receipt did not prove a payout.'
-              : 'The wallet response was inconclusive; the transaction may have been sent.'}{' '}
-            A retry may charge gas again.
-          </p>
-        ) : (
-          <p>Do not send again while this request is pending.</p>
-        )}
+        </div>
         {['uncertain', 'no_payout'].includes(activity.status) && (
-          <Button
-            variant="outline"
-            disabled={!ownerConnected}
-            onClick={() => {
-              acknowledgeClaim(activity.quote.positionId);
-              setQuote(null);
-            }}
-          >
-            I checked my wallet: no pending claim
-          </Button>
-        )}
-        {activity.hash && activity.status === 'submitted' && (
-          <Button
-            variant="outline"
-            disabled={checking || !account.checkClaim || !ownerConnected}
-            onClick={async () => {
-              setChecking(true);
-              setClaimError(null);
-              const sequence = reviewSequence.current;
-              try {
-                await account.ensureClaimChain?.(
-                  address,
-                  activity.quote.chainId,
-                  () => sequence === reviewSequence.current,
-                );
-                if (sequence !== reviewSequence.current) return;
-                await account.checkClaim?.(activity.quote.positionId);
-                if (sequence !== reviewSequence.current) return;
-                if (
-                  getClaims().some(
-                    (entry) =>
-                      entry.quote === activity.quote &&
-                      entry.status === 'confirmed',
-                  )
-                ) {
-                  setClaimedIds((previous) => [
-                    ...new Set([...previous, activity.quote.positionId]),
-                  ]);
-                  if (currentQueue) {
-                    const nextQueue = reconcileClaimQueue(
-                      currentQueue,
-                      getClaims(),
-                    );
-                    setQueue(nextQueue);
-                    const next = nextQueue.items[nextQueue.index];
-                    if (nextQueue.status === 'ready' && next)
-                      await review(next.source, next.position);
-                  }
-                }
-              } catch (error) {
-                if (sequence === reviewSequence.current)
-                  setClaimError(describeError(error, 'claim'));
-              } finally {
-                setChecking(false);
-              }
-            }}
-          >
-            {checking ? 'Checking…' : 'Check receipt'}
-          </Button>
+          <>
+            <p>Check your wallet before trying again.</p>
+            <Button
+              variant="outline"
+              disabled={!ownerConnected}
+              onClick={() => {
+                acknowledgeClaim(activity.quote.positionId);
+                setQuote(null);
+              }}
+            >
+              I checked my wallet
+            </Button>
+          </>
         )}
       </div>
     );
@@ -525,12 +518,7 @@ function ConnectedFees({ address }: { address: string }) {
           type="button"
           variant="outline"
           disabled={
-            !address ||
-            loading ||
-            !!reviewing ||
-            locked ||
-            !!loadingMore ||
-            !!currentQueue
+            !address || loading || !!reviewing || locked || !!loadingMore
           }
           onClick={() => setRefresh((value) => value + 1)}
         >
@@ -630,8 +618,7 @@ function ConnectedFees({ address }: { address: string }) {
                     locked ||
                     loading ||
                     !!loadingMore ||
-                    !!reviewing ||
-                    !!currentQueue
+                    !!reviewing
                   }
                   onClick={() => {
                     setQuote(null);
@@ -656,11 +643,7 @@ function ConnectedFees({ address }: { address: string }) {
                     <Button
                       variant="outline"
                       disabled={
-                        loading ||
-                        !!loadingMore ||
-                        locked ||
-                        !!currentQueue ||
-                        !!reviewing
+                        loading || !!loadingMore || locked || !!reviewing
                       }
                       onClick={() => entry && void continueScan(entry)}
                     >
@@ -731,8 +714,8 @@ function ConnectedFees({ address }: { address: string }) {
               {renderActivity(activity)}
             </div>
           ))}
-          <div className="fee-review-actions">
-            {queueItem && currentQueue.status === 'ready' && (
+          {queueItem && currentQueue.status === 'ready' && (
+            <div className="fee-review-actions">
               <Button
                 disabled={
                   locked ||
@@ -754,11 +737,8 @@ function ConnectedFees({ address }: { address: string }) {
                       ? 'Confirm in wallet'
                       : 'Try again'}
               </Button>
-            )}
-            <Button variant="outline" disabled={sending} onClick={cancelQueue}>
-              {currentQueue.status === 'complete' ? 'Done' : 'Cancel'}
-            </Button>
-          </div>
+            </div>
+          )}
         </section>
       )}
       {claimError && (

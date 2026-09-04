@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import test from 'node:test';
+import test, { type TestContext } from 'node:test';
 import {
   encodeFunctionData,
   encodeEventTopics,
@@ -22,6 +22,7 @@ import {
   ensureClaimChain,
   receiptPayouts,
   sendWalletClaim,
+  watchWalletClaim,
 } from './claim-wallet.ts';
 
 const addr = (digit: string) => `0x${digit.repeat(40)}` as `0x${string}`;
@@ -543,4 +544,328 @@ await test('declining an unknown claim network stops after its single add reques
     'eth_accounts',
     'wallet_addEthereumChain',
   ]);
+});
+
+let receiptTestId = 0;
+let receiptTestClock = 1_000_000;
+const drainReceiptWork = () =>
+  new Promise<void>((resolve) => setImmediate(resolve));
+async function receiptWatcherFixture(t: TestContext) {
+  t.mock.timers.enable({ apis: ['setTimeout'] });
+  let now = (receiptTestClock += 1_000_000);
+  t.mock.method(performance, 'now', () => now);
+  const input: ClaimQuote = {
+    ...quote(),
+    positionId: (++receiptTestId).toString(16).padStart(64, '0'),
+  };
+  const transactionHash =
+    `0x${receiptTestId.toString(16).padStart(64, '0')}` as Hash;
+  const success = { ...receipt(), transactionHash };
+  const state = {
+    account: owner,
+    chain: input.chainId as number,
+    response: null as unknown,
+    failure: undefined as unknown,
+    onRequest: undefined as ((method: string) => void) | undefined,
+    gate: undefined as Promise<unknown> | undefined,
+    gateMethod: 'eth_getTransactionReceipt',
+  };
+  const requests: string[] = [];
+  let sends = 0;
+  const provider = {
+    request: async ({
+      method,
+      params,
+    }: {
+      method: string;
+      params?: unknown[];
+    }) => {
+      requests.push(method);
+      state.onRequest?.(method);
+      if (state.gate && method === state.gateMethod) return await state.gate;
+      if (method === 'eth_accounts') return [state.account];
+      if (method === 'eth_chainId') return toHex(state.chain);
+      if (method === 'eth_sendTransaction') {
+        sends++;
+        return transactionHash;
+      }
+      assert.equal(method, 'eth_getTransactionReceipt');
+      assert.deepEqual(params, [transactionHash]);
+      if (state.failure) throw state.failure;
+      return state.response;
+    },
+  } as EIP1193Provider;
+  await sendWalletClaim(provider, input);
+  requests.length = 0;
+  const cleanups: (() => void)[] = [];
+  const watch = (options: Parameters<typeof watchWalletClaim>[2] = {}) => {
+    const cleanup = watchWalletClaim(provider, input.positionId, options);
+    cleanups.push(cleanup);
+    return cleanup;
+  };
+  const tick = async (ms: number) => {
+    now += ms;
+    t.mock.timers.tick(ms);
+    await drainReceiptWork();
+  };
+  t.after(async () => {
+    for (const cleanup of cleanups) cleanup();
+    state.account = owner;
+    state.chain = input.chainId;
+    state.response = success;
+    state.failure = undefined;
+    state.onRequest = undefined;
+    state.gate = undefined;
+    now += 20_000;
+    if (
+      getClaims().find((entry) => entry.quote === input)?.status === 'submitted'
+    )
+      await checkWalletClaim(provider, input.positionId);
+  });
+  return {
+    input,
+    success,
+    state,
+    requests,
+    provider,
+    watch,
+    tick,
+    sends: () => sends,
+    receiptReads: () =>
+      requests.filter((method) => method === 'eth_getTransactionReceipt')
+        .length,
+    status: () => getClaims().find((entry) => entry.quote === input)?.status,
+  };
+}
+
+await test('receipt watching backs off to one read per minute, keeps long-pending claims, and never sends', async (t) => {
+  const f = await receiptWatcherFixture(t);
+  f.watch();
+  assert.equal(f.receiptReads(), 0);
+  for (const [delay, reads] of [
+    [10_000, 1],
+    [20_000, 2],
+    [30_000, 3],
+    [60_000, 4],
+    [60_000, 5],
+  ]) {
+    await f.tick(delay - 1);
+    assert.equal(f.receiptReads(), reads - 1);
+    await f.tick(1);
+    assert.equal(f.receiptReads(), reads);
+  }
+  for (let index = 0; index < 12; index++) await f.tick(60_000);
+  assert.equal(f.receiptReads(), 17);
+  assert.equal(f.status(), 'submitted');
+  assert.equal(f.sends(), 1);
+  f.state.response = f.success;
+  await f.tick(60_000);
+  assert.equal(f.status(), 'confirmed');
+  assert.equal(
+    getClaims().find((entry) => entry.quote === f.input)?.payouts?.[0]
+      .claimableRaw,
+    '125',
+  );
+  const reads = f.receiptReads();
+  await f.tick(600_000);
+  assert.equal(f.receiptReads(), reads);
+  assert.equal(f.sends(), 1);
+});
+
+await test('receipt watchers deduplicate the same hash and one subscriber cleanup preserves the other', async (t) => {
+  const f = await receiptWatcherFixture(t);
+  const first = f.watch();
+  const second = f.watch();
+  await f.tick(10_000);
+  assert.equal(f.receiptReads(), 1);
+  first();
+  first();
+  await f.tick(20_000);
+  assert.equal(f.receiptReads(), 2);
+  second();
+  await f.tick(600_000);
+  assert.equal(f.receiptReads(), 2);
+  assert.equal(f.sends(), 1);
+});
+
+await test('receipt watching stays idle without a submitted hash and stops for reverted or unproven receipts', async (t) => {
+  for (const status of ['failed', 'no_payout']) {
+    await t.test(status, async (t) => {
+      const f = await receiptWatcherFixture(t);
+      watchWalletClaim(f.provider, 'f'.repeat(64));
+      await f.tick(20_000);
+      assert.equal(f.requests.length, 0);
+      f.state.response =
+        status === 'failed'
+          ? { ...f.success, status: '0x0' }
+          : { ...f.success, logs: [] };
+      f.watch();
+      await f.tick(10_000);
+      assert.equal(f.status(), status);
+      f.watch();
+      await f.tick(600_000);
+      assert.equal(f.receiptReads(), 1);
+      if (status === 'no_payout') acknowledgeClaim(f.input.positionId);
+    });
+  }
+});
+
+await test('receipt watching retries read failures with backoff but reports each error streak once', async (t) => {
+  const f = await receiptWatcherFixture(t);
+  const errors: unknown[] = [];
+  f.state.failure = { code: -32005 };
+  f.watch({ onError: (error) => errors.push(error) });
+  await f.tick(10_000);
+  await f.tick(20_000);
+  await f.tick(30_000);
+  assert.equal(f.receiptReads(), 3);
+  assert.equal(errors.length, 1);
+  f.state.failure = undefined;
+  await f.tick(60_000);
+  f.state.failure = { code: -32603 };
+  await f.tick(60_000);
+  assert.equal(errors.length, 2);
+  f.state.failure = undefined;
+  f.state.response = f.success;
+  await f.tick(60_000);
+  assert.equal(f.status(), 'confirmed');
+  assert.equal(f.sends(), 1);
+});
+
+await test('receipt watching stops on rejection, wrong account or wrong network without changing networks', async (t) => {
+  for (const stopReason of ['rejected', 'account', 'chain', 'disconnected']) {
+    await t.test(stopReason, async (t) => {
+      const f = await receiptWatcherFixture(t);
+      const errors: unknown[] = [];
+      f.watch({ onError: (error) => errors.push(error) });
+      if (stopReason === 'rejected') f.state.failure = { code: 4001 };
+      if (stopReason === 'disconnected') f.state.failure = { code: 4900 };
+      if (stopReason === 'account') f.state.account = addr('b');
+      if (stopReason === 'chain') f.state.chain = 1;
+      await f.tick(10_000);
+      const requests = f.requests.length;
+      assert.equal(errors.length, 1);
+      await f.tick(600_000);
+      assert.equal(f.requests.length, requests);
+      assert.equal(
+        f.receiptReads(),
+        ['rejected', 'disconnected'].includes(stopReason) ? 1 : 0,
+      );
+      assert.equal(f.sends(), 1);
+    });
+  }
+});
+
+await test('receipt watching stops stale subscribers before every wallet request and can restart after visibility returns', async (t) => {
+  const f = await receiptWatcherFixture(t);
+  let current = false;
+  const errors: unknown[] = [];
+  f.watch({ isCurrent: () => current, onError: (error) => errors.push(error) });
+  await f.tick(10_000);
+  assert.equal(f.requests.length, 0);
+  current = true;
+  f.watch({ isCurrent: () => current, onError: (error) => errors.push(error) });
+  f.state.onRequest = (method) => {
+    if (method === 'eth_accounts') current = false;
+  };
+  await f.tick(10_000);
+  assert.deepEqual(f.requests, ['eth_accounts']);
+  current = true;
+  f.state.onRequest = undefined;
+  await f.tick(600_000);
+  assert.deepEqual(f.requests, ['eth_accounts']);
+  f.state.response = f.success;
+  f.watch({ isCurrent: () => current });
+  await f.tick(10_000);
+  assert.equal(f.status(), 'confirmed');
+  assert.equal(errors.length, 0);
+});
+
+await test('cleanup during a receipt request ignores its late result and prevents further reads', async (t) => {
+  const f = await receiptWatcherFixture(t);
+  let resolveReceipt!: (receipt: unknown) => void;
+  f.state.gate = new Promise((resolve) => {
+    resolveReceipt = resolve;
+  });
+  const stop = f.watch();
+  await f.tick(10_000);
+  assert.equal(f.receiptReads(), 1);
+  stop();
+  resolveReceipt(f.success);
+  await drainReceiptWork();
+  assert.equal(f.status(), 'submitted');
+  await f.tick(600_000);
+  assert.equal(f.receiptReads(), 1);
+  f.state.gate = undefined;
+});
+
+await test('disposing an unresolved read frees the lock for a deduplicated restart and ignores the old result', async (t) => {
+  const f = await receiptWatcherFixture(t);
+  let resolveOld!: (receipt: unknown) => void;
+  f.state.gate = new Promise((resolve) => {
+    resolveOld = resolve;
+  });
+  const stop = f.watch();
+  await f.tick(10_000);
+  assert.equal(f.receiptReads(), 1);
+  stop();
+  f.state.gate = undefined;
+  f.watch();
+  f.watch();
+  await f.tick(10_000);
+  assert.equal(f.receiptReads(), 2);
+  assert.equal(f.status(), 'submitted');
+  resolveOld(f.success);
+  await drainReceiptWork();
+  assert.equal(f.status(), 'submitted');
+  assert.equal(f.receiptReads(), 2);
+  await f.tick(19_999);
+  assert.equal(f.receiptReads(), 2);
+  f.state.response = f.success;
+  await f.tick(1);
+  assert.equal(f.receiptReads(), 3);
+  assert.equal(f.status(), 'confirmed');
+  await f.tick(600_000);
+  assert.equal(f.receiptReads(), 3);
+  assert.equal(f.sends(), 1);
+});
+
+await test('a hung wallet read times out after 15 seconds and retries once with the existing backoff', async (t) => {
+  for (const method of ['eth_accounts', 'eth_getTransactionReceipt']) {
+    await t.test(method, async (t) => {
+      const f = await receiptWatcherFixture(t);
+      let resolveOld!: (value: unknown) => void;
+      const errors: unknown[] = [];
+      f.state.gateMethod = method;
+      f.state.gate = new Promise((resolve) => {
+        resolveOld = resolve;
+      });
+      f.watch({ onError: (error) => errors.push(error) });
+      await f.tick(10_000);
+      const beforeTimeout = f.requests.length;
+      await f.tick(14_999);
+      assert.equal(errors.length, 0);
+      assert.equal(f.requests.length, beforeTimeout);
+      await f.tick(1);
+      assert.equal(errors.length, 1);
+      assert.equal((errors[0] as { code: string }).code, 'timeout');
+      f.state.gate = undefined;
+      await f.tick(19_999);
+      assert.equal(f.requests.length, beforeTimeout);
+      await f.tick(1);
+      assert.equal(f.receiptReads(), method === 'eth_accounts' ? 1 : 2);
+      const afterRetry = f.requests.length;
+      resolveOld(method === 'eth_accounts' ? [owner] : f.success);
+      await drainReceiptWork();
+      assert.equal(f.requests.length, afterRetry);
+      assert.equal(f.status(), 'submitted');
+      f.state.response = f.success;
+      await f.tick(30_000);
+      assert.equal(f.status(), 'confirmed');
+      const afterConfirmation = f.requests.length;
+      await f.tick(600_000);
+      assert.equal(f.requests.length, afterConfirmation);
+      assert.equal(f.sends(), 1);
+    });
+  }
 });

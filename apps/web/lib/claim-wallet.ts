@@ -287,23 +287,62 @@ export function receiptPayouts(
     : null;
 }
 
-let checking = false;
+let checking: symbol | undefined;
 let nextCheck = 0;
+const receiptReadTimeout = 15_000;
+export type CheckWalletClaimOptions = { signal?: AbortSignal };
 export async function checkWalletClaim(
   provider: EIP1193Provider,
   positionId: string,
+  options: CheckWalletClaimOptions = {},
 ) {
   const activity = activities.get(positionId);
   if (!activity?.hash || checking || performance.now() < nextCheck)
     throw new AppError('pending');
-  checking = true;
+  if (options.signal?.aborted) throw new AppError('cancelled');
+  const token = Symbol('claim-receipt-check');
+  checking = token;
   nextCheck = performance.now() + 10_000;
+  let current = true;
+  let rejectCancellation!: (error: AppError) => void;
+  const cancellation = new Promise<never>((_resolve, reject) => {
+    rejectCancellation = reject;
+  });
+  const cancel = (code: 'cancelled' | 'timeout') => {
+    if (!current) return;
+    current = false;
+    if (checking === token) checking = undefined;
+    rejectCancellation(new AppError(code));
+  };
+  const onAbort = () => cancel('cancelled');
+  options.signal?.addEventListener('abort', onAbort, { once: true });
+  const timeout = setTimeout(() => cancel('timeout'), receiptReadTimeout);
+  const assertCurrent = () => {
+    if (!current || options.signal?.aborted) throw new AppError('cancelled');
+  };
+  const request = async <T>(read: () => Promise<T>): Promise<T> => {
+    assertCurrent();
+    const value = await Promise.race([read(), cancellation]);
+    assertCurrent();
+    return value;
+  };
   try {
-    await identity(provider, activity.quote);
-    const receipt = await provider.request({
-      method: 'eth_getTransactionReceipt',
-      params: [activity.hash],
-    });
+    const accounts = await request(() =>
+      provider.request({ method: 'eth_accounts' }),
+    );
+    if (accounts[0]?.toLowerCase() !== activity.quote.address.toLowerCase())
+      throw new AppError('wrong_account');
+    const chain = await request(() =>
+      provider.request({ method: 'eth_chainId' }),
+    );
+    if (BigInt(chain) !== BigInt(activity.quote.chainId))
+      throw new AppError('wrong_chain');
+    const receipt = await request(() =>
+      provider.request({
+        method: 'eth_getTransactionReceipt',
+        params: [activity.hash!],
+      }),
+    );
     if (!receipt) return;
     if (receipt.transactionHash.toLowerCase() !== activity.hash.toLowerCase())
       throw new AppError('invalid_response');
@@ -313,6 +352,7 @@ export async function checkWalletClaim(
       receipt.to?.toLowerCase() !== activity.quote.target.toLowerCase()
     )
       throw new AppError('invalid_response');
+    assertCurrent();
     activity.payouts = receiptPayouts(receipt, activity.quote) ?? undefined;
     activity.status =
       receipt.status === '0x0'
@@ -322,6 +362,156 @@ export async function checkWalletClaim(
           : 'no_payout';
     publish();
   } finally {
-    checking = false;
+    current = false;
+    clearTimeout(timeout);
+    options.signal?.removeEventListener('abort', onAbort);
+    if (checking === token) checking = undefined;
   }
+}
+
+export type ClaimReceiptWatchOptions = {
+  isCurrent?: () => boolean;
+  onError?: (error: unknown) => void;
+};
+type ReceiptSubscriber = ClaimReceiptWatchOptions & {
+  provider: EIP1193Provider;
+  reportedError: boolean;
+};
+type ReceiptWatch = {
+  activity: ClaimActivity;
+  subscribers: Set<ReceiptSubscriber>;
+  stop: () => void;
+};
+const receiptWatches = new Map<string, ReceiptWatch>();
+const receiptDelays = [10_000, 20_000, 30_000, 60_000];
+const subscriberIsCurrent = (subscriber: ReceiptSubscriber) => {
+  try {
+    return subscriber.isCurrent?.() !== false;
+  } catch {
+    return false;
+  }
+};
+const stopsReceiptWatch = (error: unknown) =>
+  wasRejected(error) ||
+  [4100, 4200, 4900, 4901, 4902].some((code) => hasWalletError(error, code)) ||
+  (error instanceof AppError &&
+    ['wrong_account', 'wrong_chain', 'disconnected', 'unsupported'].includes(
+      error.code,
+    ));
+
+export function watchWalletClaim(
+  provider: EIP1193Provider,
+  positionId: string,
+  options: ClaimReceiptWatchOptions = {},
+): () => void {
+  const activity = activities.get(positionId);
+  const subscriber: ReceiptSubscriber = {
+    ...options,
+    provider,
+    reportedError: false,
+  };
+  if (
+    activity?.status !== 'submitted' ||
+    !activity.hash ||
+    !subscriberIsCurrent(subscriber)
+  )
+    return () => {};
+  const key = `${activity.quote.chainId}:${activity.quote.address.toLowerCase()}:${positionId}:${activity.hash.toLowerCase()}`;
+  let watch = receiptWatches.get(key);
+  if (watch && watch.activity !== activity) {
+    watch.stop();
+    watch = undefined;
+  }
+  if (!watch) {
+    const subscribers = new Set<ReceiptSubscriber>();
+    let stopped = false;
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    let delayIndex = 0;
+    const abort = new AbortController();
+    let unsubscribe = () => {};
+    const stop = () => {
+      if (stopped) return;
+      stopped = true;
+      clearTimeout(timer);
+      abort.abort();
+      unsubscribe();
+      subscribers.clear();
+      receiptWatches.delete(key);
+    };
+    const active = () => {
+      if (stopped) return false;
+      if (
+        activities.get(positionId) !== activity ||
+        activity.status !== 'submitted'
+      ) {
+        stop();
+        return false;
+      }
+      for (const entry of subscribers)
+        if (!subscriberIsCurrent(entry)) subscribers.delete(entry);
+      if (!subscribers.size) stop();
+      return !stopped;
+    };
+    const guardedProvider = {
+      request: async (args: Parameters<EIP1193Provider['request']>[0]) => {
+        if (!active()) throw new AppError('cancelled');
+        const entry = subscribers.values().next().value!;
+        const result = await entry.provider.request(args);
+        if (!active() || !subscribers.has(entry))
+          throw new AppError('cancelled');
+        return result;
+      },
+    } as unknown as EIP1193Provider;
+    const schedule = () => {
+      if (!active()) return;
+      timer = setTimeout(() => void poll(), receiptDelays[delayIndex]);
+    };
+    const poll = async () => {
+      if (!active()) return;
+      try {
+        await checkWalletClaim(guardedProvider, positionId, {
+          signal: abort.signal,
+        });
+        for (const entry of subscribers) entry.reportedError = false;
+      } catch (error) {
+        if (!active()) return;
+        if (
+          !(
+            error instanceof AppError &&
+            ['pending', 'cancelled'].includes(error.code)
+          )
+        ) {
+          for (const entry of subscribers) {
+            if (entry.reportedError) continue;
+            entry.reportedError = true;
+            try {
+              entry.onError?.(error);
+            } catch {
+              /* Keep the receipt watcher independent of UI callbacks. */
+            }
+          }
+          if (stopsReceiptWatch(error)) {
+            stop();
+            return;
+          }
+        }
+      }
+      delayIndex = Math.min(delayIndex + 1, receiptDelays.length - 1);
+      schedule();
+    };
+    watch = { activity, subscribers, stop };
+    receiptWatches.set(key, watch);
+    subscribers.add(subscriber);
+    unsubscribe = subscribeClaims(() => {
+      active();
+    });
+    schedule();
+  } else {
+    watch.subscribers.add(subscriber);
+  }
+  const currentWatch = watch;
+  return () => {
+    currentWatch.subscribers.delete(subscriber);
+    if (!currentWatch.subscribers.size) currentWatch.stop();
+  };
 }

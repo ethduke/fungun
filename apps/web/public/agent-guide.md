@@ -68,7 +68,9 @@ The combined claim panel displays gas in ETH and a Coinbase ETH/USD estimate;
 missing or stale prices do not prevent claims. Only a separate explicit user
 confirmation opens the wallet. No approvals, recipient redirects or native claim
 payments are requested. Do not initiate a financial action without explicit user intent.
-Check receipt is manual and verifies payout events, not merely successful status.
+Submitted receipts are monitored automatically with backoff up to sixty seconds
+between reads, only on the visible Fees page with the matching wallet/network.
+Receipt checks verify payout events, not merely successful status.
 Claim all queues eligible discovered positions and requires explicit wallet
 confirmation for each transaction, refreshing expired estimates on confirmation.
 Only a confirmed payout prepares the next claim; rejected, failed or uncertain requests stop the queue.
@@ -130,8 +132,9 @@ Never request, store or log private keys, seed phrases, API/RPC credentials or
 signature payloads. Wallet connection alone does not authorize any transaction.
 Do not work around disabled actions using direct RPC or external launchpads.
 The browser performs no app-RPC balance polling. Wallet claims use the selected
-extension for account/network checks, an explicitly approved send and manual receipt reads. Automatic polling
-and retries apply only to the public market feed.
+extension for account/network checks, an explicitly approved send and automatic
+receipt reads for submitted claims. These reads back off and stop when settled;
+no transaction is automatically resent. Public market-feed polling is separate.
 Only the configured backend can perform provider-funded allowlisted RPC checks.
 Repeated refreshes cannot produce data that is not configured or implemented.
 

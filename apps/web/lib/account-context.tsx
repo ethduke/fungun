@@ -8,10 +8,21 @@ export type ConnectedAccount = {
   openWallet?: () => void;
   address?: string;
   chainId?: number;
-  ensureClaimChain?: (address: string, chainId: number, isCurrent: () => boolean) => Promise<void>;
+  ensureClaimChain?: (
+    address: string,
+    chainId: number,
+    isCurrent: () => boolean,
+  ) => Promise<void>;
   sendClaim?: (quote: ClaimQuote) => Promise<string>;
-  checkClaim?: (positionId: string) => Promise<void>;
-  signAsset?: (approval: AssetApproval, isCurrent: () => boolean) => Promise<`0x${string}`>;
+  watchClaim?: (
+    positionId: string,
+    isCurrent: () => boolean,
+    onError: (error: unknown) => void,
+  ) => Promise<() => void>;
+  signAsset?: (
+    approval: AssetApproval,
+    isCurrent: () => boolean,
+  ) => Promise<`0x${string}`>;
 };
 export const AccountContext = createContext<ConnectedAccount>({});
 
