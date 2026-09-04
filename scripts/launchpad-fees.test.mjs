@@ -33,12 +33,28 @@ test("O1 states referral and anti-snipe exceptions on both chains and routes", (
   }
 });
 
+test("Longbow scopes its LP share to the default Robinhood RWA route", () => {
+  const info = launchpadFeeInfo({ id: "longbow", chainId: 4663, route: "rwa" });
+  assert.equal(info.label, "Your LP fee share");
+  assert.equal(info.creatorPercent, 95);
+  assert.equal(info.remainder, "5% Doppler");
+  assert.match(info.details, /default LongLauncher route/);
+  assert.match(info.details, /Separate hook fees are not included/);
+  assert.match(info.details, /1% of the token supply/);
+  assert.match(info.details, /alternate launch routes use different fee splits/);
+  assert.equal(info.sourceUrl, "https://longbow.gg/launch?route=long");
+  for (const [chainId, route] of [[8453, "rwa"], [4663, "standard"]]) {
+    assert.equal(launchpadFeeInfo({ id: "longbow", chainId, route }), undefined);
+  }
+});
+
 test("fee information has public HTTPS sources and a review date", () => {
   assert.match(FEE_INFO_REVIEWED, /^\d{4}-\d{2}-\d{2}$/);
-  for (const id of ["long", "o1"]) {
+  for (const id of ["long", "o1", "longbow"]) {
     const info = launchpadFeeInfo({ id, chainId: 4663, route: "rwa" });
     const source = new URL(info.sourceUrl);
     assert.equal(source.protocol, "https:");
-    assert.equal(source.username + source.password + source.search, "");
+    assert.equal(source.username + source.password, "");
+    assert.equal(source.search, id === "longbow" ? "?route=long" : "");
   }
 });

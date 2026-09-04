@@ -19,6 +19,15 @@ const FEE_INFO = {
     sourceLabel: 'O1 fee documentation',
     sourceUrl: 'https://docs.o1.exchange/launchpad/trading/fees-referrals',
   },
+  longbow: {
+    label: 'Your LP fee share',
+    creatorPercent: 95,
+    remainder: '5% Doppler',
+    details:
+      'Longbow’s default LongLauncher route allocates 95% of LP fees to you and 5% to Doppler. Separate hook fees are not included in this split. This route also allocates 1% of the token supply to Longbow at launch; that is separate from fee revenue. Longbow’s alternate launch routes use different fee splits.',
+    sourceLabel: 'Longbow default launch route',
+    sourceUrl: 'https://longbow.gg/launch?route=long',
+  },
 } as const;
 
 export const FEE_INFO_REVIEWED = '2026-09-04';
@@ -26,9 +35,8 @@ export const FEE_INFO_REVIEWED = '2026-09-04';
 export function launchpadFeeInfo(
   destination: Pick<Destination, 'id' | 'chainId' | 'route'>,
 ) {
-  if (destination.id === 'longbow') return undefined;
   if (
-    destination.id === 'long' &&
+    (destination.id === 'long' || destination.id === 'longbow') &&
     (destination.chainId !== 4663 || destination.route !== 'rwa')
   )
     return undefined;
