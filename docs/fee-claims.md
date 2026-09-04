@@ -4,6 +4,14 @@ The Fees page loads fees only for the connected wallet. While disconnected, it
 shows “Connect your wallet to show fees.” and makes no fee lookups. Fee discovery never polls.
 Refresh is explicit; each page is cached for 45 seconds with concurrent work
 coalesced. Missing configuration and failed reads mean **unknown**, not zero.
+Up to two launchpads load concurrently, showing each result as it arrives.
+Transient provider failures receive one retry of the failed read after 250 ms;
+successful reads and entire fee scans are not replayed. Fee reads queue within
+the existing global/provider concurrency limits, and every attempt counts against
+the same quotas. Rate limits, malformed responses and contract verification errors
+are not retried. A 20-second operation deadline stops queued work and further reads
+before the web proxy times out. Exhausted failures remain cached for at least
+15 seconds, so an immediate Refresh may show the same error.
 The page groups payout balances into one card per launchpad, with one Claim all
 action per card. Check more reads one bounded page. Previously found positions
 remain visible after a failed continuation. Switching accounts or disconnecting
@@ -54,8 +62,9 @@ use Refresh in the connected wallet's Fees page.
 Use server-only `O1_API_KEY`, `ROBINHOOD_RPC` (or its existing alias), and
 `BASE_RPC_URL`. Set `RPC_BATCH_REQUESTS=false` for a provider that rejects or
 stalls JSON-RPC batches. This sends the same bounded read methods individually,
-with the same quota accounting and no request retries. The default retains batch
-requests. `FEE_CONTRACTS_JSON` has this shape; the placeholders below are
+with at most two workers and the same quota accounting. The default retains batch
+requests. Bounded transport retries apply only to fee discovery and preparation;
+wallet transactions are never retried. `FEE_CONTRACTS_JSON` has this shape; the placeholders below are
 intentionally invalid and cannot enable claims:
 
 ```json

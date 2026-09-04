@@ -1,4 +1,26 @@
 import { ServiceError, safeError } from "./errors.mjs";
+import { AsyncLocalStorage } from "node:async_hooks";
+
+const readScope = new AsyncLocalStorage();
+export function checkReadDeadline() {
+  if (readScope.getStore()?.signal.aborted) throw new ServiceError("upstream_unavailable");
+}
+
+export function withinReadDeadline(load, timeout = 20_000) {
+  const signal = AbortSignal.timeout(timeout);
+  return readScope.run({ signal }, async () => {
+    let abort;
+    const expired = new Promise((_, reject) => {
+      abort = () => reject(new ServiceError("upstream_unavailable"));
+      signal.addEventListener("abort", abort, { once: true });
+    });
+    try {
+      return await Promise.race([Promise.resolve().then(load), expired]);
+    } finally {
+      signal.removeEventListener("abort", abort);
+    }
+  });
+}
 
 export async function readJson(response, maxBytes) {
   if (response.status === 429) {
@@ -64,35 +86,97 @@ export class Upstream {
     this.active = 0;
     this.providers = new Map();
     this.retryAt = new Map();
+    this.waiting = new Set();
   }
 
-  async json(provider, url, options = {}, maxBytes = 512 * 1024, units = 1) {
+  checkCooldown(provider) {
     const retryAt = this.retryAt.get(provider) ?? 0;
     if (retryAt > this.now())
       throw new ServiceError("rate_limited", 429, Math.ceil((retryAt - this.now()) / 1000));
-    if (this.active >= 4 || (this.providers.get(provider) ?? 0) >= 2)
-      throw new ServiceError("busy", 429, 5);
-    this.budget.upstream(provider, units);
+  }
+
+  available(provider) {
+    return this.active < 4 && (this.providers.get(provider) ?? 0) < 2;
+  }
+
+  reserve(provider) {
     this.active += 1;
     this.providers.set(provider, (this.providers.get(provider) ?? 0) + 1);
-    try {
-      const response = await this.fetcher(url, {
-        ...options,
-        redirect: "error",
-        signal: AbortSignal.timeout(6000),
-      });
-      return await readJson(response, maxBytes);
-    } catch (error) {
-      const safe = safeError(error);
-      if (safe.status === 429)
-        this.retryAt.set(
-          provider,
-          Math.max(this.retryAt.get(provider) ?? 0, this.now() + safe.retryAfter * 1000),
-        );
-      throw safe;
-    } finally {
+    return () => {
       this.active -= 1;
       this.providers.set(provider, this.providers.get(provider) - 1);
+      for (const entry of this.waiting) {
+        if (!this.available(entry.provider)) continue;
+        this.removeWaiting(entry);
+        entry.resolve(this.reserve(entry.provider));
+      }
+    };
+  }
+
+  removeWaiting(entry) {
+    this.waiting.delete(entry);
+    clearTimeout(entry.timer);
+    entry.signal?.removeEventListener("abort", entry.abort);
+  }
+
+  acquire(provider, queued) {
+    checkReadDeadline();
+    this.checkCooldown(provider);
+    if (this.available(provider)) return Promise.resolve(this.reserve(provider));
+    if (!queued || this.waiting.size >= 12) return Promise.reject(new ServiceError("busy", 429, 5));
+    return new Promise((resolve, reject) => {
+      const entry = { provider, resolve, signal: readScope.getStore()?.signal };
+      entry.abort = () => {
+        this.removeWaiting(entry);
+        reject(new ServiceError("upstream_unavailable"));
+      };
+      entry.timer = setTimeout(() => {
+        this.removeWaiting(entry);
+        reject(new ServiceError("busy", 429, 5));
+      }, 6000);
+      entry.signal?.addEventListener("abort", entry.abort, { once: true });
+      this.waiting.add(entry);
+    });
+  }
+
+  async json(provider, url, options = {}, maxBytes = 512 * 1024, units = 1, policy = {}) {
+    // Opt in only for known read operations. Every retry passes admission and
+    // budget checks again; successful requests and rate limits are never replayed.
+    for (let attempt = 0; ; attempt++) {
+      const release = await this.acquire(provider, policy.queue === true);
+      let transient = false;
+      let requested = false;
+      try {
+        checkReadDeadline();
+        this.checkCooldown(provider);
+        this.budget.upstream(provider, units);
+        const operationSignal = readScope.getStore()?.signal;
+        const timeoutSignal = AbortSignal.timeout(6000);
+        requested = true;
+        const response = await this.fetcher(url, {
+          ...options,
+          redirect: "error",
+          signal: operationSignal
+            ? AbortSignal.any([operationSignal, timeoutSignal])
+            : timeoutSignal,
+        });
+        transient = [408, 500, 502, 503, 504].includes(response.status);
+        return await readJson(response, maxBytes);
+      } catch (error) {
+        const safe = safeError(error);
+        if (safe.status === 429)
+          this.retryAt.set(
+            provider,
+            Math.max(this.retryAt.get(provider) ?? 0, this.now() + safe.retryAfter * 1000),
+          );
+        transient ||=
+          requested && ["TypeError", "TimeoutError", "AbortError"].includes(error?.name);
+        if (!policy.retry || attempt > 0 || !transient || safe.status === 429) throw safe;
+        checkReadDeadline();
+      } finally {
+        release();
+      }
+      await new Promise((resolve) => setTimeout(resolve, 250));
     }
   }
 }

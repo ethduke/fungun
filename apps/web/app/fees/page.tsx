@@ -26,6 +26,7 @@ import {
 } from '@/lib/fees-model';
 import {
   loadFees,
+  loadFeeSources,
   mergeFeePages,
   prepareClaim,
   type ClaimQuote,
@@ -207,21 +208,14 @@ function ConnectedFees({ address }: { address: string }) {
     const timer = setTimeout(() => {
       setLoadingMore(null);
       setResults({ address, revision: refresh, entries: [] });
-      void (async () => {
-        for (const source of FEE_SOURCES) {
-          if (cancelled) return;
-          const key = `${source.padId}:${source.chainId}`;
-          let entry: SourceResult;
-          try {
-            entry = {
-              key,
-              source: await loadFees(address, source.chainId, source.padId),
-              pages: 1,
-            };
-          } catch (error) {
-            entry = { key, error: describeError(error, 'fees'), pages: 0 };
-          }
-          if (cancelled) return;
+      void loadFeeSources(
+        address,
+        FEE_SOURCES,
+        (result) => {
+          const key = `${result.padId}:${result.chainId}`;
+          const entry: SourceResult = result.source
+            ? { key, source: result.source, pages: 1 }
+            : { key, error: describeError(result.error, 'fees'), pages: 0 };
           setResults((previous) => ({
             address,
             revision: refresh,
@@ -232,8 +226,9 @@ function ConnectedFees({ address }: { address: string }) {
               entry,
             ],
           }));
-        }
-      })();
+        },
+        () => !cancelled,
+      );
     }, FEE_LOOKUP_DELAY);
     return () => {
       cancelled = true;

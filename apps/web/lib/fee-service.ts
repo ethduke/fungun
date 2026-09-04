@@ -283,6 +283,39 @@ export async function loadFees(
   );
 }
 
+type FeeLookup = { chainId: ChainId; padId: PadId };
+export type FeeLookupResult = FeeLookup &
+  ({ source: FeeSource; error?: never } | { source?: never; error: unknown });
+
+// Two launchpads can load together without flooding the shared RPC provider.
+// Navigation/account changes stop queued work; shared in-flight reads may finish.
+export async function loadFeeSources(
+  owner: string,
+  sources: readonly FeeLookup[],
+  onResult: (result: FeeLookupResult) => void,
+  isCurrent: () => boolean,
+) {
+  let next = 0;
+  const worker = async () => {
+    while (isCurrent() && next < sources.length) {
+      const source = sources[next++];
+      let result: FeeLookupResult;
+      try {
+        result = {
+          ...source,
+          source: await loadFees(owner, source.chainId, source.padId),
+        };
+      } catch (error) {
+        result = { ...source, error };
+      }
+      if (isCurrent()) onResult(result);
+    }
+  };
+  await Promise.all(
+    Array.from({ length: Math.min(2, sources.length) }, worker),
+  );
+}
+
 // Pages can overlap while the index changes. A shared escrow/currency position
 // is one balance, never additive; replace its amount only after identity checks.
 export function mergeFeePages(previous: FeeSource, page: FeeSource): FeeSource {

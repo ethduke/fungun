@@ -48,6 +48,10 @@ address is sent to the fee backend and relevant providers; it is not persisted
 or placed in the browser URL. Switching accounts or disconnecting clears
 displayed fees. Missing or failed balances are unknown, never zero. Refresh is
 explicit and cached.
+Two launchpads load concurrently. The backend retries a transient failed provider
+read once within a fixed deadline; it never repeats the whole scan or bypasses
+rate limits. Refreshing immediately after an exhausted failure may return the
+same cached error for 15 seconds. USD pricing requests are unchanged.
 
 Long and Longbow discover beneficiary pools from a separately configured manager's event history,
 including transferred fee rights, or pages through configured locked pools.

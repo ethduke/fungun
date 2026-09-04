@@ -5,11 +5,13 @@ import {
   claimAbi,
   legacyClaimAbi,
   loadFees,
+  loadFeeSources,
   mergeFeePages,
   parseFees,
   prepareClaim,
   validateClaim,
   type ClaimQuote,
+  type FeeLookupResult,
 } from './fee-service.ts';
 import { disabledClaimMessage, unavailableFeeMessage } from './fee-status.ts';
 
@@ -333,6 +335,99 @@ await test('fee loading coalesces without polling and preparation rejects a chan
       code: 'invalid_response',
     });
     assert.equal(calls, 2);
+  } finally {
+    globalThis.fetch = original;
+  }
+});
+
+await test('launchpads load two at a time and a slow or failed source does not block other results', async () => {
+  const original = globalThis.fetch;
+  const requests: string[] = [];
+  const releases = new Map<string, (response: Response) => void>();
+  const results: FeeLookupResult[] = [];
+  const lookups = [
+    { padId: 'long', chainId: 4663 },
+    { padId: 'o1', chainId: 4663 },
+    { padId: 'longbow', chainId: 4663 },
+  ] as const;
+  const settle = () => new Promise<void>((resolve) => setImmediate(resolve));
+  globalThis.fetch = async (_url, options) => {
+    if (typeof options?.body !== 'string')
+      throw new Error('Expected a JSON request body.');
+    const input = JSON.parse(options.body);
+    requests.push(input.padId);
+    return new Promise<Response>((resolve) =>
+      releases.set(input.padId, resolve),
+    );
+  };
+  const success = (padId: string) =>
+    Response.json({
+      ...source,
+      chainId: 4663,
+      padId,
+      positions: [],
+      serverTime: Date.now(),
+      expiresAt: Date.now() + 45_000,
+    });
+  try {
+    const job = loadFeeSources(
+      owner,
+      lookups,
+      (result) => results.push(result),
+      () => true,
+    );
+    assert.deepEqual(requests, ['long', 'o1']);
+    releases.get('o1')!(success('o1'));
+    await settle();
+    assert.deepEqual(requests, ['long', 'o1', 'longbow']);
+    assert.deepEqual(
+      results.map((result) => result.padId),
+      ['o1'],
+    );
+    releases.get('long')!(
+      Response.json({ error: 'unavailable' }, { status: 503 }),
+    );
+    releases.get('longbow')!(success('longbow'));
+    await job;
+    assert.equal(
+      results.find((result) => result.padId === 'long')?.source,
+      undefined,
+    );
+    assert.equal(
+      results.find((result) => result.padId === 'longbow')?.source?.padId,
+      'longbow',
+    );
+    assert.equal(requests.length, 3, 'no whole-scan retries or polling');
+  } finally {
+    globalThis.fetch = original;
+  }
+});
+
+await test('changing wallet or leaving Fees suppresses late results and queued launchpad reads', async () => {
+  const original = globalThis.fetch;
+  const releases: ((response: Response) => void)[] = [];
+  let current = true;
+  let results = 0;
+  globalThis.fetch = async () =>
+    new Promise<Response>((resolve) => releases.push(resolve));
+  try {
+    const job = loadFeeSources(
+      owner,
+      [
+        { padId: 'long', chainId: 4663 },
+        { padId: 'o1', chainId: 4663 },
+        { padId: 'longbow', chainId: 4663 },
+      ],
+      () => results++,
+      () => current,
+    );
+    assert.equal(releases.length, 2);
+    current = false;
+    for (const release of releases)
+      release(Response.json({ error: 'unavailable' }, { status: 503 }));
+    await job;
+    assert.equal(results, 0);
+    assert.equal(releases.length, 2);
   } finally {
     globalThis.fetch = original;
   }

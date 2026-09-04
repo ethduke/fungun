@@ -1,6 +1,6 @@
 import { decodeFunctionResult, encodeFunctionData, keccak256, toHex, toBytes } from "viem";
 import { ServiceError } from "./errors.mjs";
-import { ReadCache } from "./upstream.mjs";
+import { checkReadDeadline, ReadCache } from "./upstream.mjs";
 
 const methods = new Set([
   "eth_chainId",
@@ -40,39 +40,54 @@ export function rpcNumber(value) {
 }
 
 export class FeeRpc {
-  constructor(config, upstream, now = Date.now) {
+  constructor(config, upstream, now = Date.now, readPolicy = {}) {
     this.config = config;
     this.upstream = upstream;
     this.pins = new ReadCache(now, 16);
+    this.readPolicy = readPolicy;
   }
   async batch(chainId, calls) {
+    checkReadDeadline();
     if (![4663, 8453].includes(chainId)) throw new ServiceError("invalid_request", 400);
     const url = chainId === 4663 ? this.config.rpcUrl : this.config.baseRpcUrl;
     if (!url) throw new ServiceError("not_configured");
     if (!calls.length || calls.length > 12 || calls.some((call) => !methods.has(call.method)))
       throw new ServiceError("invalid_request", 400);
     if (this.config.rpcBatchRequests === false) {
-      const values = [];
+      const values = Array.from({ length: calls.length });
+      let next = 0;
+      let failure;
       // Some RPC providers accept only individual request objects. This mode is
-      // explicit: charge each read, send in order, and stop without a retry.
-      for (const [id, call] of calls.entries()) {
-        const result = await this.upstream.json(
-          "rpc",
-          url,
-          {
-            method: "POST",
-            headers: { "content-type": "application/json" },
-            body: JSON.stringify({ jsonrpc: "2.0", id, ...call }),
-          },
-          256 * 1024,
-          1,
-        );
-        if (!result || Array.isArray(result) || result.id !== id || result.jsonrpc !== "2.0")
-          throw new ServiceError("invalid_response");
-        if (result.error) throw rpcError(result.error);
-        if (!Object.hasOwn(result, "result")) throw new ServiceError("invalid_response");
-        values.push(result.result);
-      }
+      // explicit. Two workers share upstream admission with other readers, charge
+      // every attempted read and stop new work after the first failed response.
+      const worker = async () => {
+        while (!failure && next < calls.length) {
+          const id = next++;
+          try {
+            const result = await this.upstream.json(
+              "rpc",
+              url,
+              {
+                method: "POST",
+                headers: { "content-type": "application/json" },
+                body: JSON.stringify({ jsonrpc: "2.0", id, ...calls[id] }),
+              },
+              256 * 1024,
+              1,
+              this.readPolicy,
+            );
+            if (!result || Array.isArray(result) || result.id !== id || result.jsonrpc !== "2.0")
+              throw new ServiceError("invalid_response");
+            if (result.error) throw rpcError(result.error);
+            if (!Object.hasOwn(result, "result")) throw new ServiceError("invalid_response");
+            values[id] = result.result;
+          } catch (error) {
+            failure ??= error;
+          }
+        }
+      };
+      await Promise.all(Array.from({ length: this.readPolicy.parallel ? 2 : 1 }, worker));
+      if (failure) throw failure;
       return values;
     }
     const results = await this.upstream.json(
@@ -85,6 +100,7 @@ export class FeeRpc {
       },
       256 * 1024,
       calls.length,
+      this.readPolicy,
     );
     if (
       !Array.isArray(results) ||

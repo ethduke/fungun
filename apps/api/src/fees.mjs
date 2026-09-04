@@ -1,7 +1,7 @@
 import { createHmac, randomBytes } from "node:crypto";
 import { encodeFunctionData, serializeTransaction, zeroAddress } from "viem";
 import { ServiceError } from "./errors.mjs";
-import { ReadCache } from "./upstream.mjs";
+import { ReadCache, withinReadDeadline } from "./upstream.mjs";
 import { FeeRpc, rpcNumber } from "./fee-rpc.mjs";
 import { FeeUsd } from "./fee-usd.mjs";
 import { discoverLongFeePools } from "./long-fee-discovery.mjs";
@@ -128,7 +128,12 @@ export function parseO1Positions(body, address, chainId, limit = 25) {
 }
 
 export class Fees {
-  constructor(config, upstream, now = Date.now, rpc = new FeeRpc(config, upstream, now)) {
+  constructor(
+    config,
+    upstream,
+    now = Date.now,
+    rpc = new FeeRpc(config, upstream, now, { queue: true, retry: true, parallel: true }),
+  ) {
     this.config = config;
     this.upstream = upstream;
     this.now = now;
@@ -233,25 +238,26 @@ export class Fees {
     return this.cache.get(
       `fees:${JSON.stringify(input)}:${profileKey(this.config, padId)}`,
       TTL,
-      async () => {
-        const state = this.cursor(input);
-        const result =
-          padId === "o1"
-            ? await this.o1(address, chainId, state)
-            : await this.long(address, state, padId);
-        return {
-          address,
-          chainId,
-          padId,
-          coverage,
-          nextCursor: this.continuation(input, result.nextState),
-          status: result.partial ? "partial" : "ready",
-          checkedAt: this.now(),
-          expiresAt: this.now() + TTL,
-          positions: result.positions.map((position) => this.remember(position)),
-          ...(result.progress ? { progress: result.progress } : {}),
-        };
-      },
+      () =>
+        withinReadDeadline(async () => {
+          const state = this.cursor(input);
+          const result =
+            padId === "o1"
+              ? await this.o1(address, chainId, state)
+              : await this.long(address, state, padId);
+          return {
+            address,
+            chainId,
+            padId,
+            coverage,
+            nextCursor: this.continuation(input, result.nextState),
+            status: result.partial ? "partial" : "ready",
+            checkedAt: this.now(),
+            expiresAt: this.now() + TTL,
+            positions: result.positions.map((position) => this.remember(position)),
+            ...(result.progress ? { progress: result.progress } : {}),
+          };
+        }),
     );
   }
 
@@ -271,6 +277,7 @@ export class Fees {
         { headers: { "x-api-key": this.config.o1Key } },
         256 * 1024,
         3,
+        { queue: true, retry: true },
       ),
       address,
       chainId,
@@ -467,133 +474,138 @@ export class Fees {
       throw new ServiceError("quote_expired", 409);
     if (!handle.position.claimable) throw new ServiceError("contract_unverified", 409);
     if (isLockedPoolPad(handle.position.kind)) lockedProfile(this.config, handle.position);
-    return this.preflights.get(`claim:${address}:${positionId}`, 10_000, async () => {
-      let position = handle.position;
-      const chainId = position.chainId;
-      const block = await this.rpc.block(chainId);
-      let data;
-      let escrowVersion;
-      if (isLockedPoolPad(position.kind)) {
-        const profile = lockedProfile(this.config, position);
-        await this.rpc.verify(
+    return this.preflights.get(`claim:${address}:${positionId}`, 10_000, () =>
+      withinReadDeadline(async () => {
+        let position = handle.position;
+        const chainId = position.chainId;
+        const block = await this.rpc.block(chainId);
+        let data;
+        let escrowVersion;
+        if (isLockedPoolPad(position.kind)) {
+          const profile = lockedProfile(this.config, position);
+          await this.rpc.verify(
+            chainId,
+            [
+              { address: profile.manager, codeHash: profile.managerCodeHash },
+              { address: profile.hook, codeHash: profile.hookCodeHash },
+            ],
+            true,
+            block,
+          );
+          position = await this.longPosition(address, position.pool, block, position.kind);
+          data = encodeFunctionData({
+            abi: managerAbi,
+            functionName: "collectFees",
+            args: [position.poolId],
+          });
+        } else {
+          const profile = this.config.feeContracts.o1.find(
+            (entry) => entry.chainId === chainId && sameAddress(entry.escrow, position.target),
+          );
+          const oracle = this.config.feeContracts.baseOracle;
+          if (!profile || (chainId === 8453 && !oracle))
+            throw new ServiceError("contract_unverified", 409);
+          escrowVersion = profile.version ?? "current";
+          if ((position.escrowVersion ?? "current") !== escrowVersion)
+            throw new ServiceError("contract_unverified", 409);
+          await this.rpc.verify(
+            chainId,
+            [
+              { address: profile.escrow, codeHash: profile.codeHash },
+              ...(chainId === 8453 ? [oracle] : []),
+            ],
+            true,
+            block,
+          );
+          const [owed] = await this.rpc.calls(
+            chainId,
+            [view(profile.escrow, escrowAbi, "owed", [address, position.payouts[0].asset])],
+            block,
+          );
+          position = {
+            ...position,
+            payouts: [{ ...position.payouts[0], claimableRaw: owed.toString() }],
+          };
+          data = encodeFunctionData({
+            abi: escrowVersion === "legacy" ? legacyEscrowAbi : escrowAbi,
+            functionName: escrowVersion === "legacy" ? "claim" : "claimFor",
+            args: [address, position.payouts[0].asset],
+          });
+        }
+        if (
+          !position.payouts.some((payout) => uint(payout.claimableRaw) > 0n) ||
+          !position.claimable
+        )
+          throw new ServiceError("nothing_to_claim", 409);
+        const transaction = { from: address, to: position.target, data, value: "0x0" };
+        const [gasHex, priceHex, balanceHex, simulation, nonceHex] = await this.rpc.batch(chainId, [
+          { method: "eth_estimateGas", params: [transaction, block] },
+          { method: "eth_gasPrice", params: [] },
+          { method: "eth_getBalance", params: [address, "pending"] },
+          { method: "eth_call", params: [transaction, block] },
+          ...(chainId === 8453
+            ? [{ method: "eth_getTransactionCount", params: [address, "pending"] }]
+            : []),
+        ]);
+        if (typeof simulation !== "string" || !/^0x(?:[\da-f]{2})*$/i.test(simulation))
+          throw new ServiceError("invalid_response");
+        const gas = rpcNumber(gasHex);
+        const gasLimit = (gas * 120n + 99n) / 100n;
+        const gasPrice = rpcNumber(priceHex);
+        if (gas < 21_000n || gasLimit > 3_000_000n || gasPrice === 0n)
+          throw new ServiceError("gas_limit", 409);
+        let l1 = 0n,
+          operator = 0n,
+          operatorBudget = 0n;
+        if (chainId === 8453) {
+          const oracle = this.config.feeContracts.baseOracle;
+          const nonce = rpcNumber(nonceHex);
+          if (nonce > BigInt(Number.MAX_SAFE_INTEGER)) throw new ServiceError("invalid_response");
+          const encoded = serializeTransaction({
+            chainId,
+            type: "legacy",
+            nonce: Number(nonce),
+            to: position.target,
+            data,
+            value: 0n,
+            gas: gasLimit,
+            gasPrice,
+          });
+          [l1, operator, operatorBudget] = await this.rpc.calls(
+            chainId,
+            [
+              view(oracle.address, oracleAbi, "getL1Fee", [encoded]),
+              view(oracle.address, oracleAbi, "getOperatorFee", [gas]),
+              view(oracle.address, oracleAbi, "getOperatorFee", [gasLimit]),
+            ],
+            block,
+          );
+        }
+        const estimatedWei = gas * gasPrice + l1 + operator;
+        const budgetWei = gasLimit * gasPrice + (l1 * 120n + 99n) / 100n + operatorBudget;
+        if (rpcNumber(balanceHex) < budgetWei) throw new ServiceError("insufficient_funds", 409);
+        const gasUsd = await this.usd.estimate(estimatedWei);
+        return {
+          positionId,
+          kind: position.kind,
+          ...(escrowVersion ? { escrowVersion } : {}),
           chainId,
-          [
-            { address: profile.manager, codeHash: profile.managerCodeHash },
-            { address: profile.hook, codeHash: profile.hookCodeHash },
-          ],
-          true,
-          block,
-        );
-        position = await this.longPosition(address, position.pool, block, position.kind);
-        data = encodeFunctionData({
-          abi: managerAbi,
-          functionName: "collectFees",
-          args: [position.poolId],
-        });
-      } else {
-        const profile = this.config.feeContracts.o1.find(
-          (entry) => entry.chainId === chainId && sameAddress(entry.escrow, position.target),
-        );
-        const oracle = this.config.feeContracts.baseOracle;
-        if (!profile || (chainId === 8453 && !oracle))
-          throw new ServiceError("contract_unverified", 409);
-        escrowVersion = profile.version ?? "current";
-        if ((position.escrowVersion ?? "current") !== escrowVersion)
-          throw new ServiceError("contract_unverified", 409);
-        await this.rpc.verify(
-          chainId,
-          [
-            { address: profile.escrow, codeHash: profile.codeHash },
-            ...(chainId === 8453 ? [oracle] : []),
-          ],
-          true,
-          block,
-        );
-        const [owed] = await this.rpc.calls(
-          chainId,
-          [view(profile.escrow, escrowAbi, "owed", [address, position.payouts[0].asset])],
-          block,
-        );
-        position = {
-          ...position,
-          payouts: [{ ...position.payouts[0], claimableRaw: owed.toString() }],
-        };
-        data = encodeFunctionData({
-          abi: escrowVersion === "legacy" ? legacyEscrowAbi : escrowAbi,
-          functionName: escrowVersion === "legacy" ? "claim" : "claimFor",
-          args: [address, position.payouts[0].asset],
-        });
-      }
-      if (!position.payouts.some((payout) => uint(payout.claimableRaw) > 0n) || !position.claimable)
-        throw new ServiceError("nothing_to_claim", 409);
-      const transaction = { from: address, to: position.target, data, value: "0x0" };
-      const [gasHex, priceHex, balanceHex, simulation, nonceHex] = await this.rpc.batch(chainId, [
-        { method: "eth_estimateGas", params: [transaction, block] },
-        { method: "eth_gasPrice", params: [] },
-        { method: "eth_getBalance", params: [address, "pending"] },
-        { method: "eth_call", params: [transaction, block] },
-        ...(chainId === 8453
-          ? [{ method: "eth_getTransactionCount", params: [address, "pending"] }]
-          : []),
-      ]);
-      if (typeof simulation !== "string" || !/^0x(?:[\da-f]{2})*$/i.test(simulation))
-        throw new ServiceError("invalid_response");
-      const gas = rpcNumber(gasHex);
-      const gasLimit = (gas * 120n + 99n) / 100n;
-      const gasPrice = rpcNumber(priceHex);
-      if (gas < 21_000n || gasLimit > 3_000_000n || gasPrice === 0n)
-        throw new ServiceError("gas_limit", 409);
-      let l1 = 0n,
-        operator = 0n,
-        operatorBudget = 0n;
-      if (chainId === 8453) {
-        const oracle = this.config.feeContracts.baseOracle;
-        const nonce = rpcNumber(nonceHex);
-        if (nonce > BigInt(Number.MAX_SAFE_INTEGER)) throw new ServiceError("invalid_response");
-        const encoded = serializeTransaction({
-          chainId,
-          type: "legacy",
-          nonce: Number(nonce),
-          to: position.target,
+          address,
+          target: position.target,
           data,
-          value: 0n,
-          gas: gasLimit,
-          gasPrice,
-        });
-        [l1, operator, operatorBudget] = await this.rpc.calls(
-          chainId,
-          [
-            view(oracle.address, oracleAbi, "getL1Fee", [encoded]),
-            view(oracle.address, oracleAbi, "getOperatorFee", [gas]),
-            view(oracle.address, oracleAbi, "getOperatorFee", [gasLimit]),
-          ],
-          block,
-        );
-      }
-      const estimatedWei = gas * gasPrice + l1 + operator;
-      const budgetWei = gasLimit * gasPrice + (l1 * 120n + 99n) / 100n + operatorBudget;
-      if (rpcNumber(balanceHex) < budgetWei) throw new ServiceError("insufficient_funds", 409);
-      const gasUsd = await this.usd.estimate(estimatedWei);
-      return {
-        positionId,
-        kind: position.kind,
-        ...(escrowVersion ? { escrowVersion } : {}),
-        chainId,
-        address,
-        target: position.target,
-        data,
-        poolId: position.poolId,
-        payouts: position.payouts,
-        value: "0",
-        gas: gasLimit.toString(),
-        gasPrice: gasPrice.toString(),
-        estimatedWei: estimatedWei.toString(),
-        gasUsd,
-        budgetWei: budgetWei.toString(),
-        l1FeeWei: l1.toString(),
-        operatorFeeWei: operator.toString(),
-        expiresAt: this.now() + 20_000,
-      };
-    });
+          poolId: position.poolId,
+          payouts: position.payouts,
+          value: "0",
+          gas: gasLimit.toString(),
+          gasPrice: gasPrice.toString(),
+          estimatedWei: estimatedWei.toString(),
+          gasUsd,
+          budgetWei: budgetWei.toString(),
+          l1FeeWei: l1.toString(),
+          operatorFeeWei: operator.toString(),
+          expiresAt: this.now() + 20_000,
+        };
+      }),
+    );
   }
 }
