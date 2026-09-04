@@ -11,6 +11,7 @@ import {
 } from 'react';
 import { Button } from '@/components/ui/button';
 import { useConnectedAccount } from '@/lib/account-context';
+import { useDraftCache } from '@/lib/launch-draft';
 import {
   AssetError,
   assetDraft,
@@ -18,6 +19,7 @@ import {
   imageBytes,
   type AssetApproval,
   type PublishedAsset,
+  type ProcessingAsset,
 } from '@/lib/asset-protocol';
 import {
   checkAssetStatus,
@@ -46,6 +48,7 @@ export function AssetPublication({
   enabled: boolean;
 }) {
   const account = useConnectedAccount();
+  const { hydrated, published: cachedPublication, cachePublication } = useDraftCache();
   const context = JSON.stringify([
     name,
     ticker,
@@ -95,6 +98,10 @@ export function AssetPublication({
   } | null>(null);
   const [error, setError] = useState('');
   const [recoveryNotice, setRecoveryNotice] = useState('');
+  const [progress, setProgress] = useState<ProcessingAsset | null>(null);
+  const progressLabel = (state: string) => ({
+    staging: 'preparing', ready: 'queued', sending: 'uploading', pinned: 'pinned', verified: 'verified',
+  })[state] ?? 'pending';
   const [expiredId, setExpiredId] = useState('');
   const expires = preview?.approval.id === expiredId;
   const [cooldown, setCooldown] = useState(false);
@@ -135,6 +142,7 @@ export function AssetPublication({
   }
   const active = preview?.context === context ? preview : null;
   const ready =
+    hydrated &&
     enabled &&
     !!image &&
     !imagePending &&
@@ -228,8 +236,18 @@ export function AssetPublication({
         isCurrent,
       );
       if (mounted.current) {
-        setPublished({ result, context: active.context });
         setPreview(null);
+        if (result.status === 'processing') {
+          setProgress(result);
+          setRecoveryNotice('Publishing to IPFS. Check status to continue.');
+        } else {
+          setProgress(null);
+          setPublished({ result, context: active.context });
+        }
+        if (result.status === 'published' && isCurrent()) {
+          try { await cachePublication(result); }
+          catch { setRecoveryNotice('Artwork published, but its link could not be saved in this browser.'); }
+        }
       }
     } catch (value) {
       if (mounted.current) {
@@ -258,7 +276,11 @@ export function AssetPublication({
           setRecoveryNotice(
             'That approval expired without publishing. You can prepare a new preview.',
           );
+        } else if (result?.status === 'processing') {
+          setProgress(result);
+          setRecoveryNotice('IPFS publication is still in progress. No new approval is needed.');
         } else if (result) {
+          setProgress(null);
           setPublished({ result });
           setPreview(null);
         } else
@@ -279,6 +301,9 @@ export function AssetPublication({
         <strong>Launch artwork</strong>
         <span>Long · Robinhood</span>
       </div>
+      {!published && cachedPublication && (
+        <output>Artwork and metadata saved. <a href={cachedPublication.metadataUrl} target="_blank" rel="noopener noreferrer">View metadata</a> · Ready for launch verification.</output>
+      )}
       {published && (
         <output>
           {published.context !== context
@@ -296,6 +321,11 @@ export function AssetPublication({
       )}
       {recovery ? (
         <>
+          {progress && (
+            <output>
+              Image: {progressLabel(progress.progress.image)} · Metadata: {progressLabel(progress.progress.metadata)}
+            </output>
+          )}
           <p>
             Previous publication needs a status check. Connect the same wallet;
             no new signature is needed.
@@ -375,7 +405,8 @@ export function AssetPublication({
               !ready ||
               cooldown ||
               recoveryBlocked ||
-              published?.context === context
+              published?.context === context ||
+              !!cachedPublication
             }
           >
             Upload for preview

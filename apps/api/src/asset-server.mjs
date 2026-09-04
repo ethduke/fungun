@@ -10,6 +10,11 @@ import { createImageWorker } from "./image-generation.mjs";
 import { createGrokImageProvider } from "./grok-image-provider.mjs";
 import { createImagePayments } from "./x402-payments.mjs";
 import { createImageSettlementReader } from "./image-settlement-reader.mjs";
+import { join } from "node:path";
+import { IpfsStore } from "./ipfs-store.mjs";
+import { PinataPublisher } from "./pinata-publisher.mjs";
+import { createIpfsWorker } from "./ipfs-worker.mjs";
+import { publicationStore } from "./ipfs-publication-service.mjs";
 
 try {
   const production = process.env.NODE_ENV === "production";
@@ -26,85 +31,69 @@ try {
     production,
     uploadsEnabled,
   };
-  const store = new AssetStore(config);
-  const imageConfig = readImageConfig();
-  const processor =
-    uploadsEnabled || imageConfig.enabled
-      ? new AssetDecoder(process.env.ASSET_DECODER_ORIGIN)
-      : null;
-  const imagePath = imageJobsPath(config.root, production);
-  const images = imageConfig.enabled || existsSync(imagePath) ? new ImageJobStore(imagePath) : null;
-  const payments = imageConfig.enabled
-    ? createImagePayments({
-        asset: imageConfig.asset,
-        facilitatorUrl: process.env.X402_FACILITATOR_URL,
-        bearerToken: process.env.X402_FACILITATOR_TOKEN,
-      })
-    : null;
-  const settlementReader = imageConfig.enabled
-    ? createImageSettlementReader({ asset: imageConfig.asset, rpcUrl: process.env.ROBINHOOD_RPC })
-    : null;
-  const worker = imageConfig.enabled
-    ? createImageWorker(
-        images,
-        createGrokImageProvider({ apiKey: process.env.OPENROUTER_API_KEY }),
-        processor,
-        payments,
-        settlementReader,
-      )
-    : null;
-  const imageHandler = createImageHandler(imageConfig, images, worker, payments, settlementReader);
-  const assetHandler = createAssetHandler(config, store, processor);
-  const server = createServer({ maxHeaderSize: 16384 }, async (request, response) => {
-    if (!request.url?.startsWith("/v1/images/")) return assetHandler(request, response);
-    const deadline = setTimeout(() => {
-      request.destroy();
-      response.destroy();
-    }, 40000);
-    try {
-      store.budget.request(request.socket.remoteAddress);
-      if (request.method === "POST" && !request.headers["payment-signature"])
-        store.budget.debit([["image-quotes", 60, 3600000]]);
-      const input = new Request(`${config.appOrigin}${request.url}`, {
-        method: request.method,
-        headers: request.headers,
-        ...(["GET", "HEAD"].includes(request.method)
-          ? {}
-          : { body: Readable.toWeb(request), duplex: "half" }),
-      });
-      const result = await imageHandler(input);
-      response.writeHead(result.status, Object.fromEntries(result.headers));
-      response.end(Buffer.from(await result.arrayBuffer()));
-    } catch {
-      if (!response.destroyed) {
-        response.writeHead(503, {
-          "content-type": "application/json",
-          "cache-control": "no-store",
-        });
-        response.end('{"error":"image_service_unavailable"}');
-      }
-    } finally {
-      clearTimeout(deadline);
-    }
+  const legacyStore = new AssetStore(config);
+  const ipfsSelected = process.env.ASSET_STORAGE === "ipfs";
+  const ipfsPath = join(config.root, "ipfs.sqlite");
+  const ipfsStore = ipfsSelected || existsSync(ipfsPath) ? new IpfsStore({
+    root: config.root, appOrigin: config.appOrigin, gateway: process.env.PINATA_GATEWAY, production,
+  }) : null;
+  const publisher = new PinataPublisher({
+    jwt: process.env.PINATA_JWT, gateway: process.env.PINATA_GATEWAY,
+    enabled: config.uploadsEnabled && ipfsSelected,
   });
+  const ipfsWorker = ipfsStore ? createIpfsWorker(ipfsStore, publisher, {
+    enabled: config.uploadsEnabled && ipfsSelected,
+  }) : null;
+  const store = publicationStore(legacyStore, ipfsStore, ipfsWorker, ipfsSelected);
+  const imageConfig=readImageConfig();
+  const processor = uploadsEnabled || imageConfig.enabled ? new AssetDecoder(process.env.ASSET_DECODER_ORIGIN) : null;
+  const imagePath=imageJobsPath(config.root,production);
+  const images=imageConfig.enabled || existsSync(imagePath) ? new ImageJobStore(imagePath) : null;
+  const payments=imageConfig.enabled ? createImagePayments({asset:imageConfig.asset,facilitatorUrl:process.env.X402_FACILITATOR_URL,bearerToken:process.env.X402_FACILITATOR_TOKEN}) : null;
+  const settlementReader=imageConfig.enabled ? createImageSettlementReader({asset:imageConfig.asset,rpcUrl:process.env.ROBINHOOD_RPC}) : null;
+  const worker=imageConfig.enabled ? createImageWorker(images,createGrokImageProvider({apiKey:process.env.OPENROUTER_API_KEY}),processor,payments,settlementReader) : null;
+  const imageHandler=createImageHandler(imageConfig,images,worker,payments,settlementReader);
+  const assetHandler=createAssetHandler(config,store,processor);
+  const server = createServer(
+    { maxHeaderSize: 16384 },
+    async (request,response)=>{
+      if(!request.url?.startsWith('/v1/images/'))return assetHandler(request,response);
+      const deadline=setTimeout(()=>{request.destroy();response.destroy();},40000);
+      try {
+        store.budget.request(request.socket.remoteAddress);
+        if(request.method==='POST' && !request.headers['payment-signature'])store.budget.debit([["image-quotes",60,3600000]]);
+        const input=new Request(`${config.appOrigin}${request.url}`,{method:request.method,headers:request.headers,
+          ...(['GET','HEAD'].includes(request.method)?{}:{body:Readable.toWeb(request),duplex:'half'})});
+        const result=await imageHandler(input);
+        response.writeHead(result.status,Object.fromEntries(result.headers));
+        response.end(Buffer.from(await result.arrayBuffer()));
+      }catch {
+        if(!response.destroyed){response.writeHead(503,{'content-type':'application/json','cache-control':'no-store'});response.end('{"error":"image_service_unavailable"}');}
+      }finally{clearTimeout(deadline);}
+    },
+  );
   server.maxConnections = 32;
   server.requestTimeout = 40000;
   server.headersTimeout = 10000;
   server.keepAliveTimeout = 2000;
   server.on("clientError", (_error, socket) => socket.destroy());
   server.on("error", () => {
-    store.close();
+    legacyStore.close();
+    ipfsStore?.close();
     console.error("Asset service could not listen.");
     process.exitCode = 1;
   });
   server.listen(8790, production ? "::" : "127.0.0.1", () => console.log("Asset service ready."));
+  ipfsWorker?.kick();
   worker?.kick();
   for (const signal of ["SIGTERM", "SIGINT"])
     process.on(signal, () =>
       server.close(async () => {
         await worker?.stop();
+        await ipfsWorker?.stop();
         images?.close();
-        store.close();
+        legacyStore.close();
+        ipfsStore?.close();
         process.exit(0);
       }),
     );

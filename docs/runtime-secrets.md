@@ -32,3 +32,7 @@ The separate asset launcher also allowlists OpenRouter, x402, USDG and read-only
 settlement RPC settings for [image generation](image-generation.md). Those values
 are never forwarded to the read API, the isolated decoder, or a web build. Only
 the public USDG asset configuration is shared with the web quote proxy.
+
+For managed IPFS, set `ASSET_STORAGE=ipfs`, `PINATA_GATEWAY` to the public
+`*.mypinata.cloud` hostname, and `PINATA_JWT` only in the asset service. Never add
+the JWT to the web application, a gateway URL, Git, logs or wallet messages.

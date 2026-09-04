@@ -3,6 +3,12 @@ import { isAddress, zeroAddress } from 'viem';
 export const ASSET_IMAGE_LIMIT = 2 * 1024 * 1024;
 export const ASSET_BODY_LIMIT = Math.ceil(ASSET_IMAGE_LIMIT / 3) * 4 + 16384;
 export type AssetDraft = { name: string; ticker: string; description: string };
+export type AssetIpfs = {
+  profile: 'pinata-v1-256k';
+  schema: 'long-ipfs-v1';
+  imageCid: string;
+  metadataCid: string;
+};
 export type AssetApproval = {
   id: string;
   wallet: string;
@@ -21,11 +27,21 @@ export type AssetApproval = {
   deadline: number;
   totalBytes: number;
   message: string;
+  ipfs?: AssetIpfs;
 };
 export type PublishedAsset = Pick<
   AssetApproval,
   'id' | 'imageHash' | 'metadataHash' | 'imageUrl' | 'metadataUrl'
-> & { status: 'published'; launchReady: false };
+> & { status: 'published'; launchReady: false; ipfs?: AssetIpfs };
+export type ProcessingAsset = Pick<
+  AssetApproval,
+  'id' | 'imageHash' | 'metadataHash' | 'imageUrl' | 'metadataUrl'
+> & {
+  status: 'processing';
+  launchReady: false;
+  ipfs: AssetIpfs;
+  progress: { image: 'staging' | 'ready' | 'sending' | 'pinned' | 'verified'; metadata: 'staging' | 'ready' | 'sending' | 'pinned' | 'verified' };
+};
 export type ExpiredAsset = Pick<
   AssetApproval,
   'id' | 'imageHash' | 'metadataHash'
@@ -89,6 +105,14 @@ const messages: Record<string, string> = {
     'Stored files could not be verified. Contact support before publishing again.',
   asset_publication_uncertain:
     'Publication could not be confirmed. Check its status; do not publish again.',
+  ipfs_approval_pending:
+    'Finish or let the current image approval expire before preparing another one.',
+  ipfs_publication_disabled:
+    'IPFS publication is not available yet. Your image has not been uploaded.',
+  ipfs_configuration:
+    'IPFS publication is not configured. Your image has not been uploaded.',
+  ipfs_verification_unavailable:
+    'The IPFS files are still being verified. Keep this launch pending and check again later.',
   asset_recovery_wallet:
     'Connect the wallet used for this publication to check its status.',
   asset_recovery_unavailable:
@@ -213,8 +237,32 @@ export function assetMessage(
     | 'id'
     | 'issuedAt'
     | 'expiresAt'
+    | 'ipfs'
   >,
 ) {
+  if ('ipfs' in value && value.ipfs) {
+    return [
+      'Publish memecoin assets — no transaction or token approval.',
+      'Intent version: 2',
+      `Website: ${value.appOrigin}`,
+      `Public asset origin: ${value.assetOrigin}`,
+      `Wallet: ${value.wallet.toLowerCase()}`,
+      'Chain ID: 4663',
+      'Launchpad: Long',
+      'Storage: public IPFS',
+      `Importer: ${value.ipfs.profile}`,
+      `Metadata schema: ${value.ipfs.schema}`,
+      `Image URI: ipfs://${value.ipfs.imageCid}`,
+      `Metadata URI: ipfs://${value.ipfs.metadataCid}`,
+      `Image SHA-256: ${value.imageHash}`,
+      `Metadata SHA-256: ${value.metadataHash}`,
+      `Total published bytes: ${value.totalBytes}`,
+      'I approve publishing these exact images and metadata publicly. Copies may remain permanently.',
+      `Nonce: ${value.id}`,
+      `Issued at: ${value.issuedAt}`,
+      `Expires at: ${value.expiresAt}`,
+    ].join('\n');
+  }
   return [
     'Publish memecoin assets — no transaction or token approval.',
     'Intent version: 1',
@@ -242,7 +290,7 @@ export async function validateAssetPreview(
   },
   now = performance.now(),
 ): Promise<AssetApproval> {
-  const fields = [
+  const baseFields = [
     'id',
     'message',
     'issuedAt',
@@ -259,6 +307,7 @@ export async function validateAssetPreview(
     'serverTime',
     'assetOrigin',
   ];
+  const fields = raw && typeof raw === 'object' && 'ipfs' in raw ? [...baseFields, 'ipfs'] : baseFields;
   if (!objectFields(raw, fields))
     throw new AssetError('invalid_asset_response');
   const origin = assetOrigin(raw.assetOrigin);
@@ -286,21 +335,30 @@ export async function validateAssetPreview(
   )
     throw new AssetError('invalid_asset_response');
   const imageHash = await assetHash(bytes);
-  const imageUrl = `${origin}/launch-assets/${imageHash}.webp`;
-  const metadata = new TextEncoder().encode(
-    JSON.stringify({
-      name: draft.name,
-      symbol: draft.ticker,
-      description: draft.description,
-      image: imageUrl,
-    }),
-  );
+  let imageUrl = `${origin}/launch-assets/${imageHash}.webp`;
+  let metadata = new TextEncoder().encode(JSON.stringify({ name: draft.name, symbol: draft.ticker,
+    description: draft.description, image: imageUrl }));
+  let ipfs: AssetIpfs | undefined;
+  if (Object.hasOwn(raw, 'ipfs')) {
+    const { IPFS_PROFILE, IPFS_SCHEMA, ipfsContentId, ipfsMetadata } = await import('./ipfs-content.ts');
+    const suppliedIpfs = raw.ipfs;
+    if (!objectFields(suppliedIpfs, ['profile', 'schema', 'imageCid', 'metadataCid'])
+      || suppliedIpfs.profile !== IPFS_PROFILE || suppliedIpfs.schema !== IPFS_SCHEMA)
+      throw new AssetError('invalid_asset_response');
+    const imageCid = await ipfsContentId(bytes);
+    metadata = ipfsMetadata(draft, imageCid);
+    const metadataCid = await ipfsContentId(metadata);
+    if (suppliedIpfs.imageCid !== imageCid || suppliedIpfs.metadataCid !== metadataCid)
+      throw new AssetError('invalid_asset_response');
+    ipfs = suppliedIpfs as AssetIpfs;
+    imageUrl = `${origin}/ipfs/${imageCid}`;
+  }
   const metadataHash = await assetHash(metadata);
   if (
     raw.imageHash !== imageHash ||
     raw.imageUrl !== imageUrl ||
     raw.metadataHash !== metadataHash ||
-    raw.metadataUrl !== `${origin}/launch-assets/${metadataHash}.json` ||
+    raw.metadataUrl !== (ipfs ? `${origin}/ipfs/${ipfs.metadataCid}` : `${origin}/launch-assets/${metadataHash}.json`) ||
     raw.totalBytes !== bytes.length + metadata.length
   )
     throw new AssetError('invalid_asset_response');
@@ -320,7 +378,7 @@ export function validatePublishedAsset(
   raw: unknown,
   expected: Pick<
     AssetApproval,
-    'id' | 'imageHash' | 'metadataHash' | 'imageUrl' | 'metadataUrl'
+    'id' | 'imageHash' | 'metadataHash' | 'imageUrl' | 'metadataUrl' | 'ipfs'
   >,
 ): PublishedAsset {
   if (
@@ -332,15 +390,28 @@ export function validatePublishedAsset(
       'imageHash',
       'metadataHash',
       'launchReady',
+      ...(expected.ipfs ? ['ipfs'] : []),
     ]) ||
     raw.status !== 'published' ||
     raw.launchReady !== false ||
     ['id', 'imageUrl', 'metadataUrl', 'imageHash', 'metadataHash'].some(
       (field) => raw[field] !== expected[field as keyof typeof expected],
-    )
+    ) || JSON.stringify(raw.ipfs) !== JSON.stringify(expected.ipfs)
   )
     throw new AssetError('invalid_asset_response');
   return raw as PublishedAsset;
+}
+
+export function validateProcessingAsset(raw: unknown, expected: AssetApproval | (Partial<AssetApproval> & { ipfs?: AssetIpfs })): ProcessingAsset {
+  const states = ['staging', 'ready', 'sending', 'pinned', 'verified'];
+  if (!expected.ipfs || !objectFields(raw, ['id','imageHash','metadataHash','imageUrl','metadataUrl','ipfs','launchReady','status','progress'])
+    || raw.status !== 'processing' || raw.launchReady !== false
+    || ['id','imageHash','metadataHash','imageUrl','metadataUrl'].some((field) => raw[field] !== expected[field as keyof typeof expected])
+    || JSON.stringify(raw.ipfs) !== JSON.stringify(expected.ipfs)
+    || !objectFields(raw.progress, ['image','metadata'])
+    || !states.includes(String(raw.progress.image)) || !states.includes(String(raw.progress.metadata)))
+    throw new AssetError('invalid_asset_response');
+  return raw as ProcessingAsset;
 }
 export async function readAssetJson(
   body: ReadableStream<Uint8Array> | null,

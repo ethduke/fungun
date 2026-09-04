@@ -9,6 +9,7 @@ import {
   readAssetJson,
   validateAssetPreview,
   validatePublishedAsset,
+  validateProcessingAsset,
   validateExpiredAsset,
   type AssetApproval,
 } from './asset-protocol.ts';
@@ -159,6 +160,10 @@ export function createAssetProxy(
           'asset_approval_expired',
           'invalid_asset_approval',
           'asset_publication_uncertain',
+          'ipfs_approval_pending',
+          'ipfs_publication_disabled',
+          'ipfs_configuration',
+          'ipfs_verification_unavailable',
           'asset_storage_full',
           'asset_history_full',
           'asset_integrity_failed',
@@ -203,13 +208,24 @@ export function createAssetProxy(
         ['pending', 'uncertain'].includes(raw.status as string)
       )
         return Response.json(raw, { headers });
+      const ipfs = raw && typeof raw === 'object' && 'ipfs' in raw ? raw.ipfs : undefined;
       const expected = {
         id: String(value.id),
         imageHash: String(value.imageHash),
         metadataHash: String(value.metadataHash),
         imageUrl: `${publicOrigin}/launch-assets/${String(value.imageHash)}.webp`,
         metadataUrl: `${publicOrigin}/launch-assets/${String(value.metadataHash)}.json`,
+        ...(ipfs ? { ipfs } : {}),
       };
+      if (ipfs) {
+        if (!objectFields(ipfs, ['profile','schema','imageCid','metadataCid'])
+          || ipfs.profile !== 'pinata-v1-256k' || ipfs.schema !== 'long-ipfs-v1'
+          || !/^b[a-z2-7]{58}$/.test(String(ipfs.imageCid))
+          || !/^b[a-z2-7]{58}$/.test(String(ipfs.metadataCid)))
+          return fail('invalid_asset_response');
+        expected.imageUrl = `${publicOrigin}/ipfs/${String(ipfs.imageCid)}`;
+        expected.metadataUrl = `${publicOrigin}/ipfs/${String(ipfs.metadataCid)}`;
+      }
       if (
         operation === 'status' &&
         raw &&
@@ -221,22 +237,29 @@ export function createAssetProxy(
       if (operation === 'publish') {
         const { assetHash } = await import('./asset-protocol.ts');
         const draft = assetDraft(value.draft);
-        expected.imageHash = await assetHash(imageBytes(value.imageBase64));
-        expected.imageUrl = `${publicOrigin}/launch-assets/${expected.imageHash}.webp`;
-        expected.metadataHash = await assetHash(
-          new TextEncoder().encode(
-            JSON.stringify({
-              name: draft.name,
-              symbol: draft.ticker,
-              description: draft.description,
-              image: expected.imageUrl,
-            }),
-          ),
-        );
-        expected.metadataUrl = `${publicOrigin}/launch-assets/${expected.metadataHash}.json`;
+        const image = imageBytes(value.imageBase64);
+        expected.imageHash = await assetHash(image);
+        if (ipfs) {
+          const { IPFS_PROFILE, IPFS_SCHEMA, ipfsContentId, ipfsMetadata } = await import('./ipfs-content.ts');
+          const imageCid = await ipfsContentId(image);
+          const metadata = ipfsMetadata(draft, imageCid);
+          const metadataCid = await ipfsContentId(metadata);
+          expected.metadataHash = await assetHash(metadata);
+          expected.imageUrl = `${publicOrigin}/ipfs/${imageCid}`;
+          expected.metadataUrl = `${publicOrigin}/ipfs/${metadataCid}`;
+          expected.ipfs = { profile: IPFS_PROFILE, schema: IPFS_SCHEMA, imageCid, metadataCid };
+        } else {
+          expected.imageUrl = `${publicOrigin}/launch-assets/${expected.imageHash}.webp`;
+          expected.metadataHash = await assetHash(new TextEncoder().encode(JSON.stringify({
+            name: draft.name, symbol: draft.ticker, description: draft.description, image: expected.imageUrl,
+          })));
+          expected.metadataUrl = `${publicOrigin}/launch-assets/${expected.metadataHash}.json`;
+        }
       }
       return Response.json(
-        validatePublishedAsset(raw, expected as AssetApproval),
+        raw && typeof raw === 'object' && 'status' in raw && raw.status === 'processing'
+          ? validateProcessingAsset(raw, expected as AssetApproval)
+          : validatePublishedAsset(raw, expected as AssetApproval),
         { headers },
       );
     } catch (error) {

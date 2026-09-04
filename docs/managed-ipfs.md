@@ -75,18 +75,18 @@ does not itself pin the image.
 
 ## Remaining integration
 
-1. Configure the isolated publisher with `PINATA_JWT` and `PINATA_GATEWAY` only
-   after adding the runtime allowlist. The gateway value is a hostname, not a URL.
-   These names are planned runtime inputs; the transport currently takes explicit
-   constructor options and never reads `.env` or process credentials itself.
-2. Connect the existing preview/approval/status flow to the IPFS publisher without
-   exposing credentials or creating an arbitrary URL fetcher/upload relay.
+1. Configure `PINATA_JWT` and `PINATA_GATEWAY` only in the allowlisted asset
+   runtime. The gateway value is a hostname, not a URL. The web route receives the
+   public gateway hostname only; the JWT never enters its environment or response.
+2. The Long webview independently calculates both CIDs, signs intent version 2,
+   displays saved per-object progress and resumes by status without another
+   signature or POST. O1 remains on its native preparation and pinning flow.
 3. Verify account pin records and exact gateway bytes with approved disposable
    uploads, then verify new Long display and O1 preparation before enabling launches.
 
 Gateway availability proves content retrieval, not account pin ownership or an
 indefinite storage guarantee. Public uploads may remain on other nodes even after
-the account unpins them. No provider account, key, upload, migration or deployment
+the account unpins them. No provider account, key, upload or deployment
 has been created by this implementation.
 
 Sources: [Long](https://app.long.xyz/),

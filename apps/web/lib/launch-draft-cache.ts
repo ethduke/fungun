@@ -149,15 +149,20 @@ export function validateDraftPublication(
   try {
     const image = new URL(result.imageUrl);
     const metadata = new URL(result.metadataUrl);
-    if (
-      image.protocol !== 'https:' ||
+    const ipfs = result.ipfs;
+    if (image.protocol !== 'https:' ||
       image.username ||
       image.password ||
-      metadata.origin !== image.origin ||
-      image.href !== `${image.origin}/launch-assets/${result.imageHash}.webp` ||
-      metadata.href !==
-        `${image.origin}/launch-assets/${result.metadataHash}.json`
-    )
+      metadata.origin !== image.origin)
+      return null;
+    if (ipfs) {
+      if (!record(ipfs) || ipfs.profile !== 'pinata-v1-256k' || ipfs.schema !== 'long-ipfs-v1'
+        || !text(ipfs.imageCid, 59) || !/^b[a-z2-7]{58}$/.test(ipfs.imageCid)
+        || !text(ipfs.metadataCid, 59) || !/^b[a-z2-7]{58}$/.test(ipfs.metadataCid)
+        || image.href !== `${image.origin}/ipfs/${ipfs.imageCid}`
+        || metadata.href !== `${image.origin}/ipfs/${ipfs.metadataCid}`) return null;
+    } else if (image.href !== `${image.origin}/launch-assets/${result.imageHash}.webp`
+      || metadata.href !== `${image.origin}/launch-assets/${result.metadataHash}.json`)
       return null;
   } catch {
     return null;
@@ -172,6 +177,7 @@ export function validateDraftPublication(
       metadataUrl: result.metadataUrl,
       status: 'published',
       launchReady: false,
+      ...(record(result.ipfs) ? { ipfs: result.ipfs as PublishedAsset['ipfs'] } : {}),
     },
   };
 }

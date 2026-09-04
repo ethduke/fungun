@@ -53,6 +53,8 @@ Do not run two API Machines or initialize a replacement quota database.
    Keep unrelated in-progress changes out of the deployment snapshot.
 2. Provision the dedicated apps and one new API volume. Confirm the mount, perform
    the explicit one-time budget initialization, then pin that Machine identity.
+   Initialize the IPFS journal once with `npm run dev:api -- --initialize-ipfs-publications`
+   while the asset service is stopped.
 3. Supply the allowlisted runtime settings and deploy each service without HA.
    Confirm health checks and the web-to-API boundary on the actual Machines.
 4. Attach the website's main hostname and optional `www` hostname to the **web**

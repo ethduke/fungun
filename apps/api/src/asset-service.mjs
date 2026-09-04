@@ -15,6 +15,14 @@ const messages = {
     "The wallet approval could not be verified. Use the wallet shown in the preview.",
   asset_publication_uncertain:
     "Publication could not be confirmed. Do not approve another upload; contact support to check its status.",
+  ipfs_approval_pending:
+    "Finish or let the current image approval expire before preparing another one.",
+  ipfs_publication_disabled:
+    "IPFS publication is not available yet. Your image has not been uploaded.",
+  ipfs_configuration:
+    "IPFS publication is not configured. Your image has not been uploaded.",
+  ipfs_verification_unavailable:
+    "The IPFS files could not be verified yet. Keep this launch pending and check again later.",
   asset_integrity_failed:
     "The stored files could not be verified. Do not publish again; contact support.",
   invalid_launch_details: "Check the coin name, ticker and description before trying again.",
@@ -189,8 +197,11 @@ export function createAssetHandler(config, store, processor) {
         preparing = acquired = true;
       }
       const input = validateAssetInput(kind, await body(request));
-      if (kind === "status") return send(200, store.status(input));
-      if (kind === "publish") return send(200, await store.publish(input));
+      if (kind === "status") return send(200, await store.status(input));
+      if (kind === "publish") {
+        const result = await store.publish(input);
+        return send(result.status === "processing" ? 202 : 200, result);
+      }
       validateImageInput(input.image);
       store.budget.debit([
         ["image-decodes", 60, 86400000],
@@ -198,7 +209,7 @@ export function createAssetHandler(config, store, processor) {
       ]);
       const image = await processor.process(input.image);
       if (response.destroyed) return;
-      const challenge = store.challenge(input.wallet, image.bytes, input.draft);
+      const challenge = await store.challenge(input.wallet, image.bytes, input.draft);
       send(200, {
         ...challenge,
         imageBase64: image.bytes.toString("base64"),

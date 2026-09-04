@@ -8,10 +8,12 @@ import {
   readAssetJson,
   validateAssetPreview,
   validatePublishedAsset,
+  validateProcessingAsset,
   validateExpiredAsset,
   type AssetApproval,
   type AssetDraft,
   type PublishedAsset,
+  type ProcessingAsset,
   type ExpiredAsset,
 } from './asset-protocol.ts';
 
@@ -24,7 +26,7 @@ export type AssetRecovery = Pick<
   | 'metadataUrl'
   | 'appOrigin'
   | 'assetOrigin'
-> & { walletHash: string };
+> & { walletHash: string; ipfs?: AssetApproval['ipfs']; version?: 2 };
 const storageKey = 'fungun.asset-publication.v1';
 const recoveryEvent = 'fungun:asset-recovery';
 export function assetRecoverySnapshot() {
@@ -54,8 +56,7 @@ export function readAssetRecovery(
   if (!saved) return null;
   if (saved.length > 2048) throw new AssetError('asset_publication_uncertain');
   const value: unknown = JSON.parse(saved);
-  if (
-    !objectFields(value, [
+  const fields = [
       'id',
       'imageHash',
       'metadataHash',
@@ -64,7 +65,10 @@ export function readAssetRecovery(
       'appOrigin',
       'assetOrigin',
       'walletHash',
-    ]) ||
+    ];
+  const ipfs = !!value && typeof value === 'object' && 'version' in value;
+  if (
+    !objectFields(value, ipfs ? [...fields, 'ipfs', 'version'] : fields) ||
     typeof value.id !== 'string' ||
     !/^[a-f0-9]{48}$/.test(value.id) ||
     value.appOrigin !== origin ||
@@ -74,11 +78,16 @@ export function readAssetRecovery(
   )
     throw new AssetError('asset_publication_uncertain');
   const publicOrigin = assetOrigin(value.assetOrigin);
+  if (ipfs && (value.version !== 2 || !objectFields(value.ipfs, ['profile','schema','imageCid','metadataCid'])
+    || value.ipfs.profile !== 'pinata-v1-256k' || value.ipfs.schema !== 'long-ipfs-v1'
+    || !/^b[a-z2-7]{58}$/.test(String(value.ipfs.imageCid))
+    || !/^b[a-z2-7]{58}$/.test(String(value.ipfs.metadataCid))))
+    throw new AssetError('asset_publication_uncertain');
   if (
-    value.imageUrl !==
-      `${publicOrigin}/launch-assets/${String(value.imageHash)}.webp` ||
-    value.metadataUrl !==
-      `${publicOrigin}/launch-assets/${String(value.metadataHash)}.json`
+    value.imageUrl !== (ipfs ? `${publicOrigin}/ipfs/${String((value.ipfs as Record<string, unknown>).imageCid)}`
+      : `${publicOrigin}/launch-assets/${String(value.imageHash)}.webp`) ||
+    value.metadataUrl !== (ipfs ? `${publicOrigin}/ipfs/${String((value.ipfs as Record<string, unknown>).metadataCid)}`
+      : `${publicOrigin}/launch-assets/${String(value.metadataHash)}.json`)
   )
     throw new AssetError('asset_publication_uncertain');
   return value as AssetRecovery;
@@ -104,6 +113,7 @@ export async function recoveryFor(
     appOrigin,
     assetOrigin,
     walletHash: await assetHash(new TextEncoder().encode(approval.wallet)),
+    ...(approval.ipfs ? { version: 2 as const, ipfs: approval.ipfs } : {}),
   };
 }
 export function saveAssetRecovery(storage: Storage, value: AssetRecovery) {
@@ -186,7 +196,7 @@ export async function publishAsset(
   storage: Storage,
   isCurrent: () => boolean,
   fetcher: typeof fetch = fetch,
-): Promise<PublishedAsset> {
+): Promise<PublishedAsset | ProcessingAsset> {
   if (!isCurrent()) throw new AssetError('asset_context_changed');
   if (performance.now() >= approval.deadline)
     throw new AssetError('asset_approval_expired');
@@ -218,8 +228,9 @@ export async function publishAsset(
       },
       fetcher,
     );
-    const result = validatePublishedAsset(raw, approval);
-    clearAssetRecovery(storage, recovery);
+    const result = raw && typeof raw === 'object' && 'status' in raw && raw.status === 'processing'
+      ? validateProcessingAsset(raw, approval) : validatePublishedAsset(raw, approval);
+    if (result.status === 'published') clearAssetRecovery(storage, recovery);
     return result;
   } catch (error) {
     throw new AssetError(
@@ -234,7 +245,7 @@ export async function checkAssetStatus(
   wallet: string,
   storage: Storage,
   fetcher: typeof fetch = fetch,
-): Promise<PublishedAsset | ExpiredAsset | null> {
+): Promise<PublishedAsset | ProcessingAsset | ExpiredAsset | null> {
   const account = assetWallet(wallet);
   if (
     (await assetHash(new TextEncoder().encode(account))) !== recovery.walletHash
@@ -263,7 +274,9 @@ export async function checkAssetStatus(
     'status' in raw &&
     raw.status === 'expired'
       ? validateExpiredAsset(raw, recovery)
-      : validatePublishedAsset(raw, recovery);
-  clearAssetRecovery(storage, recovery);
+      : raw && typeof raw === 'object' && 'status' in raw && raw.status === 'processing'
+        ? validateProcessingAsset(raw, recovery)
+        : validatePublishedAsset(raw, recovery);
+  if (result.status !== 'processing') clearAssetRecovery(storage, recovery);
   return result;
 }
