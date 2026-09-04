@@ -29,3 +29,9 @@
   flex-shrink: 0;
   margin-top: 2px;
 }
+
+.long-launch { display: grid; gap: 0.65rem; max-width: 34rem; }
+.long-launch p, .long-launch output { font-size: 0.85rem; line-height: 1.5; }
+.long-launch details { padding: 0.75rem; border: 1px solid var(--border); border-radius: 0.5rem; }
+.long-launch summary { cursor: pointer; }
+.long-launch a { text-decoration: underline; }

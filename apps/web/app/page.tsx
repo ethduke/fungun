@@ -22,6 +22,7 @@ import {
   CollapsibleTrigger,
 } from '@/components/ui/collapsible';
 import { LaunchpadCard } from '@/components/launchpad-card';
+import { LongLaunch, type LongCosts } from '@/components/long-launch';
 import { LaunchSection } from '@/components/launch-section';
 import { AssetPublication } from '@/components/asset-publication';
 import { ImageGeneration } from '@/components/image-generation';
@@ -48,6 +49,7 @@ import { useConnectedAccount } from '@/lib/account-context';
 
 export default function Home() {
   const account = useConnectedAccount();
+  const [longCosts, setLongCosts] = useState<LongCosts>(null);
   const { hydrated, cacheState, cacheError, retryCache } = useDraftCache();
   const [selection, setSelection] = useDraftField('selection');
   const { chainId, destinations } = selection;
@@ -528,6 +530,8 @@ export default function Home() {
           </div>
           <LaunchSection
             chainId={chainId}
+            costQuote={longCosts?.quote}
+            usdRate={longCosts?.usd}
             costContextKey={launchCostKey({
               name,
               ticker,
@@ -559,13 +563,29 @@ export default function Home() {
                 chainId === 4663 && active.some((pad) => pad.id === 'long')
               }
             />
+            <LongLaunch
+              enabled={chainId === 4663 && active.some((pad) => pad.id === 'long')}
+              ready={active.length === 1 && active[0]?.id === 'long' && !imagePending && !Object.keys(errors).length}
+              pairId={active.find((pad) => pad.id === 'long')?.pairId}
+              name={name} ticker={ticker} description={description}
+              contextKey={launchCostKey({
+              name,
+              ticker,
+              description,
+              imageRevision: image?.url ?? '',
+              account: account.address,
+              walletChainId: account.chainId,
+              destinations,
+            })}
+              onCosts={setLongCosts}
+            />
           </LaunchSection>
           </fieldset>
         </form>
         <footer className="workspace-footer">
           <span>YOUR IDEA. YOUR WALLET. YOUR LAUNCH.</span>
           <span>
-            Long + O1 + Longbow <span>·</span>Preview — no transactions
+            Long + O1 + Longbow <span>·</span>Wallet approval required
           </span>
         </footer>
       </main>
