@@ -231,14 +231,14 @@ await test('description has a UTF-8 byte limit', () => {
   );
 });
 
-await test('image sniffing rejects unsupported or spoofed formats', () => {
+await test('image sniffing requires supported raster content and enforces size limits', () => {
   const png = new Uint8Array(32);
   png.set([137, 80, 78, 71, 13, 10, 26, 10]);
   png.set(new TextEncoder().encode('IHDR'), 12);
   assert.equal(imageKind(png), 'image/png');
   assert.equal(imageFileError(100, 'image/png', png), null);
   assert.equal(imageFileError(100, '', png), null);
-  assert.ok(imageFileError(100, 'image/jpeg', png));
+  assert.equal(imageFileError(100, 'image/jpeg', png), null);
   assert.ok(imageFileError(IMAGE_LIMIT + 1, 'image/png', png));
   assert.ok(imageFileError(0, 'image/png', png));
   assert.ok(
@@ -296,6 +296,47 @@ await test('WebP MIME compatibility does not bypass file validation or size limi
       imageFileError(100, mime, new TextEncoder().encode('<svg></svg>')),
     );
   }
-  assert.ok(imageFileError(bytes.length, 'image/png', bytes));
+  assert.equal(imageFileError(bytes.length, 'image/png', bytes), null);
   assert.ok(imageFileError(bytes.length, 'text/html', bytes));
+});
+
+await test('JPEG content named WebP is accepted and retagged as JPEG for decoding', async () => {
+  const bytes = new Uint8Array(32);
+  bytes.set([255, 216, 255, 219]);
+  const file = new File([bytes], 'renamed.webp', { type: 'image/webp' });
+  const header = new Uint8Array(await file.slice(0, 32).arrayBuffer());
+  assert.equal(imageKind(header), 'image/jpeg');
+  assert.equal(imageFileError(file.size, file.type, header), null);
+  const source = file.slice(0, file.size, imageKind(header) ?? '');
+  assert.equal(source.type, 'image/jpeg');
+  assert.deepEqual(new Uint8Array(await source.arrayBuffer()), bytes);
+});
+
+await test('mislabeled raster files still reject unsupported MIME labels and non-image content', () => {
+  const jpeg = new Uint8Array(32);
+  jpeg.set([255, 216, 255, 219]);
+  for (const mime of [
+    'image/png',
+    'image/jpeg',
+    'image/jpg',
+    'image/webp',
+    'image/x-webp',
+    'image/gif',
+    ' IMAGE/WEBP ',
+    '',
+    'application/octet-stream',
+  ]) {
+    assert.equal(imageFileError(jpeg.length, mime, jpeg), null);
+    assert.ok(imageFileError(0, mime, jpeg));
+    assert.ok(imageFileError(IMAGE_LIMIT + 1, mime, jpeg));
+    for (const text of ['<svg></svg>', '<html></html>', 'not an image'])
+      assert.ok(imageFileError(32, mime, new TextEncoder().encode(text)));
+  }
+  for (const mime of [
+    'text/html',
+    'image/svg+xml',
+    'application/pdf',
+    'image/unknown',
+  ])
+    assert.ok(imageFileError(jpeg.length, mime, jpeg));
 });

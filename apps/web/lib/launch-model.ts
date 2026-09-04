@@ -195,7 +195,14 @@ export function imageFileError(size: number, mime: string, header: Uint8Array) {
   if (normalizedMime === 'image/x-webp') normalizedMime = 'image/webp';
   const genericMime =
     !normalizedMime || normalizedMime === 'application/octet-stream';
-  if (!detected || (!genericMime && detected !== normalizedMime))
+  // File.type may come from a mislabeled extension; decoded content is authoritative.
+  const rasterMime = [
+    'image/png',
+    'image/jpeg',
+    'image/webp',
+    'image/gif',
+  ].includes(normalizedMime);
+  if (!detected || (!genericMime && !rasterMime))
     return 'Choose a valid PNG, JPEG, WebP or GIF image.';
   return null;
 }
