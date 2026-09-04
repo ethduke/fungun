@@ -45,8 +45,12 @@ import {
 import { usePreviewTools } from '@/lib/preview-webmcp';
 import { useDraftField } from '@/lib/launch-draft';
 import { useReadService } from '@/lib/use-read-service';
+import { tickerNotice } from '@/lib/read-service';
+import { launchCostKey } from '@/lib/launch-cost';
+import { useConnectedAccount } from '@/lib/account-context';
 
 export default function Home() {
+  const account = useConnectedAccount();
   const [selection, setSelection] = useDraftField('selection');
   const { chainId, destinations } = selection;
   const [name, setName] = useDraftField('name');
@@ -415,8 +419,7 @@ export default function Home() {
               </div>
               {(reads.check || reads.checkError) && (
                 <output className="notice" aria-live="polite">
-                  {reads.checkError ??
-                    'Long checks its 24-hour reservation registry only; O1 remains unverified. See results in Launch.'}
+                  {reads.checkError ?? tickerNotice(reads.check)}
                 </output>
               )}
               <Collapsible className="extra-details">
@@ -499,9 +502,24 @@ export default function Home() {
                   ? 'Loading pairings…'
                   : 'Refresh pairings'}
               </Button>
+              {reads.catalogError && (
+                <p role="alert" className="notice">
+                  {reads.catalogError}
+                </p>
+              )}
             </section>
           </div>
           <LaunchSection
+            chainId={chainId}
+            costContextKey={launchCostKey({
+              name,
+              ticker,
+              description,
+              imageRevision: image?.url ?? '',
+              account: account.address,
+              walletChainId: account.chainId,
+              destinations,
+            })}
             name={name}
             ticker={ticker}
             image={image}

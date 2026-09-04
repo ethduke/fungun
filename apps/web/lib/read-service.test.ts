@@ -6,7 +6,10 @@ import {
   parseCatalog,
   tickerKey,
   tickerLabel,
+  checkTicker,
+  tickerNotice,
 } from './read-service.ts';
+import { AppError, describeError } from './user-error.ts';
 import { DEFAULT_DESTINATIONS, validateDraft } from './launch-model.ts';
 
 await test('ticker identity changes on edits and chain changes but not launchpad order', () => {
@@ -80,4 +83,85 @@ await test('catalog is validated and live pair IDs belong to the exact chain and
   );
   assert.throws(() => parseCatalog({ ...catalog, chainId: 8453 }, 4663));
   assert.throws(() => parseCatalog({ ...catalog, pads: {} }, 4663));
+});
+
+await test('unverified ticker reasons become plain text without exposing raw provider data', () => {
+  const notice = tickerNotice({
+    chainId: 4663,
+    ticker: 'MOON',
+    results: {
+      long: { status: 'unverified', reason: 'not_configured' },
+      o1: { status: 'unverified', reason: 'unsupported' },
+    },
+  });
+  assert.match(notice!, /Long: live ticker checks are not connected/);
+  assert.match(notice!, /O1: ticker checking is not supported/);
+});
+
+await test('read service turns transport and malformed response failures into safe categories', async (t) => {
+  const fetch = t.mock.method(globalThis, 'fetch', async () => {
+    throw new Error('synthetic private diagnostic');
+  });
+  await assert.rejects(
+    checkTicker(4663, 'NETWORK', ['long']),
+    (error: unknown) => error instanceof AppError && error.code === 'network',
+  );
+  fetch.mock.mockImplementation(
+    async () => new Response('not json', { status: 200 }),
+  );
+  await assert.rejects(
+    checkTicker(4663, 'BADJSON', ['long']),
+    (error: unknown) =>
+      error instanceof AppError && error.code === 'invalid_response',
+  );
+  fetch.mock.mockImplementation(
+    async () => new Response('private response body', { status: 504 }),
+  );
+  await assert.rejects(
+    checkTicker(4663, 'TIMEOUT', ['long']),
+    (error: unknown) => error instanceof AppError && error.code === 'timeout',
+  );
+});
+
+await test('concurrent 429 responses never shorten cooldown or let subsequent clicks fetch', async (t) => {
+  const resolve: ((response: Response) => void)[] = [];
+  const fetch = t.mock.method(
+    globalThis,
+    'fetch',
+    () => new Promise<Response>((done) => resolve.push(done)),
+  );
+  const first = assert.rejects(
+    checkTicker(4663, 'LIMITED', ['long']),
+    (error: unknown) => {
+      assert.match(describeError(error, 'ticker'), /45 seconds/);
+      return error instanceof AppError && error.code === 'rate_limited';
+    },
+  );
+  const second = assert.rejects(
+    checkTicker(4663, 'SHORTLIMIT', ['long']),
+    (error: unknown) =>
+      error instanceof AppError &&
+      error.code === 'rate_limited' &&
+      (error.retrySeconds ?? 0) >= 40,
+  );
+  resolve[0](
+    new Response('private response body', {
+      status: 429,
+      headers: { 'retry-after': '45' },
+    }),
+  );
+  await first;
+  resolve[1](
+    new Response('private response body', {
+      status: 429,
+      headers: { 'retry-after': '5' },
+    }),
+  );
+  await second;
+  await assert.rejects(
+    checkTicker(4663, 'BACKOFF', ['long']),
+    (error: unknown) =>
+      error instanceof AppError && error.code === 'rate_limited',
+  );
+  assert.equal(fetch.mock.callCount(), 2);
 });

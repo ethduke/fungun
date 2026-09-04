@@ -23,6 +23,14 @@ Start with [llms.txt](/llms.txt) for the site overview.
    explicit read: Long reports only its reservation state; O1 stays unverified.
    Results expire and edits invalidate them. Launch stays disabled.
 
+The launch cost panel separates launchpad fees and complete network fees in ETH,
+with approximate USD when a fresh reference price is available. Live quoting is
+not connected yet: unavailable is not zero. Do not treat draft completion as a
+cost quote or permission to sign. High network fees will show an explicit warning;
+wait and refresh rather than blindly raising gas limits. Follow the displayed
+retry delay after a failed check. Never repeat a possibly submitted transaction
+without checking wallet activity first.
+
 The app retains the draft and image in memory across Launch/FEE navigation;
 refreshing or closing the page clears them. No app state is persisted to disk.
 Wallet connection is optional for drafting and starts only after a user click.

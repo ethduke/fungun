@@ -1,0 +1,31 @@
+.cost-amount {
+  font-variant-numeric: tabular-nums;
+}
+.cost-amount > span {
+  display: block;
+  margin-top: 4px;
+  color: #62734f;
+  font-size: 12px;
+}
+.cost-caption {
+  color: #62734f;
+  font-size: 13px;
+  margin: 6px 0 0;
+}
+.cost-warning {
+  display: flex;
+  align-items: flex-start;
+  gap: 9px;
+  margin: 20px 0 0;
+  padding: 12px 14px;
+  border: 1px solid #c9ac60;
+  border-radius: 6px;
+  background: #fff8df;
+  color: #674b12;
+  font-size: 14px;
+  line-height: 1.5;
+}
+.cost-warning svg {
+  flex-shrink: 0;
+  margin-top: 2px;
+}

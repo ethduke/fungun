@@ -20,6 +20,7 @@ import {
 } from '@/components/ui/dialog';
 import { createPreviewConfig, previewQueryDefaults } from '@/lib/preview-web3';
 import type { ConnectedAccount } from '@/lib/account-context';
+import { describeError } from '@/lib/user-error';
 
 let configuration: ReturnType<typeof createPreviewConfig> | undefined;
 
@@ -82,6 +83,11 @@ function ConnectionControl({
               <Button variant="outline" onClick={() => disconnect.mutate({})}>
                 Disconnect
               </Button>
+              {disconnect.isError && (
+                <p role="alert" className="field-error">
+                  {describeError(disconnect.error, 'disconnect')}
+                </p>
+              )}
             </div>
           ) : (
             <div className="wallet-list">
@@ -129,7 +135,7 @@ function ConnectionControl({
               )}
               {connect.isError && (
                 <p role="alert" className="field-error">
-                  Connection was declined or unavailable. You can try again.
+                  {describeError(connect.error, 'connect')}
                 </p>
               )}
             </div>

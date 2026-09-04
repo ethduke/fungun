@@ -2,6 +2,7 @@
 
 import { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import type { ChainId, PadId } from './launch-model';
+import { describeError } from './user-error';
 import {
   checkTicker,
   expiryDelay,
@@ -24,6 +25,10 @@ export function useReadService(
   const [catalog, setCatalog] = useState<Catalog | null>(null);
   const [catalogSettled, setCatalogSettled] = useState('');
   const [catalogRefresh, setCatalogRefresh] = useState(0);
+  const [catalogError, setCatalogError] = useState<{
+    key: string;
+    message: string;
+  } | null>(null);
   const [check, setCheck] = useState<{ key: string; data: TickerCheck } | null>(
     null,
   );
@@ -38,10 +43,19 @@ export function useReadService(
     let ignore = false;
     void loadCatalog(chainId)
       .then((value) => {
-        if (!ignore) setCatalog(value);
+        if (!ignore) {
+          setCatalog(value);
+          setCatalogError(null);
+        }
       })
-      .catch(() => {
-        if (!ignore) setCatalog(null);
+      .catch((error: unknown) => {
+        if (!ignore) {
+          setCatalog(null);
+          setCatalogError({
+            key: `${chainId}:${catalogRefresh}`,
+            message: describeError(error, 'catalog'),
+          });
+        }
       })
       .finally(() => {
         if (!ignore) {
@@ -77,11 +91,11 @@ export function useReadService(
       const data = await checkTicker(chainId, ticker, pads);
       if (currentKey.current === requestKey)
         setCheck({ key: requestKey, data });
-    } catch {
+    } catch (error) {
       if (currentKey.current === requestKey)
         setCheckError({
           key: requestKey,
-          message: 'Ticker check unavailable. Try again later.',
+          message: describeError(error, 'ticker'),
         });
     } finally {
       setPendingKey((pending) => (pending === requestKey ? '' : pending));
@@ -93,6 +107,10 @@ export function useReadService(
     catalog:
       catalog?.chainId === chainId && catalog.expiresAt > now ? catalog : null,
     catalogLoading: catalogSettled !== `${chainId}:${catalogRefresh}`,
+    catalogError:
+      catalogError?.key === `${chainId}:${catalogRefresh}`
+        ? catalogError.message
+        : null,
     now,
     refreshCatalog: () => setCatalogRefresh((n) => n + 1),
     check: check?.key === key ? check.data : null,

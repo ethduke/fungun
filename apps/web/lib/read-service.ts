@@ -1,4 +1,5 @@
 import type { ChainId, PadId } from './launch-model';
+import { AppError, retrySeconds } from './user-error.ts';
 
 export type CatalogPair = { id: `rwa-${string}`; symbol: string };
 export type CatalogPad = {
@@ -12,6 +13,7 @@ export type Catalog = {
 };
 export type TickerResult = {
   status: 'unreserved' | 'reserved' | 'unverified';
+  reason?: 'unsupported' | 'not_configured' | 'unavailable';
   checkedAt?: number;
   expiresAt?: number;
 };
@@ -44,7 +46,7 @@ export function localExpiry(
   maximum: number,
 ) {
   if (![expiresAt, serverTime, receivedAt, elapsed].every(Number.isFinite))
-    throw new Error('Invalid response time.');
+    throw new AppError('invalid_response');
   return (
     receivedAt +
     Math.max(0, Math.min(maximum, expiresAt - serverTime) - elapsed)
@@ -64,7 +66,10 @@ export function expiryDelay(
 
 async function request(kind: 'catalog' | 'ticker', input: object) {
   if (performance.now() < retryAt)
-    throw new Error('Please wait before checking again.');
+    throw new AppError(
+      'rate_limited',
+      Math.ceil((retryAt - performance.now()) / 1000),
+    );
   const key = `${kind}:${JSON.stringify(input)}`;
   const cached = records.get(key);
   if (cached && cached.expiresAt > performance.now()) return cached.data;
@@ -78,28 +83,42 @@ async function request(kind: 'catalog' | 'ticker', input: object) {
       headers: { 'content-type': 'application/json', 'x-fungun-intent': kind },
       body: JSON.stringify(input),
       signal: AbortSignal.timeout(24_000),
+    }).catch((error: unknown) => {
+      throw new AppError(
+        error instanceof Error && error.name === 'TimeoutError'
+          ? 'timeout'
+          : 'network',
+      );
     });
     if (!response.ok) {
       if (response.status === 429) {
-        const seconds = Number(response.headers.get('retry-after'));
-        retryAt =
-          performance.now() +
-          Math.min(
-            86400,
-            Math.max(5, Number.isFinite(seconds) ? seconds : 30),
-          ) *
-            1000;
+        const seconds = retrySeconds(response.headers.get('retry-after'));
+        retryAt = Math.max(retryAt, performance.now() + seconds * 1000);
+        throw new AppError(
+          'rate_limited',
+          Math.ceil((retryAt - performance.now()) / 1000),
+        );
       }
-      throw new Error('Read service unavailable. Try again later.');
+      throw new AppError(
+        response.status === 403
+          ? 'origin_denied'
+          : [400, 413, 415].includes(response.status)
+            ? 'invalid_request'
+            : [408, 504].includes(response.status)
+              ? 'timeout'
+              : 'unavailable',
+      );
     }
-    const data = (await response.json()) as {
+    const data = (await response.json().catch(() => {
+      throw new AppError('invalid_response');
+    })) as {
       serverTime: number;
       expiresAt: number;
       results?: Record<string, TickerResult>;
     };
     const received = performance.now();
     if (!data || !Number.isFinite(data.serverTime))
-      throw new Error('Invalid response time.');
+      throw new AppError('invalid_response');
     if (kind === 'catalog')
       data.expiresAt = localExpiry(
         data.expiresAt,
@@ -138,7 +157,7 @@ export function parseCatalog(value: unknown, chainId: ChainId): Catalog {
     !catalog.pads ||
     typeof catalog.pads !== 'object'
   )
-    throw new Error('Invalid catalog.');
+    throw new AppError('invalid_response');
   for (const [pad, entry] of Object.entries(catalog.pads)) {
     if (
       !['long', 'o1'].includes(pad) ||
@@ -156,10 +175,10 @@ export function parseCatalog(value: unknown, chainId: ChainId): Catalog {
           !/^[A-Za-z0-9._-]{1,24}$/.test(pair.symbol),
       )
     )
-      throw new Error('Invalid catalog.');
+      throw new AppError('invalid_response');
   }
   if (!catalog.pads.o1 || (chainId === 4663 && !catalog.pads.long))
-    throw new Error('Incomplete catalog.');
+    throw new AppError('invalid_response');
   return catalog;
 }
 
@@ -188,6 +207,10 @@ export async function checkTicker(
       return (
         !result ||
         !['unreserved', 'reserved', 'unverified'].includes(result.status) ||
+        (result.reason !== undefined &&
+          !['unsupported', 'not_configured', 'unavailable'].includes(
+            result.reason,
+          )) ||
         (pad === 'o1' && result.status !== 'unverified') ||
         (result.status !== 'unverified' &&
           (!Number.isFinite(result.checkedAt) ||
@@ -195,6 +218,22 @@ export async function checkTicker(
       );
     })
   )
-    throw new Error('Invalid ticker result.');
+    throw new AppError('invalid_response');
   return value;
+}
+
+export function tickerNotice(check: TickerCheck | null) {
+  if (!check) return null;
+  return Object.entries(check.results)
+    .map(([pad, result]) => {
+      const label = pad === 'long' ? 'Long' : 'O1';
+      if (result?.status !== 'unverified')
+        return `${label}: reservation checked; see Launch below.`;
+      if (result.reason === 'unsupported')
+        return `${label}: ticker checking is not supported yet.`;
+      if (result.reason === 'not_configured')
+        return `${label}: live ticker checks are not connected yet.`;
+      return `${label}: the ticker could not be verified. Try checking again later.`;
+    })
+    .join(' ');
 }

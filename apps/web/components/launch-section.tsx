@@ -1,7 +1,8 @@
 'use client';
 
 import Image from 'next/image';
-import { ImagePlus, LockKeyhole } from 'lucide-react';
+import { useEffect, useState } from 'react';
+import { ImagePlus, LockKeyhole, TriangleAlert } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Checkbox } from '@/components/ui/checkbox';
 import { Skeleton } from '@/components/ui/skeleton';
@@ -10,12 +11,24 @@ import {
   draftStatus,
   pairingName,
   type Destination,
+  type ChainId,
 } from '@/lib/launch-model';
 import {
   tickerLabel,
   type Catalog,
   type TickerCheck,
 } from '@/lib/read-service';
+import {
+  calculateLaunchCosts,
+  costRefreshDelay,
+  costNotice,
+  formatEth,
+  formatUsd,
+  highGasNotice,
+  type LaunchCostQuote,
+  type UsdRate,
+} from '@/lib/launch-cost';
+import './launch-cost.css';
 
 export function LaunchSection({
   name,
@@ -29,6 +42,10 @@ export function LaunchSection({
   tickerCheck,
   checking = false,
   now = 0,
+  chainId,
+  costContextKey,
+  costQuote,
+  usdRate,
 }: {
   name: string;
   ticker: string;
@@ -41,7 +58,43 @@ export function LaunchSection({
   tickerCheck?: TickerCheck | null;
   checking?: boolean;
   now?: number;
+  chainId: ChainId;
+  costContextKey: string;
+  costQuote?: LaunchCostQuote | null;
+  usdRate?: UsdRate | null;
 }) {
+  const [costTick, setCostTick] = useState(0);
+  const costNow = Math.max(now, costTick);
+  useEffect(() => {
+    const delay = costRefreshDelay(
+      costQuote,
+      usdRate,
+      costNow,
+      performance.now(),
+    );
+    if (delay === null) return;
+    const timer = setTimeout(
+      () => setCostTick(performance.now()),
+      Math.min(delay + 1, 1000),
+    );
+    return () => clearTimeout(timer);
+  }, [costQuote, usdRate, costNow]);
+  const costs = calculateLaunchCosts(
+    imagePending ? null : costQuote,
+    {
+      contextKey: costContextKey,
+      chainId,
+      pads: destinations.map((pad) => pad.id),
+    },
+    costNow,
+  );
+  const gasWarning = highGasNotice(
+    Object.values(costs.pads).reduce(
+      (sum, pad) => sum + (pad?.networkWei ?? 0n),
+      0n,
+    ),
+  );
+  const usdTotal = formatUsd(costs.total?.totalWei, usdRate, costNow);
   const status = draftStatus(errors, imagePending);
   const statusText = {
     checking: 'Checking image…',
@@ -126,13 +179,46 @@ export function LaunchSection({
                   </dd>
                 </div>
                 <div>
-                  <dt>Deployment fee</dt>
-                  <dd>Not quoted</dd>
+                  <dt>Launchpad fee</dt>
+                  <dd className="cost-amount">
+                    {formatEth(costs.pads[pad.id]?.launchpadWei)}
+                    <span>
+                      {formatUsd(
+                        costs.pads[pad.id]?.launchpadWei,
+                        usdRate,
+                        costNow,
+                      )}
+                    </span>
+                  </dd>
                 </div>
                 <div>
-                  <dt>Network gas</dt>
-                  <dd>Not estimated</dd>
+                  <dt>Network fees · estimated</dt>
+                  <dd className="cost-amount">
+                    {formatEth(costs.pads[pad.id]?.networkWei)}
+                    <span>
+                      {formatUsd(
+                        costs.pads[pad.id]?.networkWei,
+                        usdRate,
+                        costNow,
+                      )}
+                    </span>
+                  </dd>
                 </div>
+                {!!costs.pads[pad.id]?.otherValueWei && (
+                  <div>
+                    <dt>Other transaction value</dt>
+                    <dd className="cost-amount">
+                      {formatEth(costs.pads[pad.id]?.otherValueWei)}
+                      <span>
+                        {formatUsd(
+                          costs.pads[pad.id]?.otherValueWei,
+                          usdRate,
+                          costNow,
+                        )}
+                      </span>
+                    </dd>
+                  </div>
+                )}
                 <div>
                   <dt>Ticker</dt>
                   <dd>
@@ -158,15 +244,36 @@ export function LaunchSection({
           Separate token deployments; one can succeed while another fails.
         </p>
       )}
+      {gasWarning && (
+        <p role="alert" className="cost-warning">
+          <TriangleAlert size={18} aria-hidden="true" />
+          {gasWarning}
+        </p>
+      )}
       <footer className="launch-footer">
         <div>
           <span className="eyebrow">ESTIMATED TOTAL</span>
-          <div className="total-price">
-            — <span>Deployment + network fees</span>
-          </div>
+          <output className="total-price" aria-live="polite">
+            {formatEth(costs.total?.totalWei)} <span>{usdTotal}</span>
+          </output>
+          <p className="cost-caption">
+            Launchpad + network fees
+            {costs.total?.otherValueWei ? ' + other transaction value' : ''}
+            {costs.total
+              ? ` · ${costs.total.transactions} transaction${costs.total.transactions === 1 ? '' : 's'}`
+              : ''}
+          </p>
+          {usdTotal !== 'USD unavailable' && usdRate && (
+            <p className="cost-caption">
+              ETH/USD: {usdRate.sourceLabel} ·{' '}
+              {Math.max(0, Math.floor((costNow - usdRate.quotedAt) / 1000))}s
+              ago
+            </p>
+          )}
           <p id="launch-preview-notice" className="launch-note">
-            Live launch and quotes are not connected. Catalog and reservation
-            checks do not guarantee a successful launch.
+            {destinations.length
+              ? costNotice(costs.reason)
+              : 'Select a launchpad to see its launch costs.'}
           </p>
         </div>
         <Button
