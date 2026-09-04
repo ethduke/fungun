@@ -1,3 +1,4 @@
+import { LongLive } from "./long-live.mjs";
 import { createServer } from "node:http";
 import { mkdirSync } from "node:fs";
 import { dirname } from "node:path";
@@ -23,10 +24,11 @@ try {
     enabled: true,
   });
   const fees = new Fees(config, upstream);
+  const launches = new LongLive(config, upstream, budget);
   const trackedPrices = new TrackedPrices(config, upstream);
   const server = createServer(
     { maxHeaderSize: 8192 },
-    createHandler(config, budget, adapters, fees, trackedPrices),
+    createHandler(config, budget, adapters, fees, trackedPrices, launches),
   );
   server.requestTimeout = 10_000;
   server.headersTimeout = 5000;

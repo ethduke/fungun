@@ -1,3 +1,4 @@
+import { readLongLiveConfig } from "./long-live.mjs";
 import { resolve } from "node:path";
 import { isAddress, isHex, size } from "viem";
 import { ServiceError } from "./errors.mjs";
@@ -54,6 +55,7 @@ export function readConfig(env = process.env) {
   )
     throw new ServiceError("invalid_long_configuration");
   return {
+    longLaunch: readLongLiveConfig(env),
     production,
     origin,
     databasePath,

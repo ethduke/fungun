@@ -1,9 +1,11 @@
+import { validateLongInput } from "./long-live.mjs";
 import { isIP } from "node:net";
 import { ServiceError, safeError } from "./errors.mjs";
 import { validAddress } from "./fee-contracts.mjs";
 import { validatePriceInput } from "./tracked-prices.mjs";
 
 export function validateInput(kind, input) {
+  if (kind.startsWith("launch-")) return validateLongInput(kind, input);
   if (kind === "tracked-prices") return validatePriceInput(input);
   if (kind === "fees" || kind === "claim-prepare") {
     const required = kind === "fees" ? ["address", "chainId", "padId"] : ["address", "positionId"];
@@ -57,19 +59,19 @@ export function validateInput(kind, input) {
   return input;
 }
 
-async function readBody(request) {
+async function readBody(request, limit = 2048) {
   if (
     request.headers["content-type"]?.split(";")[0].trim() !== "application/json" ||
     request.headers["content-encoding"]
   )
     throw new ServiceError("invalid_request", 415);
-  if (Number(request.headers["content-length"]) > 2048)
+  if (Number(request.headers["content-length"]) > limit)
     throw new ServiceError("request_too_large", 413);
   let length = 0;
   const chunks = [];
   for await (const chunk of request) {
     length += chunk.length;
-    if (length > 2048) throw new ServiceError("request_too_large", 413);
+    if (length > limit) throw new ServiceError("request_too_large", 413);
     chunks.push(chunk);
   }
   try {
@@ -79,7 +81,7 @@ async function readBody(request) {
   }
 }
 
-export function createHandler(config, budget, adapters, fees, trackedPrices) {
+export function createHandler(config, budget, adapters, fees, trackedPrices, launches) {
   let active = 0;
   return async (request, response) => {
     response.setHeader("content-type", "application/json; charset=utf-8");
@@ -108,7 +110,7 @@ export function createHandler(config, budget, adapters, fees, trackedPrices) {
         request.headers["sec-fetch-site"] === "cross-site"
       )
         throw new ServiceError("origin_denied", 403);
-      const kind = ["catalog", "ticker", "fees", "claim-prepare", "tracked-prices"].find(
+      const kind = ["catalog", "ticker", "fees", "claim-prepare", "tracked-prices", "launch-prepare", "launch-reserve", "launch-status"].find(
         (operation) => request.url === `/v1/${operation}`,
       );
       if (!kind || request.method !== "POST" || request.headers["x-fungun-intent"] !== kind)
@@ -117,9 +119,11 @@ export function createHandler(config, budget, adapters, fees, trackedPrices) {
       const ip = request.socket.remoteAddress;
       if (!ip || !isIP(ip)) throw new ServiceError("unavailable");
       budget.request(ip, kind === "ticker");
-      const input = validateInput(kind, await readBody(request));
+      const input = validateInput(kind, await readBody(request, kind.startsWith("launch-") ? 4096 : 2048));
       const value =
-        kind === "tracked-prices"
+        kind.startsWith("launch-")
+          ? await launches.run(kind, input)
+          : kind === "tracked-prices"
           ? await trackedPrices.list(input, {
               shouldContinue: () => !response.destroyed && !response.writableEnded,
             })
