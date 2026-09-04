@@ -2,6 +2,7 @@ import { sites } from '@openai/sites-vite-plugin';
 import tailwindcss from '@tailwindcss/postcss';
 import vinext from 'vinext';
 import { defineConfig } from 'vite';
+import { configureReadServiceProxy } from './lib/dev-read-proxy.mjs';
 const isCodexSeatbeltSandbox = process.env.CODEX_SANDBOX === 'seatbelt';
 
 const localBindingConfig = {
@@ -36,6 +37,7 @@ export default defineConfig(async ({ command }) => {
         '^/api/(catalog|ticker|fees|claim-prepare|tracked-prices)(?:[/?]|$)': {
           target: `http://127.0.0.1:${apiPort}`,
           rewrite: (path: string) => path.replace(/^\/api(?=\/)/, '/v1'),
+          configure: configureReadServiceProxy,
         },
       },
       watch: isCodexSeatbeltSandbox
