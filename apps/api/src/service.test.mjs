@@ -126,3 +126,66 @@ test("fee HTTP endpoints remain non-signing and reject arbitrary calldata", asyn
   assert.deepEqual(await prepared.json(), { error: "not_configured" });
   assert.equal((await post("claim-send", { address })).status, 404);
 });
+
+test("launch HTTP endpoints enforce exact inputs and their bounded larger body", async (t) => {
+  const budget = new Budget(":memory:");
+  const config = { origin: "http://127.0.0.1:3000" };
+  const calls = [];
+  const launches = {
+    async run(kind, input) {
+      calls.push([kind, input]);
+      return { id: input.id ?? "a".repeat(64), status: kind.slice(7) };
+    },
+  };
+  const server = createServer(createHandler(config, budget, {}, undefined, undefined, launches));
+  await new Promise((resolve, reject) => {
+    server.once("error", reject);
+    server.listen(0, "127.0.0.1", resolve);
+  });
+  t.after(async () => {
+    server.closeAllConnections();
+    await new Promise((resolve) => server.close(resolve));
+    budget.close();
+  });
+  const base = `http://127.0.0.1:${server.address().port}`;
+  const post = (kind, body, headers = {}) => fetch(`${base}/v1/${kind}`, {
+    method: "POST",
+    headers: {
+      origin: config.origin,
+      "content-type": "application/json",
+      "x-fungun-intent": kind,
+      cookie: "private=EXAMPLE",
+      "x-forwarded-for": "192.0.2.1",
+      ...headers,
+    },
+    body: typeof body === "string" ? body : JSON.stringify(body),
+  });
+  const prepare = {
+    chainId: 4663,
+    wallet: `0x${"1".repeat(40)}`,
+    draft: { name: "Sample", ticker: "SAMPLE", description: "a".repeat(2000) },
+    pairId: "long-NVDA",
+    publication: {
+      id: "a".repeat(48),
+      imageHash: "b".repeat(64),
+      metadataHash: "c".repeat(64),
+    },
+  };
+  assert.ok(Buffer.byteLength(JSON.stringify(prepare)) > 2048);
+  assert.equal((await post("launch-prepare", prepare)).status, 200);
+  const id = "d".repeat(64);
+  assert.equal((await post("launch-reserve", { id, binding: "e".repeat(64) })).status, 200);
+  assert.equal((await post("launch-status", { id, hash: null })).status, 200);
+  assert.equal(
+    (await post("launch-status", { id, hash: null, transaction: "0x" })).status,
+    400,
+  );
+  assert.equal((await post("launch-status", { id, hash: "0x1234" })).status, 400);
+  assert.equal((await post("launch-prepare", `{"padding":"${"a".repeat(4096)}"}`)).status, 413);
+  assert.equal(
+    (await post("launch-status", { id, hash: null }, { "x-fungun-intent": "catalog" })).status,
+    404,
+  );
+  assert.deepEqual(calls.map(([kind]) => kind), ["launch-prepare", "launch-reserve", "launch-status"]);
+  assert.equal(calls[0][1].draft.description.length, 2000);
+});

@@ -204,11 +204,11 @@ export class LongLive {
   async status(input) {
     const row = this.row(input.id);
     if (!row) fail("launch_unknown");
+    if (row.tx_hash && input.hash && !same(row.tx_hash, input.hash)) fail("launch_transaction_changed");
     if (row.result) return JSON.parse(row.result);
     const hash = row.tx_hash ?? input.hash;
     if (!hash) return { id: input.id, status: row.state === "prepared" ? "prepared" : "uncertain" };
     if (row.state === "prepared") fail("launch_unknown");
-    if (row.tx_hash && input.hash && !same(row.tx_hash, input.hash)) fail("launch_transaction_changed");
     return this.cache.get(`receipt:${input.id}:${hash}`, 10000, async () => {
       const [chain, tx, receipt] = await this.rpc.batch(4663, [
         { method: "eth_chainId", params: [] }, { method: "eth_getTransactionByHash", params: [hash] },

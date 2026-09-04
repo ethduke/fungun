@@ -251,3 +251,67 @@ await test('fee and claim preparation use fixed backend routes without forwarded
     else process.env.READ_SERVICE_ORIGIN = previousBackend;
   }
 });
+
+await test('launch proxy fixes all routes, strips credentials and enforces the 4096-byte body limit', async () => {
+  const previousOrigin = process.env.APP_ORIGIN;
+  const previousBackend = process.env.READ_SERVICE_ORIGIN;
+  const originalFetch = globalThis.fetch;
+  const origin = 'https://app.example.invalid';
+  const calls: string[] = [];
+  try {
+    process.env.APP_ORIGIN = origin;
+    process.env.READ_SERVICE_ORIGIN = 'https://backend.example.invalid';
+    globalThis.fetch = async (url, options) => {
+      const operation = (url as URL).pathname.slice('/v1/'.length);
+      calls.push(operation);
+      assert.ok(['launch-prepare', 'launch-reserve', 'launch-status'].includes(operation));
+      const headers = new Headers(options?.headers);
+      assert.equal(headers.get('x-fungun-intent'), operation);
+      assert.equal(headers.get('cookie'), null);
+      assert.equal(headers.get('authorization'), null);
+      assert.equal(headers.get('x-forwarded-for'), null);
+      assert.ok(options?.body instanceof Uint8Array);
+      assert.ok(options.body.byteLength > 2048);
+      return Response.json({ status: 'ok' });
+    };
+    for (const operation of ['launch-prepare', 'launch-reserve', 'launch-status']) {
+      const body = JSON.stringify({ operation, padding: 'a'.repeat(2200) });
+      const response = await POST(
+        new Request(`${origin}/api/${operation}`, {
+          method: 'POST',
+          headers: {
+            origin,
+            'content-type': 'application/json',
+            'x-fungun-intent': operation,
+            cookie: 'private=EXAMPLE',
+            authorization: 'Bearer EXAMPLE',
+            'x-forwarded-for': '192.0.2.1',
+          },
+          body,
+        }),
+        { params: Promise.resolve({ operation }) },
+      );
+      assert.equal(response.status, 200);
+    }
+    const oversized = await POST(
+      new Request(`${origin}/api/launch-prepare`, {
+        method: 'POST',
+        headers: {
+          origin,
+          'content-type': 'application/json',
+          'x-fungun-intent': 'launch-prepare',
+        },
+        body: 'a'.repeat(4097),
+      }),
+      { params: Promise.resolve({ operation: 'launch-prepare' }) },
+    );
+    assert.equal(oversized.status, 413);
+    assert.deepEqual(calls, ['launch-prepare', 'launch-reserve', 'launch-status']);
+  } finally {
+    globalThis.fetch = originalFetch;
+    if (previousOrigin === undefined) delete process.env.APP_ORIGIN;
+    else process.env.APP_ORIGIN = previousOrigin;
+    if (previousBackend === undefined) delete process.env.READ_SERVICE_ORIGIN;
+    else process.env.READ_SERVICE_ORIGIN = previousBackend;
+  }
+});

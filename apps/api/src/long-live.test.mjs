@@ -145,6 +145,30 @@ test('receipt verification rejects substituted transactions and requires canonic
   assert.equal((await f.service.run('launch-status', { id: plan.id, hash: null })).status, 'confirmed');
 });
 
+test('terminal launch results remain bound to the journaled transaction hash', async (t) => {
+  for (const status of ['confirmed', 'failed']) {
+    const f = await fixture(t);
+    const plan = await f.service.run('launch-prepare', f.input);
+    const txHash = hash(status === 'confirmed' ? 700 : 701);
+    const terminal = { id: plan.id, status, hash: txHash, paidGasWei: '1' };
+    f.budget.db.prepare(
+      "UPDATE long_launches SET state=?,tx_hash=?,result=? WHERE id=?",
+    ).run(status, txHash, JSON.stringify(terminal), plan.id);
+    assert.deepEqual(
+      await f.service.run('launch-status', { id: plan.id, hash: null }),
+      terminal,
+    );
+    assert.deepEqual(
+      await f.service.run('launch-status', { id: plan.id, hash: txHash.toUpperCase() }),
+      terminal,
+    );
+    await assert.rejects(
+      f.service.run('launch-status', { id: plan.id, hash: hash(702) }),
+      /launch_transaction_changed/,
+    );
+  }
+});
+
 test('configuration and inputs reject arbitrary targets, signatures and unsupported chains', () => {
   assert.equal(readLongLiveConfig({}), null);
   assert.throws(() => readLongLiveConfig({ LONG_WALLET_LAUNCH: 'true' }));
