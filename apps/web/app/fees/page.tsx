@@ -2,7 +2,7 @@
 
 import { useEffect, useRef, useState, useSyncExternalStore } from 'react';
 import { formatUnits } from 'viem';
-import { Wallet, LockKeyhole, RefreshCw } from 'lucide-react';
+import { Wallet, RefreshCw } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import {
@@ -347,14 +347,6 @@ export default function Fees() {
           </TableBody>
         </Table>
       </section>
-      {address && (
-        <p className="fee-claim-notice">
-          Long covers configured locked pools only, not hook payouts. O1 lists
-          up to 25 Robinhood positions. Base is paused, and Longbow fee lookup
-          is not connected. Shared escrow fees are not attributed to individual
-          launches.
-        </p>
-      )}
       {address && !ownerConnected && (
         <p className="notice">Connect this address to claim its fees.</p>
       )}
@@ -538,12 +530,6 @@ export default function Fees() {
           )}
         </section>
       ))}
-      <p id="fee-claim-notice" className="fee-claim-notice">
-        <LockKeyhole size={15} />
-        Address lookups go to our fee service and providers. Signing stays in
-        your wallet; submitted transactions are public. No automatic claims or
-        receipt polling.
-      </p>
     </main>
   );
 }
