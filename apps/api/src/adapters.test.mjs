@@ -27,6 +27,14 @@ const quote = (overrides = {}) => ({
 });
 const body = (quotes) => ({ data: { quotes } });
 
+test("backend accepts ROBINHOOD_RPC and retains the legacy variable fallback", () => {
+  const endpoint = new URL('/primary', 'https://rpc.example.invalid').href;
+  const legacy = new URL('/legacy', 'https://rpc.example.invalid').href;
+  assert.equal(readConfig({ ROBINHOOD_RPC: endpoint }).rpcUrl, endpoint);
+  assert.equal(readConfig({ ROBINHOOD_RPC_URL: legacy }).rpcUrl, legacy);
+  assert.equal(readConfig({ ROBINHOOD_RPC: endpoint, ROBINHOOD_RPC_URL: legacy }).rpcUrl, endpoint);
+});
+
 test("malformed entries and ambiguous symbols fail closed before eligibility filtering", () => {
   for (const quotes of [
     [{}],

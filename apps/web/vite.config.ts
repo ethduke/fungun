@@ -23,7 +23,7 @@ export default defineConfig(async () => {
       host: '127.0.0.1',
       strictPort: true,
       proxy: {
-        '/api': {
+        '^/api/(catalog|ticker)(?:[/?]|$)': {
           target: 'http://127.0.0.1:8787',
           rewrite: (path: string) => path.replace(/^\/api(?=\/)/, '/v1'),
         },

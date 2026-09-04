@@ -45,6 +45,12 @@
   --destructive: #af3932;
   --border: #dfe3d9;
   --ring: #7f996b;
+  --feed-bg: var(--muted);
+  --feed-panel: var(--card);
+  --feed-border: var(--border);
+  --feed-text: var(--foreground);
+  --feed-muted: #5e6b60;
+  --feed-accent: #285bb2;
 }
 * {
   box-sizing: border-box;
@@ -178,6 +184,11 @@ a:focus-visible {
   width: min(1190px, 90%);
   margin: 0 auto;
   padding: 48px 0 25px;
+}
+tracked-market-feed {
+  display: block;
+  width: min(1190px, 90%);
+  margin: 24px auto 0;
 }
 .fees-heading {
   margin-bottom: 30px;

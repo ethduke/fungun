@@ -16,6 +16,15 @@ Run `npm run dev:api` in a second terminal for the read service. See
 
 ## Working controls
 
+- The top market feed shows the source's tracked ETH and SHARES pairs together,
+  fetched through same-origin `GET /api/tracked-feed` approximately every four
+  seconds. It uses the public `https://rh-monitor.fly.dev/api` source without
+  credentials. Each lane preserves source order and scrolls through all returned
+  pairs. Reconnecting retains the last successful rows; an empty successful
+  response clears them. The receipt time is not a per-token valuation timestamp.
+- Popularity groups count similarly named distinct contracts in this selected
+  feed, deduplicated by chain and token and ranked by count then inflow. They
+  refresh on every response. Base rows keep their observed-snapshot label.
 - Upload/drop a PNG, JPEG, WebP or GIF, preview and remove it. Files stay in memory.
 - Enter name, ticker and optional description; review per-launchpad validation.
 - Ticker edits auto-fill the coin name unless a custom name has been entered.

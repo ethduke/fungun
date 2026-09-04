@@ -25,7 +25,7 @@ export function readConfig(env = process.env) {
   )
     throw new ServiceError("single_machine_required");
 
-  const rpcUrl = env.ROBINHOOD_RPC_URL || "";
+  const rpcUrl = env.ROBINHOOD_RPC || env.ROBINHOOD_RPC_URL || "";
   if (rpcUrl && new URL(rpcUrl).protocol !== "https:")
     throw new ServiceError("invalid_rpc_configuration");
   const registry = env.LONG_TICKER_REGISTRY_ADDRESS || "";

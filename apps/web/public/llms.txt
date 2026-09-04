@@ -9,6 +9,11 @@ unverified. Fee reads, live quotes and paid image generation are not enabled.
 An unavailable balance is unknown, not zero. A reservation check is not proof
 of global ticker uniqueness or launch readiness.
 
+The launch page also shows a public market feed, with ETH and SHARES together.
+It updates automatically through same-origin `/api/tracked-feed`, independently
+of the optional read service. Popularity counts similarly named distinct token
+contracts in the source's selected tracked cohort, not social trends.
+
 Only one chain can be selected at a time: Robinhood Chain (default) supports
 Long and O1; Base supports O1. Selecting both launchpads represents separate
 deployments, not one token contract shared between them.

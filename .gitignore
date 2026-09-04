@@ -1,5 +1,7 @@
 # Local credentials and operational data
 .env
+.nev
+.nev.*
 .env.*
 !.env.example
 .envrc

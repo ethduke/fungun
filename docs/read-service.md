@@ -9,8 +9,9 @@ was performed for this milestone.
 
 Use Node 24.4 or newer. Run `npm run setup`, then `npm run dev` and
 `npm run dev:api` in separate terminals. The webview remains at
-http://127.0.0.1:3000; its development proxy forwards only `/api` to the local
-read service on port 8787. SQLite runtime files live in ignored
+http://127.0.0.1:3000; its development proxy forwards `/api/catalog` and
+`/api/ticker` to the local read service on port 8787. The public market feed's
+`GET /api/tracked-feed` route runs in the web server. SQLite runtime files live in ignored
 `apps/api/local/`; never delete them to reset a spent quota.
 
 An ignored root `.env` can hold backend runtime configuration. Leave the committed
@@ -20,7 +21,7 @@ An ignored root `.env` can hold backend runtime configuration. Leave the committ
 - `LONG_RWA_ALLOWLIST`: comma-separated runtime token addresses verified against
   Long's supported stock/oracle configuration. Long intersects the shared O1
   catalog by address; ticker labels alone do not establish eligibility.
-- `ROBINHOOD_RPC_URL`, `LONG_TICKER_REGISTRY_ADDRESS`,
+- `ROBINHOOD_RPC` (legacy alias: `ROBINHOOD_RPC_URL`), `LONG_TICKER_REGISTRY_ADDRESS`,
   `LONG_TICKER_REGISTRY_CODE_HASH`: server-only RPC configuration and independently
   verified deployed Long registry identity. Do not copy addresses into source/tests.
 - `APP_ORIGIN`: exact web origin; defaults to the local URL above.
