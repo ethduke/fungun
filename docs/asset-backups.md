@@ -38,6 +38,27 @@ No wallet keys, RPC URLs or provider credentials enter the snapshot child proces
 Inside the asset image, use `node src/asset-snapshot-cli.mjs` with the same arguments
 instead of the npm wrapper. Do not expose these commands as HTTP endpoints.
 
+## Restore reconciliation
+
+Run `npm run assets:snapshot -- reconcile-restore` with the original store,
+independently verified backup and quarantined restore configured above. The command
+accepts no write flags. It checks distinct private stores, exact database state,
+quotas, pinned origins, object inventories and the externally recorded digest.
+Stop and drain the service first to obtain useful offline evidence.
+
+A match reports `activationAllowed: false`. It is not a reusable activation permit:
+the source may change after the read transaction. Missing originals, stale backups,
+retired stores, aliases, unsafe links and changed restores are rejected. Complete
+agreement about an incomplete reservation does not make that reservation publishable.
+
+Activation remains unavailable until dedicated production Machine/volume identities
+can bind the destination and a fenced cutover repeats reconciliation. The future
+protocol must durably retire the original before making that exact destination
+active, fence every quota/state mutation, and preserve an interrupted-cutover record.
+Constructor checks alone cannot stop an already-open service or an in-flight file
+write. Never clear quarantine manually or reactivate an old original. Loss of the
+original still requires a separate independently anchored recovery procedure.
+
 ## Interrupted publication
 
 When both approved final files were written but publication was not committed,
@@ -77,8 +98,8 @@ existing read-only status check. Storage receipts still say `launchReady: false`
   reruns require a different new directory. No automatic cleanup or overwrite occurs.
 - Every exported database is quarantined before it receives the runtime filename.
   Runtime startup, expiry, migration, recovery and re-export all reject quarantined stores.
-  There is deliberately no unlock flag. Reconciliation with all post-backup
-  publications/counters and a reviewed activation procedure are still required.
+  There is deliberately no unlock flag. Read-only reconciliation is implemented;
+  physically bound activation and unavailable-original recovery remain required.
 - Production rejects same-filesystem exports. A different filesystem alone does
   not prove an independent failure domain. Choose encrypted offsite retention and
   perform a restore drill before tokens depend on these URLs. Fly snapshots may
@@ -87,3 +108,23 @@ existing read-only status check. Storage receipts still say `launchReady: false`
 Sources: [SQLite online backup](https://www.sqlite.org/backup.html),
 [Node SQLite backup](https://nodejs.org/api/sqlite.html#sqlitebackupsource-db-path-options),
 [Fly volume snapshots](https://fly.io/docs/volumes/snapshots/).
+
+## Recommended independent destination
+
+Recommendation, not provisioned: a private **Backblaze B2 pay-as-you-go** bucket in
+a separate account with MFA. Current pricing includes the first 10 GB; subsequent
+storage is $6.95/TB per 30 days. Retained snapshots count toward usage, so free storage
+is not guaranteed. [B2 pricing](https://www.backblaze.com/cloud-storage/pricing)
+
+Encrypt each complete snapshot before upload. Keep its recovery key and trusted
+manifest/version checkpoints outside Fly and Git. Give the backup job only a
+bucket/prefix-scoped key, without permanent-delete, account-management or retention-
+administration permissions. Keep restore credentials separate from the web/API
+environment. [Scoped B2 keys](https://www.backblaze.com/docs/cloud-storage-s3-compatible-app-keys)
+
+Propose seven-day immutable retention for initial backups, subject to approval.
+Compliance-mode Object Lock cannot be undone early; locked data remains stored and
+billable. Restore a recorded object version and verify its independent digest,
+not an untrusted mutable "latest" pointer. No bucket, key, retention rule or upload
+has been created. [Object Lock](https://www.backblaze.com/docs/cloud-storage-object-lock),
+[file versions](https://www.backblaze.com/docs/cloud-storage-file-versions)
