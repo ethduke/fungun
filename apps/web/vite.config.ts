@@ -10,6 +10,13 @@ const localBindingConfig = {
 };
 
 export default defineConfig(async () => {
+  if (process.env.FUNGUN_WEB_TARGET === 'fly') {
+    return {
+      css: { postcss: { plugins: [tailwindcss()] } },
+      plugins: [vinext()],
+      build: { sourcemap: false },
+    };
+  }
   // Keep preview runtime files out of the user's global directories.
   process.env.WRANGLER_WRITE_LOGS ??= 'false';
   process.env.WRANGLER_LOG_PATH ??= '.wrangler/logs';

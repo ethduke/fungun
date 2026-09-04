@@ -7,6 +7,7 @@
     "dev": "npm --prefix apps/web run dev -- --hostname 127.0.0.1 --port 3000",
     "dev:api": "npm --prefix apps/api start",
     "build": "npm --prefix apps/web run build",
+    "build:fly": "npm --prefix apps/web run build:fly",
     "lint": "npm --prefix apps/web run lint && apps/web/node_modules/.bin/oxlint apps/api/src",
     "typecheck": "npm --prefix apps/web run typecheck",
     "runtime:status": "node --env-file-if-exists=.env scripts/runtime-status.mjs",

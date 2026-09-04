@@ -8,6 +8,8 @@
   "scripts": {
     "dev": "vinext dev",
     "build": "vinext build",
+    "build:fly": "node scripts/build-fly.mjs",
+    "start:fly": "NODE_ENV=production node dist/standalone/server.js",
     "start": "wrangler dev --config dist/server/wrangler.json",
     "lint": "oxlint",
     "typecheck": "tsc --noEmit",
