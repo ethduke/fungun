@@ -60,9 +60,10 @@ the authenticated Robinhood catalog check. The running web-to-API path then
 returned 194 Robinhood and 10 Base RWA pairings. These are observed counts, not
 fixed expected counts or launch approval. An earlier Base request was throttled;
 no immediate retry was sent and a later explicit check succeeded.
-Wallet claims, launches and payments remain disabled. Registry identities
-and the RPC endpoint stay in the ignored local environment, never this document.
-This proves a reservation read works, not global uniqueness or launch readiness.
+Launch transactions remain disabled; this catalog verification did not exercise
+wallet claims or payments. Registry identities and the RPC endpoint stay in the
+ignored local environment, never this document. This proves a reservation read
+works, not global uniqueness or launch readiness.
 
 With the local webview and API running, `npm run verify:catalog:local -- 4663`
 checks Robinhood; use `8453` for Base. Each explicit command makes one local HTTP

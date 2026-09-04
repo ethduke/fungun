@@ -164,4 +164,5 @@ opaque `cursor` returned by the previous page. It returns `nextCursor` and cover
 `/api/claim-prepare` takes only `address` and an opaque returned `positionId`;
 it prepares but never sends. Intent headers match the operation. Handles expire,
 quotas apply, and clients cannot supply targets, calldata or provider URLs.
-Only continue fee pages under explicit scan intent. No launch, upload or paid-image API is available.
+Only continue fee pages under explicit scan intent. No launch API is available;
+upload and paid-image APIs require configured services and explicit user actions.
