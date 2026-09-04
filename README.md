@@ -23,7 +23,10 @@ unverified and Longbow ticker checking is not connected. Configured fee adapters
 and explicit wallet claims. The Fees tab discovers the connected wallet's beneficiary positions with
 resumable pages and queues all eligible claims for individual wallet confirmation;
 see [fee setup and coverage](docs/fee-claims.md).
-Launch transactions and paid image generation remain disabled. Telegram is out of scope.
+USDG/x402 image generation is implemented and defaults to disabled until its runtime
+settings are configured; see [image setup and recovery](docs/image-generation.md).
+Drafts, images and published metadata survive reloads. Launch transactions remain
+disabled pending their existing verification work. Telegram is out of scope.
 
 ## Agent documentation
 

@@ -1,0 +1,14 @@
+.generated-image-result {
+  display: grid;
+  justify-items: center;
+  gap: 1rem;
+}
+.generated-image-result img {
+  max-width: 100%;
+  border-radius: 1rem;
+  object-fit: contain;
+}
+.payment-address {
+  overflow-wrap: anywhere;
+  font-size: 1rem;
+}

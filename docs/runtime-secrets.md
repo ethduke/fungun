@@ -27,3 +27,8 @@ Prefer a dedicated O1 key scoped to the required read endpoints. Local API quota
 cannot account for another bot or service using the same provider credential.
 Keep `.env` ignored and run the staged, tracked and history security scans before
 committing or pushing. Never include real credentials in tests.
+
+The separate asset launcher also allowlists OpenRouter, x402, USDG and read-only
+settlement RPC settings for [image generation](image-generation.md). Those values
+are never forwarded to the read API, the isolated decoder, or a web build. Only
+the public USDG asset configuration is shared with the web quote proxy.

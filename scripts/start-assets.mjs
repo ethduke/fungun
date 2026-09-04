@@ -16,10 +16,20 @@ try {
   }
   const args = process.argv.slice(2);
   const initialize = args.length === 1 && args[0] === "--initialize-new-volume";
-  if (args.length && !initialize) maintenanceArguments(args);
+  const images = args.length === 1 && args[0] === "--initialize-image-jobs";
+  if (args.length && !initialize && !images) maintenanceArguments(args);
   const child = spawn(
     process.execPath,
-    [initialize ? "src/init-assets.mjs" : args.length ? "src/asset-maintenance.mjs" : "src/asset-server.mjs", ...args],
+    [
+      initialize
+        ? "src/init-assets.mjs"
+        : images
+          ? "src/init-image-jobs.mjs"
+          : args.length
+            ? "src/asset-maintenance.mjs"
+            : "src/asset-server.mjs",
+      ...args,
+    ],
     {
       cwd: fileURLToPath(new URL("../apps/api/", import.meta.url)),
       env: assetEnvironment(process.env, local),

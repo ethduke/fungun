@@ -59,6 +59,7 @@ export default defineConfig(async ({ command }) => {
                     'ASSET_SERVICE_ORIGIN',
                     'ASSET_PUBLIC_ORIGIN',
                     'ASSET_UPLOADS',
+                    'IMAGE_USDG_ADDRESS',
                   ]
                     .filter((name) => typeof process.env[name] === 'string')
                     .map((name) => [name, process.env[name]!]),

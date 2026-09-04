@@ -3,8 +3,10 @@
 import { createContext, useContext } from 'react';
 import type { ClaimQuote } from './fee-service';
 import type { AssetApproval } from './asset-protocol';
+import type { ImageOperation, ImageQuote, ImageProof } from './image-generation';
 
 export type ConnectedAccount = {
+  signImage?: (quote: ImageQuote, input: ImageOperation, isCurrent: () => boolean) => Promise<ImageProof>;
   openWallet?: () => void;
   address?: string;
   chainId?: number;

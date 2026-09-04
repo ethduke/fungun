@@ -31,6 +31,8 @@ import {
 import type { ClaimQuote } from '@/lib/fee-service';
 import { signWalletAsset } from '@/lib/asset-wallet';
 import type { AssetApproval } from '@/lib/asset-protocol';
+import { signImagePayment } from '@/lib/image-wallet';
+import type { ImageQuote, ImageOperation } from '@/lib/image-generation';
 
 let configuration: ReturnType<typeof createPreviewConfig> | undefined;
 async function walletProvider() {
@@ -71,6 +73,8 @@ const ensureClaimChain = async (
   ensureWalletClaimChain(await walletProvider(), address, chainId, isCurrent);
 const signAsset = async (approval: AssetApproval, isCurrent: () => boolean) =>
   signWalletAsset(await walletProvider(), approval, isCurrent);
+const signImage = async (quote: ImageQuote, input: ImageOperation, isCurrent: () => boolean) =>
+  signImagePayment(await walletProvider(), quote, input, isCurrent);
 
 function ConnectionControl({
   onAccountChange,
@@ -96,6 +100,7 @@ function ConnectionControl({
             watchClaim,
             ensureClaimChain,
             signAsset,
+            signImage,
           }
         : {},
     );

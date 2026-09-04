@@ -7,7 +7,6 @@ import {
   Check,
   ChevronDown,
   ImagePlus,
-  LockKeyhole,
   ShieldCheck,
   Sparkles,
   Trash2,
@@ -22,16 +21,10 @@ import {
   CollapsibleContent,
   CollapsibleTrigger,
 } from '@/components/ui/collapsible';
-import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogHeader,
-  DialogTitle,
-} from '@/components/ui/dialog';
 import { LaunchpadCard } from '@/components/launchpad-card';
 import { LaunchSection } from '@/components/launch-section';
 import { AssetPublication } from '@/components/asset-publication';
+import { ImageGeneration } from '@/components/image-generation';
 import {
   autofillCoinName,
   IMAGE_LIMIT,
@@ -47,7 +40,7 @@ import {
   type Destination,
 } from '@/lib/launch-model';
 import { usePreviewTools } from '@/lib/preview-webmcp';
-import { useDraftField } from '@/lib/launch-draft';
+import { useDraftCache, useDraftField } from '@/lib/launch-draft';
 import { useReadService } from '@/lib/use-read-service';
 import { tickerNotice } from '@/lib/read-service';
 import { launchCostKey } from '@/lib/launch-cost';
@@ -55,6 +48,7 @@ import { useConnectedAccount } from '@/lib/account-context';
 
 export default function Home() {
   const account = useConnectedAccount();
+  const { hydrated, cacheState, cacheError, retryCache } = useDraftCache();
   const [selection, setSelection] = useDraftField('selection');
   const { chainId, destinations } = selection;
   const [name, setName] = useDraftField('name');
@@ -138,7 +132,7 @@ export default function Home() {
   );
 
   async function selectImage(file?: File) {
-    if (!file) return;
+    if (!file || !hydrated) return;
     const sequence = ++imageSequence.current;
     setImageError('');
     setImagePending(true);
@@ -155,7 +149,7 @@ export default function Home() {
       if (oversized)
         throw new Error('Use an image no larger than 4096 × 4096 pixels.');
       if (sequence === imageSequence.current)
-        setImage({ url: URL.createObjectURL(source), size: file.size });
+        setImage({ url: URL.createObjectURL(source), size: file.size, blob: source });
     } catch (error) {
       if (sequence === imageSequence.current) {
         setImage(null);
@@ -221,7 +215,12 @@ export default function Home() {
             </span>
           </div>
         </div>
+        <p className="sample-note" aria-live="polite">
+          {cacheState === 'loading' ? 'Restoring your draft…' : cacheState === 'saving' ? 'Saving your draft…' : cacheState === 'saved' ? 'Draft and picture saved in this browser.' : cacheError}
+          {cacheError && <Button variant="ghost" size="sm" onClick={() => void retryCache()}>Retry saving</Button>}
+        </p>
         <form onSubmit={(event) => event.preventDefault()} noValidate>
+          <fieldset disabled={!hydrated} style={{ border: 0, padding: 0, margin: 0, minWidth: 0 }}>
           <div className="composer-grid">
             <section
               className="composer-panel"
@@ -309,7 +308,7 @@ export default function Home() {
                     <div className="image-file-note">
                       <span>
                         <Check size={13} />
-                        {imageBytes} · Kept in this browser only
+                        {imageBytes} · Saved with your draft
                       </span>
                       <Button
                         variant="ghost"
@@ -356,10 +355,10 @@ export default function Home() {
                       onClick={() => setGenerationOpen(true)}
                     >
                       <Sparkles size={16} />
-                      Preview generation
+                      Generate with Grok
                     </Button>
                     <p className="sample-note">
-                      Preview only. Your prompt is not sent or charged.
+                      Review the USDG price before authorizing one image.
                     </p>
                   </div>
                 </TabsContent>
@@ -570,6 +569,7 @@ export default function Home() {
               }
             />
           </LaunchSection>
+          </fieldset>
         </form>
         <footer className="workspace-footer">
           <span>YOUR IDEA. YOUR WALLET. YOUR LAUNCH.</span>
@@ -578,43 +578,7 @@ export default function Home() {
           </span>
         </footer>
       </main>
-      <Dialog open={generationOpen} onOpenChange={setGenerationOpen}>
-        <DialogContent className="app-dialog">
-          <DialogHeader>
-            <span className="dialog-icon">
-              <Sparkles />
-            </span>
-            <DialogTitle>Generate with Grok</DialogTitle>
-            <DialogDescription>
-              In the next milestone, you’ll review an x402 price, approve
-              payment in your wallet, and receive your image.
-            </DialogDescription>
-          </DialogHeader>
-          <p className="prompt-preview">{prompt}</p>
-          <div className="generation-steps">
-            <span>
-              <span>1</span>Review price & payment network
-            </span>
-            <span>
-              <span>2</span>Approve a one-time wallet payment
-            </span>
-            <span>
-              <span>3</span>Generate and attach your image
-            </span>
-          </div>
-          <p className="notice">
-            No price has been quoted. No prompt, payment or signature has been
-            sent.
-          </p>
-          <Button disabled>
-            <LockKeyhole size={16} />
-            Payment not enabled
-          </Button>
-          <Button variant="outline" onClick={() => setGenerationOpen(false)}>
-            Back to prompt
-          </Button>
-        </DialogContent>
-      </Dialog>
+      <ImageGeneration open={generationOpen} onOpenChange={setGenerationOpen} />
     </>
   );
 }
