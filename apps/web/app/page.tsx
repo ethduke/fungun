@@ -35,6 +35,7 @@ import {
 } from '@/components/ui/dialog';
 import { LaunchpadCard } from '@/components/launchpad-card';
 import {
+  autofillCoinName,
   chainName,
   DEFAULT_CHAIN_ID,
   DEFAULT_DESTINATIONS,
@@ -431,7 +432,11 @@ export default function Home() {
                       autoComplete="off"
                       spellCheck={false}
                       onChange={(event) => {
-                        setTicker(event.target.value);
+                        const nextTicker = event.target.value;
+                        setName((current) =>
+                          autofillCoinName(current, ticker, nextTicker),
+                        );
+                        setTicker(nextTicker);
                         setTickerNotice(false);
                       }}
                       aria-invalid={(attempted || !!ticker) && !!errors.ticker}

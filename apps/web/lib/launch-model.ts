@@ -19,6 +19,14 @@ export interface CoinDraft {
   hasImage: boolean;
 }
 
+export function autofillCoinName(
+  name: string,
+  previousTicker: string,
+  ticker: string,
+) {
+  return !name.trim() || name === previousTicker ? ticker : name;
+}
+
 export const IMAGE_LIMIT = 2 * 1024 * 1024;
 export const DESCRIPTION_LIMIT = 2000;
 export const DEFAULT_CHAIN_ID: ChainId = 4663;

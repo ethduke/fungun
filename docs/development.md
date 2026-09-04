@@ -16,6 +16,7 @@ installed to test wallet connection; embedded browsers may have no injected wall
 
 - Upload/drop a PNG, JPEG, WebP or GIF, preview and remove it. Files stay in memory.
 - Enter name, ticker and optional description; review per-launchpad validation.
+- Ticker edits auto-fill the coin name unless a custom name has been entered.
 - Choose one chain: Robinhood (default) offers Long and O1; Base offers O1.
 - Select launchpads and pairings. Changing chains clears incompatible selections.
 - Choose clearly labeled sample stock symbols; these are not a live RWA catalog.

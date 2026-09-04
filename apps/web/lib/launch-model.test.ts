@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import {
+  autofillCoinName,
   DEFAULT_DESTINATIONS,
   DEFAULT_CHAIN_ID,
   IMAGE_LIMIT,
@@ -19,6 +20,34 @@ const draft = {
   hasImage: true,
 };
 const destinations = () => structuredClone(DEFAULT_DESTINATIONS);
+
+await test('coin name follows ticker typing, replacement and clearing', () => {
+  let name = '';
+  let ticker = '';
+  for (const nextTicker of ['M', 'MO', 'MOON', 'SUN', 'SU', '']) {
+    name = autofillCoinName(name, ticker, nextTicker);
+    ticker = nextTicker;
+    assert.equal(name, ticker);
+  }
+});
+
+await test('ticker autofill preserves custom names until the name is cleared', () => {
+  assert.equal(
+    autofillCoinName('Moon Department', 'MOON', 'SUN'),
+    'Moon Department',
+  );
+  assert.equal(
+    autofillCoinName('Moon Department', 'MOON', ''),
+    'Moon Department',
+  );
+  assert.equal(autofillCoinName('', 'MOON', 'SUN'), 'SUN');
+  assert.equal(autofillCoinName('   ', 'MOON', 'SUN'), 'SUN');
+});
+
+await test('ticker autofill copies the exact text without changing case or characters', () => {
+  assert.equal(autofillCoinName('', '', 'Moon1'), 'Moon1');
+  assert.equal(autofillCoinName('', '', '🌙'), '🌙');
+});
 
 await test('valid Long draft and empty draft requirements', () => {
   assert.deepEqual(validateDraft(draft, destinations()), {});
