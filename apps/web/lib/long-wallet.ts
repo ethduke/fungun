@@ -75,6 +75,13 @@ export function validateLongPlan(raw: unknown, input: LaunchInput, published: Pu
   return Object.freeze({ ...p, deadline, transaction: Object.freeze({ ...tx }) });
 }
 
+export async function prepareLongWallet(input: LaunchInput, publication: PublishedAsset) {
+  const started = performance.now();
+  const raw = await launchRequest('launch-prepare', input);
+  const plan = validateLongPlan(raw, input, publication, started);
+  return { plan, observedAt: performance.now(), usdAge: raw.serverTime - plan.usd.quotedAt };
+}
+
 export async function sendLongWallet(provider: EIP1193Provider, plan: LongPlan, isCurrent: () => boolean, reserve: () => Promise<void>) {
   const check = async () => {
     if (!isCurrent()) throw new LaunchError('wrong_account');

@@ -43,15 +43,17 @@ export function createAssetProxy(
     );
   return async (request: Request, operation: string) => {
     if (
-      !['prepare', 'publish', 'status'].includes(operation) ||
+      !['prepare', 'publish', 'status', 'launch-prepare', 'launch-publish'].includes(operation) ||
       new URL(request.url).search
     )
       return fail('not_found', 404);
+    const launch = operation.startsWith('launch-');
+    const kind = launch ? operation.slice(7) : operation;
     if (active >= 4) return fail('asset_busy', 429, 2);
     active++;
     try {
       const config = configure();
-      if (operation !== 'status' && !config.enabled)
+      if (kind !== 'status' && !config.enabled)
         return fail('asset_uploads_disabled');
       const origin = assetOrigin(config.appOrigin, !config.production);
       const publicOrigin = assetOrigin(config.publicOrigin);
@@ -80,40 +82,40 @@ export function createAssetProxy(
         request.headers.has('content-encoding')
       )
         return fail('invalid_request', 403);
-      const limit = operation === 'status' ? 2048 : ASSET_BODY_LIMIT;
+      const limit = kind === 'status' ? 2048 : ASSET_BODY_LIMIT;
       if (Number(request.headers.get('content-length')) > limit)
         return fail('image_size', 413);
       const value = await readAssetJson(request.body, limit);
       const fields =
-        operation === 'status'
+        kind === 'status'
           ? ['chainId', 'wallet', 'id', 'imageHash', 'metadataHash']
           : [
               'chainId',
               'wallet',
               'draft',
               'imageBase64',
-              ...(operation === 'publish' ? ['id', 'signature'] : []),
+              ...(kind === 'publish' ? ['id', launch ? 'uploadToken' : 'signature'] : []),
             ];
       if (!objectFields(value, fields) || value.chainId !== 4663)
         return fail('invalid_request', 400);
       const wallet = assetWallet(value.wallet);
-      if (operation !== 'status') {
+      if (kind !== 'status') {
         assetDraft(value.draft);
         imageBytes(value.imageBase64);
       }
       if (
-        operation !== 'prepare' &&
+        kind !== 'prepare' &&
         (typeof value.id !== 'string' || !/^[a-f0-9]{48}$/.test(value.id))
       )
         return fail('invalid_request', 400);
       if (
-        operation === 'publish' &&
-        (typeof value.signature !== 'string' ||
-          !/^0x[a-f0-9]{130}$/i.test(value.signature))
+        kind === 'publish' &&
+        (launch ? typeof value.uploadToken !== 'string' || !/^[a-f0-9]{64}$/.test(value.uploadToken)
+          : typeof value.signature !== 'string' || !/^0x[a-f0-9]{130}$/i.test(value.signature))
       )
         return fail('invalid_request', 400);
       if (
-        operation === 'status' &&
+        kind === 'status' &&
         [value.imageHash, value.metadataHash].some(
           (hash) => typeof hash !== 'string' || !/^[a-f0-9]{64}$/.test(hash),
         )
@@ -143,7 +145,7 @@ export function createAssetProxy(
       }
       const raw = await readAssetJson(
         response.body,
-        operation === 'prepare' ? ASSET_BODY_LIMIT : 4096,
+        kind === 'prepare' ? ASSET_BODY_LIMIT : 4096,
       );
       if (!response.ok) {
         const code =
@@ -189,7 +191,7 @@ export function createAssetProxy(
           Number.isInteger(retry) && retry > 0 ? Math.min(retry, 86400) : 0,
         );
       }
-      if (operation === 'prepare') {
+      if (kind === 'prepare') {
         if (!raw || typeof raw !== 'object' || Array.isArray(raw))
           return fail('invalid_asset_response');
         const payload = { ...raw, assetOrigin: publicOrigin };
@@ -198,11 +200,12 @@ export function createAssetProxy(
           draft: assetDraft(value.draft),
           appOrigin: origin,
           startedAt,
+          launch,
         });
         return Response.json(payload, { headers });
       }
       if (
-        operation === 'status' &&
+        kind === 'status' &&
         objectFields(raw, ['id', 'status']) &&
         raw.id === value.id &&
         ['pending', 'uncertain'].includes(raw.status as string)
@@ -227,14 +230,14 @@ export function createAssetProxy(
         expected.metadataUrl = `${publicOrigin}/ipfs/${String(ipfs.metadataCid)}`;
       }
       if (
-        operation === 'status' &&
+        kind === 'status' &&
         raw &&
         typeof raw === 'object' &&
         'status' in raw &&
         raw.status === 'expired'
       )
         return Response.json(validateExpiredAsset(raw, expected), { headers });
-      if (operation === 'publish') {
+      if (kind === 'publish') {
         const { assetHash } = await import('./asset-protocol.ts');
         const draft = assetDraft(value.draft);
         const image = imageBytes(value.imageBase64);

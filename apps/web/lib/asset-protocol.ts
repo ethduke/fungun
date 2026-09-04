@@ -10,6 +10,7 @@ export type AssetIpfs = {
   metadataCid: string;
 };
 export type AssetApproval = {
+  uploadToken?: string;
   id: string;
   wallet: string;
   appOrigin: string;
@@ -247,12 +248,13 @@ export function assetMessage(
     | 'issuedAt'
     | 'expiresAt'
     | 'ipfs'
+    | 'uploadToken'
   >,
 ) {
   if ('ipfs' in value && value.ipfs) {
     return [
-      'Publish memecoin assets — no transaction or token approval.',
-      'Intent version: 2',
+      value.uploadToken ? 'Launch assets — no wallet signature.' : 'Publish memecoin assets — no transaction or token approval.',
+      value.uploadToken ? 'Intent version: 3' : 'Intent version: 2',
       `Website: ${value.appOrigin}`,
       `Public asset origin: ${value.assetOrigin}`,
       `Wallet: ${value.wallet.toLowerCase()}`,
@@ -296,6 +298,7 @@ export async function validateAssetPreview(
     draft: AssetDraft;
     appOrigin: string;
     startedAt: number;
+    launch?: boolean;
   },
   now = performance.now(),
 ): Promise<AssetApproval> {
@@ -317,7 +320,8 @@ export async function validateAssetPreview(
     'assetOrigin',
   ];
   const fields = raw && typeof raw === 'object' && 'ipfs' in raw ? [...baseFields, 'ipfs'] : baseFields;
-  if (!objectFields(raw, fields))
+  if (!objectFields(raw, expected.launch ? [...fields, 'uploadToken'] : fields)
+    || (expected.launch && (typeof raw.uploadToken !== 'string' || !/^[a-f0-9]{64}$/.test(raw.uploadToken) || !('ipfs' in raw))))
     throw new AssetError('invalid_asset_response');
   const origin = assetOrigin(raw.assetOrigin);
   const draft = assetDraft(raw.draft);

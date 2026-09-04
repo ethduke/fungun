@@ -24,7 +24,6 @@ import {
 import { LaunchpadCard } from '@/components/launchpad-card';
 import { LongLaunch, type LongCosts } from '@/components/long-launch';
 import { LaunchSection } from '@/components/launch-section';
-import { AssetPublication } from '@/components/asset-publication';
 import { ImageGeneration } from '@/components/image-generation';
 import {
   autofillCoinName,
@@ -553,21 +552,11 @@ export default function Home() {
             checking={reads.checking}
             now={reads.now}
           >
-            <AssetPublication
-              name={name}
-              ticker={ticker}
-              description={description}
-              image={image}
-              imagePending={imagePending}
-              enabled={
-                chainId === 4663 && active.some((pad) => pad.id === 'long')
-              }
-            />
             <LongLaunch
               enabled={chainId === 4663 && active.some((pad) => pad.id === 'long')}
               ready={active.length === 1 && active[0]?.id === 'long' && !imagePending && !Object.keys(errors).length}
               pairId={active.find((pad) => pad.id === 'long')?.pairId}
-              name={name} ticker={ticker} description={description}
+              name={name} ticker={ticker} description={description} image={image}
               contextKey={launchCostKey({
               name,
               ticker,

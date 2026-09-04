@@ -39,14 +39,15 @@ headers and feed observations are checked; they do not replace that feed.
 ## User flow
 
 1. Connect Rabby or MetaMask, choose only Long and NVDA, and complete the draft.
-2. Prepare and confirm public artwork. The existing free signature authenticates
-   exact publication consent and the wallet's upload quota. Pinata uploads and
-   verification then run in the background. Public copies may remain permanently.
-3. Review launch. The server verifies the existing publication receipt, reconstructs
+2. Click **Launch coin** once. This authorizes publication of the displayed artwork
+   and metadata. The app validates, uploads and verifies them in the background.
+   No wallet message signature or separate prepare/publish button is used.
+   Public copies may remain permanently; the app covers publication within its limits.
+3. The server then verifies the publication receipt, reconstructs
    its canonical metadata/CID, validates contracts and prices at one explicit block,
    checks ticker/address vacancy, simulates with the wallet as sender, and estimates
    pending gas and balance. It returns no signed bytes.
-4. Review ETH/USD launch and gas costs, then click Launch coin. The browser uses the
+4. ETH/USD launch and gas estimates appear and the wallet opens automatically. The browser uses the
    same portable encoder to reconstruct every calldata byte. It rechecks account,
    chain, launcher code and pending nonce, durably reserves one attempt, and asks
    the extension to sign and submit exactly once. The user must approve in the wallet.
@@ -105,11 +106,23 @@ without changing publication IDs, hashes, CIDs or wallet bindings. Both URLs mus
 match the recorded origin and CIDs; altered paths or queries remain rejected.
 Recovery continues through the existing status endpoint without another signature.
 
-Publication's version-2 message and server journal remain compatible with pending
-approvals. Removing the signature would require another authenticated admission
-mechanism. Origin headers alone are not authentication. A shorter signed protocol
-would require explicit versioning and recovery migration; existing signatures are
-not silently reinterpreted. O1 retains its native pinning path.
+New uploads use version-3 server-issued upload capabilities. They bind the exact
+publication ID, wallet field, processed bytes, metadata and five-minute expiry.
+The wallet field is unverified input in this mode, not proof of wallet ownership.
+The wallet authenticates the actual deployment transaction. Origin checks do not
+authenticate a caller. The existing global limits remain: six preparations per
+minute, 60 per day, 30 publications per day, three per wallet field per day,
+256 MiB reserved staging and 4,096 journal entries. Anonymous traffic can exhaust
+these allowances, but cannot bypass the global publication budget.
+
+An additive `ipfs_launch_admissions` table marks version-3 records. Legacy signed
+records cannot be published through the capability endpoint. Their messages,
+signatures and status recovery remain intact. Browser recovery persists an opaque
+publication ID and hash of the original draft/image/wallet context before the
+write; the upload capability stays in memory only. Lost responses use status
+reads, never automatic publication retries. Normal polling is bounded to twelve
+checks, five seconds apart. A changed draft cannot use an earlier recovery's image.
+O1 retains its native pinning path; this wallet release supports Long/NVDA only.
 
 Sources: [Robinhood network configuration](https://docs.robinhood.com/chain/connecting/),
 [gas and fees](https://docs.robinhood.com/chain/gas-and-fees/),

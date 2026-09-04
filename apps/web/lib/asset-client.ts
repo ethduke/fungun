@@ -135,7 +135,7 @@ export function clearAssetRecovery(storage: Storage, value: AssetRecovery) {
   notifyRecovery();
 }
 export async function assetRequest(
-  operation: 'prepare' | 'publish' | 'status',
+  operation: 'prepare' | 'publish' | 'status' | 'launch-prepare' | 'launch-publish',
   value: unknown,
   fetcher: typeof fetch = fetch,
 ): Promise<unknown> {
@@ -181,11 +181,12 @@ export async function prepareAsset(
   draft: AssetDraft,
   origin: string,
   fetcher: typeof fetch = fetch,
+  launch = false,
 ) {
   const startedAt = performance.now();
   const account = assetWallet(wallet);
   const response = await assetRequest(
-    'prepare',
+    launch ? 'launch-prepare' : 'prepare',
     { chainId: 4663, wallet: account, draft, imageBase64: imageBase64(bytes) },
     fetcher,
   );
@@ -194,21 +195,23 @@ export async function prepareAsset(
     draft,
     appOrigin: origin,
     startedAt,
+    launch,
   });
 }
 export async function publishAsset(
   approval: AssetApproval,
-  signature: string,
+  proof: string,
   recovery: AssetRecovery,
   storage: Storage,
   isCurrent: () => boolean,
   fetcher: typeof fetch = fetch,
+  launch = false,
 ): Promise<PublishedAsset | ProcessingAsset> {
   if (!isCurrent()) throw new AssetError('asset_context_changed');
   if (performance.now() >= approval.deadline)
     throw new AssetError('asset_approval_expired');
   if (
-    !/^0x[a-f0-9]{130}$/i.test(signature) ||
+    (launch ? !/^[a-f0-9]{64}$/.test(proof) || proof !== approval.uploadToken : !/^0x[a-f0-9]{130}$/i.test(proof)) ||
     JSON.stringify(recovery) !== JSON.stringify(await recoveryFor(approval))
   )
     throw new AssetError('invalid_asset_approval');
@@ -224,14 +227,14 @@ export async function publishAsset(
   }
   try {
     const raw = await assetRequest(
-      'publish',
+      launch ? 'launch-publish' : 'publish',
       {
         chainId: 4663,
         wallet: approval.wallet,
         draft: approval.draft,
         imageBase64: approval.imageBase64,
         id: approval.id,
-        signature,
+        ...(launch ? { uploadToken: proof } : { signature: proof }),
       },
       fetcher,
     );
@@ -285,4 +288,8 @@ export async function checkAssetStatus(
         : validatePublishedAsset(raw, recovery);
   if (result.status === 'expired') clearAssetRecovery(storage, recovery);
   return result;
+}
+
+export function publishLaunchAsset(approval: AssetApproval, recovery: AssetRecovery, storage: Storage, isCurrent: () => boolean, fetcher: typeof fetch = fetch) {
+  return publishAsset(approval, approval.uploadToken ?? '', recovery, storage, isCurrent, fetcher, true);
 }
