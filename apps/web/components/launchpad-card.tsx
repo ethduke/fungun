@@ -1,7 +1,14 @@
 'use client';
 
-import { ArrowUpRight } from 'lucide-react';
+import { ArrowUpRight, Info } from 'lucide-react';
 import { Checkbox } from '@/components/ui/checkbox';
+import {
+  Popover,
+  PopoverContent,
+  PopoverDescription,
+  PopoverTitle,
+  PopoverTrigger,
+} from '@/components/ui/popover';
 import {
   Select,
   SelectContent,
@@ -15,6 +22,7 @@ import {
   type PairId,
 } from '@/lib/launch-model';
 import type { CatalogPad } from '@/lib/read-service';
+import { FEE_INFO_REVIEWED, launchpadFeeInfo } from '@/lib/launchpad-fees';
 
 export function LaunchpadCard({
   destination: pad,
@@ -32,6 +40,7 @@ export function LaunchpadCard({
   const live = catalog?.status === 'ready';
   const pairs = live ? catalog.pairs : SAMPLE_PAIRS;
   const selectedPair = pairs.find((pair) => pair.id === pad.pairId);
+  const feeInfo = launchpadFeeInfo(pad);
   return (
     <div className="launchpad-card">
       <label className="launchpad-top">
@@ -92,6 +101,44 @@ export function LaunchpadCard({
             )}
           </SelectContent>
         </Select>
+      )}
+      {feeInfo && (
+        <div className="pad-fee-share">
+          <span>
+            {feeInfo.label} <strong>{feeInfo.creatorPercent}%</strong>
+            {' · '}
+            {feeInfo.remainder}
+          </span>
+          <Popover>
+            <PopoverTrigger
+              type="button"
+              className="pad-fee-info"
+              aria-label={`${title} fee share details`}
+            >
+              <Info size={15} aria-hidden="true" />
+            </PopoverTrigger>
+            <PopoverContent align="end" className="pad-fee-details">
+              <PopoverTitle>{title} fee share</PopoverTitle>
+              <PopoverDescription>{feeInfo.details}</PopoverDescription>
+              <p>
+                Shares of fee revenue, not trading volume. Launch costs and
+                network gas are separate.
+              </p>
+              <a
+                href={feeInfo.sourceUrl}
+                target="_blank"
+                rel="noopener noreferrer"
+              >
+                {feeInfo.sourceLabel}{' '}
+                <ArrowUpRight size={13} aria-hidden="true" />
+              </a>
+              <p className="pad-fee-reviewed">
+                Reviewed <time dateTime={FEE_INFO_REVIEWED}>4 Sep 2026</time>.
+                Not a live quote; terms may change for future launches.
+              </p>
+            </PopoverContent>
+          </Popover>
+        </div>
       )}
     </div>
   );

@@ -570,6 +570,49 @@ h2 {
   height: 20px;
   border-radius: 5px;
 }
+.pad-fee-share {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  flex-basis: 100%;
+  color: #67765a;
+  font-size: 13px;
+  line-height: 1.5;
+}
+.pad-fee-share strong {
+  color: #29452f;
+  font-weight: 600;
+}
+.pad-fee-info {
+  display: grid;
+  place-items: center;
+  flex-shrink: 0;
+  width: 32px;
+  height: 32px;
+  padding: 0;
+  border-radius: 50%;
+  cursor: pointer;
+}
+.pad-fee-info:hover {
+  color: #29452f;
+  background: #edf1e4;
+}
+.pad-fee-details {
+  max-width: calc(100vw - 32px);
+  padding: 16px;
+  line-height: 1.5;
+}
+.pad-fee-details a {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+.pad-fee-reviewed {
+  color: #67765a;
+  font-size: 12px;
+}
 .launch-section {
   margin-top: 25px;
   padding: 23px 27px;
