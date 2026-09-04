@@ -1,8 +1,11 @@
 'use client';
 
+import { quicksand } from '@/lib/fonts';
+import './globals.css';
+
 export default function GlobalError() {
   return (
-    <html lang="en">
+    <html lang="en" className={quicksand.variable}>
       <body>
         <main>
           <h1>Fungun couldn’t finish loading.</h1>

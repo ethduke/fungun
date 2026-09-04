@@ -16,12 +16,12 @@
 .asset-publication output {
   display: block;
   margin-block: 0.75rem;
-  font-size: 0.875rem;
+  font-size: 1rem;
   line-height: 1.5;
 }
 .asset-publication p,
 .asset-publication-heading span {
-  font-size: 0.875rem;
+  font-size: 1rem;
   line-height: 1.5;
 }
 .asset-publication p {

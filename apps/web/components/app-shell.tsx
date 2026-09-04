@@ -2,6 +2,7 @@
 
 import { lazy, Suspense, useState, type ReactNode } from 'react';
 import Link from 'next/link';
+import Image from 'next/image';
 import { usePathname } from 'next/navigation';
 import { Wallet } from 'lucide-react';
 import { Button } from '@/components/ui/button';
@@ -31,10 +32,14 @@ export function AppShell({ children }: { children: ReactNode }) {
             className="brand"
             aria-label="Fungun home"
           >
-            <span className="brand-mark" aria-hidden="true">
-              f
-            </span>
-            fungun<span className="brand-period">.</span>
+            <Image
+              className="brand-logo"
+              src="/brand/fungun-logo.png"
+              alt=""
+              width={720}
+              height={202}
+              unoptimized
+            />
           </Link>
           <nav className="header-nav" aria-label="Main navigation">
             <Link

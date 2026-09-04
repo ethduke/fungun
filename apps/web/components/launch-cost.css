@@ -5,11 +5,11 @@
   display: block;
   margin-top: 4px;
   color: #62734f;
-  font-size: 12px;
+  font-size: 14px;
 }
 .cost-caption {
   color: #62734f;
-  font-size: 13px;
+  font-size: 15px;
   margin: 6px 0 0;
 }
 .cost-warning {
@@ -22,7 +22,7 @@
   border-radius: 6px;
   background: #fff8df;
   color: #674b12;
-  font-size: 14px;
+  font-size: 16px;
   line-height: 1.5;
 }
 .cost-warning svg {
