@@ -17,7 +17,7 @@ http://127.0.0.1:3000; its development proxy forwards `/api/catalog` and
 An ignored root `.env` can hold backend runtime configuration. Leave the committed
 `.env.example` blank. `READ_UPSTREAMS=true` is the explicit opt-in to provider reads:
 
-- `O1_API_KEY`: server-only O1 catalog access. The upstream origin is fixed in code.
+- `O1_API_KEY`: server-only O1 catalog access with `config:read` scope. The upstream origin is fixed in code.
 - `LONG_RWA_ALLOWLIST`: comma-separated runtime token addresses verified against
   Long's supported stock/oracle configuration. Long intersects the shared O1
   catalog by address; ticker labels alone do not establish eligibility.
@@ -47,6 +47,11 @@ No arbitrary URL, address, method, calldata, cookie, signature or forwarding-hea
 parameter is accepted. Wallet addresses, images and prompts are not sent by these reads.
 
 Catalog results contain opaque pair IDs and symbols, not operational addresses.
+The O1 request includes chain, suite and quote sections in one call. The parser
+checks the requested chain, a block-tagged snapshot, active Base asset capability,
+and each selectable RWA's creation-enabled suite. Paused or unsupported creation
+is unavailable, not an empty successful catalog. These are provider-reported read
+checks, not independent contract verification or launch authorization.
 Missing configuration or upstream failure means unavailable, never an empty success.
 An actual valid empty catalog is represented separately. Preview sample pairs remain
 labeled and cannot stand in for a fetched live pair.
@@ -82,6 +87,11 @@ All results are advisory and can change before a transaction.
   This adds one daily public HTTP registry read per active isolate, with zero RPC
   calls; it does not change tracking performed inside the external feed service.
 - One shared catalog per chain, cached five minutes, with concurrent reads coalesced.
+  Each live RWA catalog attempt consumes 20 durable O1 units, including failures;
+  the existing 600-unit daily O1 cap permits at most 30 uncached catalogs if no
+  other O1 operations consume units. No budget was raised for this change.
+  Provider 429 responses preserve bounded `Retry-After` delays in the shared cache
+  and pause all new requests to that provider before another quota debit.
 - Ticker responses cached 15 seconds; no automatic polling/retries. Failed reads back
   off at least 15 seconds. Chain checks cache five minutes; block reads five seconds;
   code checks are cached by block. A cold Long check needs four RPC methods; another
@@ -148,3 +158,10 @@ Remaining work: live adapter verification with operator-supplied runtime configu
 noncustodial launch transaction preparation,
 simulation and explicit wallet approval; image storage; separately authorized
 x402 payment/generation jobs. Launch transaction preparation remains unavailable.
+
+The O1 snapshot checks and catalog weight follow the official
+[configuration schema](https://docs.o1.exchange/launchpad/public-api/reference/meta/get-api-configuration)
+and [weighted limits](https://docs.o1.exchange/launchpad/api/errors-and-limits), reviewed
+4 September 2026. Long's intersection is a conservative configured subset, not an
+independently discovered complete Long catalog. Never substitute another launchpad's
+stock list for reviewed Long token/oracle eligibility.

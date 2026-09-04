@@ -5,6 +5,7 @@ import { Adapters, parseQuotes } from "./adapters.mjs";
 import { readConfig } from "./config.mjs";
 import { ReadCache, Upstream, readJson } from "./upstream.mjs";
 import { validateInput } from "./service.mjs";
+import { Budget } from "./budget.mjs";
 
 const address = (digit) => `0x${digit.repeat(40)}`;
 const bytecode = "0x60016000";
@@ -21,15 +22,89 @@ const quote = (overrides = {}) => ({
   symbol: "MOON",
   decimals: 18,
   route: "rwa",
+  suite_id: "current",
   registered: true,
   selectable: true,
   ...overrides,
 });
-const body = (quotes) => ({ data: { quotes } });
+const suite = (chainId = 4663, overrides = {}) => ({
+  id: "current",
+  chain_id: chainId,
+  active_for_creation: true,
+  creation_available: true,
+  launch_creation_enabled: true,
+  supported_routes: ["standard", "rwa"],
+  ...overrides,
+});
+const body = (quotes, chainId = 4663) => ({
+  data: {
+    chain: { chain_id: chainId, capabilities: { b20_asset_status: "active" } },
+    suites: [suite(chainId)],
+    as_of_block: "123",
+    quotes,
+  },
+});
+
+test("catalog binds quotes to the requested chain and a current creation-enabled suite", () => {
+  assert.equal(parseQuotes(body([quote()], 8453), 8453).length, 1);
+  for (const mutate of [
+    (data) => {
+      data.chain.chain_id = 8453;
+    },
+    (data) => {
+      delete data.chain;
+    },
+    (data) => {
+      data.as_of_block = "0";
+    },
+    (data) => {
+      data.as_of_block = 123;
+    },
+    (data) => {
+      data.suites.push(suite());
+    },
+    (data) => {
+      data.suites[0].chain_id = 8453;
+    },
+    (data) => {
+      data.suites[0].supported_routes = ["other"];
+    },
+    (data) => {
+      data.quotes[0].suite_id = "unknown";
+    },
+    (data) => {
+      data.quotes[0].route = "unknown";
+    },
+  ]) {
+    const snapshot = body([quote()]);
+    mutate(snapshot.data);
+    assert.throws(() => parseQuotes(snapshot, 4663), { code: "invalid_catalog" });
+  }
+});
+
+test("paused, historical, unsupported and inactive Base catalogs are unavailable, not empty", () => {
+  for (const changes of [
+    { active_for_creation: false },
+    { creation_available: false },
+    { launch_creation_enabled: false },
+    { launch_creation_enabled: undefined },
+    { supported_routes: ["standard"] },
+  ]) {
+    const snapshot = body([quote()]);
+    snapshot.data.suites = [suite(4663, changes)];
+    assert.throws(() => parseQuotes(snapshot, 4663), { code: "catalog_unavailable" });
+  }
+  const snapshot = body([quote()], 8453);
+  snapshot.data.chain.capabilities.b20_asset_status = "pending";
+  assert.throws(() => parseQuotes(snapshot, 8453), { code: "catalog_unavailable" });
+  const mixed = body([quote({ suite_id: "old" })]);
+  mixed.data.suites.push(suite(4663, { id: "old", active_for_creation: false }));
+  assert.throws(() => parseQuotes(mixed, 4663), { code: "invalid_catalog" });
+});
 
 test("backend accepts ROBINHOOD_RPC and retains the legacy variable fallback", () => {
-  const endpoint = new URL('/primary', 'https://rpc.example.invalid').href;
-  const legacy = new URL('/legacy', 'https://rpc.example.invalid').href;
+  const endpoint = new URL("/primary", "https://rpc.example.invalid").href;
+  const legacy = new URL("/legacy", "https://rpc.example.invalid").href;
   assert.equal(readConfig({ ROBINHOOD_RPC: endpoint }).rpcUrl, endpoint);
   assert.equal(readConfig({ ROBINHOOD_RPC_URL: legacy }).rpcUrl, legacy);
   assert.equal(readConfig({ ROBINHOOD_RPC: endpoint, ROBINHOOD_RPC_URL: legacy }).rpcUrl, endpoint);
@@ -81,12 +156,16 @@ test("registry verification is repeated at each newly observed block", async () 
 test("catalog validates eligibility, deduplicates addresses and hides runtime addresses", async () => {
   let calls = 0;
   const adapter = new Adapters(config(), {
-    async json(provider, url, options) {
+    async json(provider, url, options, maxBytes, units) {
       calls++;
       assert.equal(provider, "o1");
       assert.equal(url.origin, "https://api.launch.o1.exchange");
       assert.equal(url.pathname, "/v1/config");
       assert.equal(url.searchParams.get("chain_id"), "4663");
+      assert.equal(url.searchParams.get("include"), "chains,suites,quotes");
+      assert.equal(url.searchParams.get("active_only"), "true");
+      assert.equal(units, 20);
+      assert.equal(maxBytes, 512 * 1024);
       assert.equal(options.headers["x-api-key"], "EXAMPLE");
       return body([
         quote(),
@@ -102,6 +181,96 @@ test("catalog validates eligibility, deduplicates addresses and hides runtime ad
   assert.equal(values[0].pads.long.pairs.length, 1);
   assert.ok(!JSON.stringify(values).includes(address("2")));
   assert.ok(!JSON.stringify(values).includes("EXAMPLE"));
+});
+
+test("cached catalogs charge 20 durable O1 units once and cannot exceed the daily budget", async () => {
+  let now = 0;
+  let calls = 0;
+  const budget = new Budget(":memory:", () => now);
+  const adapter = new Adapters(
+    config(),
+    new Upstream(budget, async () => {
+      calls++;
+      return Response.json(body([quote()]));
+    }),
+    () => now,
+  );
+  try {
+    await Promise.all(Array.from({ length: 100 }, () => adapter.catalog(4663)));
+    assert.equal(calls, 1);
+    assert.ok(
+      budget.db
+        .prepare("SELECT used FROM counters")
+        .all()
+        .every((row) => row.used === 20),
+    );
+    for (let i = 1; i < 30; i++) {
+      now += 300_001;
+      await adapter.catalog(4663);
+    }
+    now += 300_001;
+    await assert.rejects(adapter.catalog(4663), { status: 429 });
+    assert.equal(calls, 30);
+  } finally {
+    budget.close();
+  }
+});
+
+test("provider Retry-After blocks shared catalog retries without leaking its response", async () => {
+  let now = 0;
+  let calls = 0;
+  const adapter = new Adapters(
+    config(),
+    new Upstream(
+      { upstream() {} },
+      async () => {
+        calls++;
+        return new Response("private provider response", {
+          status: 429,
+          headers: { "retry-after": "120" },
+        });
+      },
+      () => now,
+    ),
+    () => now,
+  );
+  await assert.rejects(adapter.catalog(4663), { code: "rate_limited", retryAfter: 120 });
+  await assert.rejects(adapter.catalog(8453), { code: "rate_limited", retryAfter: 120 });
+  now = 119_999;
+  await assert.rejects(adapter.catalog(4663), { message: "rate_limited", retryAfter: 1 });
+  assert.equal(calls, 1);
+  now = 120_000;
+  await assert.rejects(adapter.catalog(4663), { code: "rate_limited" });
+  assert.equal(calls, 2);
+});
+
+test("provider cooldown blocks new request keys before spending more quota", async () => {
+  let debits = 0;
+  const upstream = new Upstream(
+    {
+      upstream() {
+        debits++;
+      },
+    },
+    async () => new Response(null, { status: 429, headers: { "retry-after": "60" } }),
+    () => 0,
+  );
+  await assert.rejects(upstream.json("o1", "https://example.invalid/first"), { retryAfter: 60 });
+  await assert.rejects(upstream.json("o1", "https://example.invalid/second"), { retryAfter: 60 });
+  assert.equal(debits, 1);
+});
+
+test("provider retry delays are bounded and malformed values use a safe default", async () => {
+  for (const [header, expected] of [
+    ["bad", 30],
+    ["0", 5],
+    ["999999", 86400],
+  ]) {
+    await assert.rejects(
+      readJson(new Response("private", { status: 429, headers: { "retry-after": header } }), 100),
+      { retryAfter: expected, code: "rate_limited" },
+    );
+  }
 });
 
 test("malformed catalogs cannot become an empty ready catalog", () => {

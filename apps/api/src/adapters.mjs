@@ -15,8 +15,47 @@ const TICKER_ABI = [
 ];
 
 export function parseQuotes(body, chainId) {
-  const quotes = body?.data?.quotes;
-  if (!Array.isArray(quotes) || quotes.length > 1000) throw new ServiceError("invalid_catalog");
+  const data = body?.data;
+  const quotes = data?.quotes;
+  if (
+    ![4663, 8453].includes(chainId) ||
+    data?.chain?.chain_id !== chainId ||
+    typeof data.as_of_block !== "string" ||
+    !/^[1-9]\d{0,19}$/.test(data.as_of_block) ||
+    !Array.isArray(data.suites) ||
+    data.suites.length > 32 ||
+    !Array.isArray(quotes) ||
+    quotes.length > 1000
+  )
+    throw new ServiceError("invalid_catalog");
+  if (chainId === 8453 && data.chain.capabilities?.b20_asset_status !== "active")
+    throw new ServiceError("catalog_unavailable");
+  const suites = new Map();
+  for (const suite of data.suites) {
+    if (
+      !suite ||
+      typeof suite.id !== "string" ||
+      !/^[A-Za-z0-9_.:-]{1,128}$/.test(suite.id) ||
+      suites.has(suite.id) ||
+      suite.chain_id !== chainId ||
+      typeof suite.active_for_creation !== "boolean" ||
+      typeof suite.creation_available !== "boolean" ||
+      !Array.isArray(suite.supported_routes) ||
+      !suite.supported_routes.length ||
+      suite.supported_routes.length > 2 ||
+      suite.supported_routes.some((route) => !["standard", "rwa"].includes(route))
+    )
+      throw new ServiceError("invalid_catalog");
+    suites.set(suite.id, {
+      routes: suite.supported_routes,
+      ready:
+        suite.active_for_creation &&
+        suite.creation_available &&
+        suite.launch_creation_enabled === true,
+    });
+  }
+  if (![...suites.values()].some((suite) => suite.ready && suite.routes.includes("rwa")))
+    throw new ServiceError("catalog_unavailable");
   const unique = new Map();
   for (const quote of quotes) {
     if (
@@ -27,11 +66,17 @@ export function parseQuotes(body, chainId) {
       typeof quote.symbol !== "string" ||
       !Number.isInteger(quote.decimals) ||
       typeof quote.route !== "string" ||
+      !["standard", "rwa"].includes(quote.route) ||
+      typeof quote.suite_id !== "string" ||
+      !suites.has(quote.suite_id) ||
       typeof quote.registered !== "boolean" ||
       typeof quote.selectable !== "boolean"
     )
       throw new ServiceError("invalid_catalog");
     if (quote.route !== "rwa" || !quote.registered || !quote.selectable) continue;
+    const suite = suites.get(quote.suite_id);
+    if (!suite.ready || !suite.routes.includes(quote.route))
+      throw new ServiceError("invalid_catalog");
     if (
       !isAddress(quote.address) ||
       /^0x0+$/i.test(quote.address) ||
@@ -76,12 +121,16 @@ export class Adapters {
       url.search = new URLSearchParams({
         chain_id: String(chainId),
         market: "rwa",
-        include: "quotes",
+        include: "chains,suites,quotes",
         active_only: "true",
       }).toString();
-      const body = await this.upstream.json("o1", url, {
-        headers: { "x-api-key": this.config.o1Key },
-      });
+      const body = await this.upstream.json(
+        "o1",
+        url,
+        { headers: { "x-api-key": this.config.o1Key } },
+        512 * 1024,
+        20,
+      );
       const quotes = parseQuotes(body, chainId);
       const project = ({ id, symbol }) => ({ id, symbol });
       const pads = { o1: { status: "ready", pairs: quotes.map(project) } };
