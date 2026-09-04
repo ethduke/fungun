@@ -3,7 +3,7 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "setup": "npm --prefix apps/web ci && npm --prefix apps/api ci --ignore-scripts && git config --local core.hooksPath .githooks",
+    "setup": "npm --prefix apps/web ci && npm --prefix apps/api ci --ignore-scripts && npm --prefix apps/facilitator ci --ignore-scripts && git config --local core.hooksPath .githooks",
     "dev": "node scripts/dev.mjs",
     "dev:web": "npm --prefix apps/web run dev -- --hostname 127.0.0.1 --port 3000",
     "dev:api": "npm --prefix apps/api start",

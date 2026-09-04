@@ -22,10 +22,14 @@ jobs:
           cache-dependency-path: |
             apps/web/package-lock.json
             apps/api/package-lock.json
+            apps/facilitator/package-lock.json
       - run: npm --prefix apps/web ci
       - run: npm --prefix apps/api ci --ignore-scripts
+      - run: npm --prefix apps/facilitator ci --ignore-scripts
       - run: npm test
+      - run: npm --prefix apps/facilitator test
       - run: npm run typecheck
       - run: npm run lint
       - run: npm run build
       - run: npm --prefix apps/web audit --audit-level=high
+      - run: npm --prefix apps/facilitator audit --audit-level=high
