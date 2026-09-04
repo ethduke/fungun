@@ -6,12 +6,13 @@ import { validatePriceInput } from "./tracked-prices.mjs";
 export function validateInput(kind, input) {
   if (kind === "tracked-prices") return validatePriceInput(input);
   if (kind === "fees" || kind === "claim-prepare") {
-    const fields = kind === "fees" ? ["address", "chainId", "padId"] : ["address", "positionId"];
+    const required = kind === "fees" ? ["address", "chainId", "padId"] : ["address", "positionId"];
+    const fields = kind === "fees" ? [...required, "cursor"] : required;
     if (
       !input ||
       typeof input !== "object" ||
       Array.isArray(input) ||
-      Object.keys(input).length !== fields.length ||
+      required.some((key) => !Object.hasOwn(input, key)) ||
       Object.keys(input).some((key) => !fields.includes(key)) ||
       !validAddress(input.address)
     )
@@ -20,7 +21,9 @@ export function validateInput(kind, input) {
       kind === "fees"
         ? ![4663, 8453].includes(input.chainId) ||
           !["long", "o1"].includes(input.padId) ||
-          (input.padId === "long" && input.chainId !== 4663)
+          (input.padId === "long" && input.chainId !== 4663) ||
+          (Object.hasOwn(input, "cursor") &&
+            (typeof input.cursor !== "string" || !/^[a-f0-9]{64}$/.test(input.cursor)))
         : typeof input.positionId !== "string" || !/^[a-f0-9]{64}$/.test(input.positionId)
     )
       throw new ServiceError("invalid_request", 400);

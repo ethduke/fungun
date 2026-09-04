@@ -1,6 +1,7 @@
 export const API_RUNTIME_NAMES = Object.freeze([
   "NODE_ENV",
   "APP_ORIGIN",
+  "READ_SERVICE_PORT",
   "BUDGET_DB_PATH",
   "READS_MACHINE_ID",
   "FLY_MACHINE_ID",

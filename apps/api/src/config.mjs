@@ -14,9 +14,14 @@ export function readConfig(env = process.env) {
     url.password ||
     (production
       ? url.protocol !== "https:"
-      : !["http://127.0.0.1:3000", "http://localhost:3000"].includes(origin))
+      : url.protocol !== "http:" ||
+        !["127.0.0.1", "localhost"].includes(url.hostname) ||
+        !/^\d+$/.test(url.port) || Number(url.port) < 1024)
   )
     throw new ServiceError("invalid_origin_configuration");
+  const port = Number(env.READ_SERVICE_PORT || 8787);
+  if (!Number.isInteger(port) || port < 1024 || port > 65535 || (production && port !== 8787))
+    throw new ServiceError("invalid_port_configuration");
   const databasePath = resolve(env.BUDGET_DB_PATH || "local/read-budget.sqlite");
   if (
     production &&
@@ -50,7 +55,7 @@ export function readConfig(env = process.env) {
     origin,
     databasePath,
     host: production ? "0.0.0.0" : "127.0.0.1",
-    port: 8787,
+    port,
     readsEnabled: env.READ_UPSTREAMS === "true",
     o1Key,
     rpcUrl,

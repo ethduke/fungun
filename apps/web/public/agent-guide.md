@@ -42,16 +42,25 @@ is not configured. The wallet extension may make its own network requests.
 
 ## View fees
 
-Open [FEE](/fees). It uses the connected account or a manually entered address,
-validated locally, then sent to the fee backend and relevant providers after a
-500 ms debounce. It is not persisted or placed in the browser URL. Missing or
-failed balances are unknown, never zero. Refresh is explicit and cached.
+Open [Fees](/fees). It uses only the connected wallet. While disconnected, it
+shows “Connect your wallet to show fees.” and makes no fee lookups. The connected
+address is sent to the fee backend and relevant providers; it is not persisted
+or placed in the browser URL. Switching accounts or disconnecting clears
+displayed fees. Missing or failed balances are unknown, never zero. Refresh is
+explicit and cached.
 
-Long covers up to two configured locked pools; separate hook fees are unknown.
-O1 lists up to 25 indexed Robinhood positions; O1 Robinhood claims are not connected.
+Long discovers beneficiary pools from the configured manager's event history,
+including transferred fee rights, or pages through configured locked pools.
+Historical scans may take many pages; separate hook fees remain unknown.
+O1 pages through indexed Robinhood positions and verifies every position in a
+reviewed current escrow. Configured, verified Robinhood claims are supported.
 Base fee lookups are paused, and Longbow fee lookup is not connected.
 Shared escrow balances are by payout asset,
 not individual launched coin; do not merge matching tickers with different addresses.
+Load more reads one page. Check remaining pages continues until completion,
+Stop scan or an error; honor provider retry delays and preserve partial results.
+The source cards report coverage. A balance of an ordinary held token does not
+establish a creator-fee entitlement.
 
 Claim review rechecks the connected owner, chain, contracts, positive fees, simulation
 and ETH for gas. It displays a short-lived ETH estimate and warns when gas is high;
@@ -59,6 +68,9 @@ USD is unavailable without a fresh reference price. Only a separate explicit use
 confirmation opens the wallet. No approvals, recipient redirects or native claim
 payments are requested. Do not initiate a financial action without explicit user intent.
 Check receipt is manual and verifies payout events, not merely successful status.
+Claim all queues eligible discovered positions and requires a fresh review and
+explicit wallet confirmation for each transaction. Only a confirmed payout
+unlocks the next review; rejected, failed or uncertain requests stop the queue.
 Never retry an uncertain claim automatically. Check wallet activity before acknowledging
 uncertainty or reloading; the session guard is memory-only and does not span tabs.
 
@@ -136,8 +148,9 @@ anonymous read endpoints, not authentication or consent for financial actions.
 The webview only requests Robinhood (4663). Base (8453) remains supported by the
 backend but is paused in the webview. Longbow is a draft destination, not an API pad.
 Never send keys, wallet addresses, signatures, images or prompts to these routes.
-Fee lookup uses `/api/fees` with only `address`, `chainId` and `padId`.
+Fee lookup uses `/api/fees` with `address`, `chainId`, `padId` and an optional
+opaque `cursor` returned by the previous page. It returns `nextCursor` and coverage.
 `/api/claim-prepare` takes only `address` and an opaque returned `positionId`;
 it prepares but never sends. Intent headers match the operation. Handles expire,
 quotas apply, and clients cannot supply targets, calldata or provider URLs.
-Do not loop fee requests. No launch, upload or paid-image API is available.
+Only continue fee pages under explicit scan intent. No launch, upload or paid-image API is available.

@@ -3,12 +3,15 @@ import test from 'node:test';
 import { encodeFunctionData } from 'viem';
 import {
   claimAbi,
+  legacyClaimAbi,
   loadFees,
+  mergeFeePages,
   parseFees,
   prepareClaim,
   validateClaim,
   type ClaimQuote,
 } from './fee-service.ts';
+import { disabledClaimMessage, unavailableFeeMessage } from './fee-status.ts';
 
 const addr = (digit: string) => `0x${digit.repeat(40)}` as `0x${string}`;
 const owner = addr('a');
@@ -60,6 +63,12 @@ await test('fee responses bind owner and chain, reject duplicate positions and i
   for (const value of [
     { ...source, address: addr('b') },
     { ...source, positions: [position, position] },
+    { ...source, status: 'ready', coverage: 'configured_pools' },
+    {
+      ...source,
+      status: 'ready',
+      positions: [{ ...position, verification: 'indexed', claimable: false }],
+    },
     { ...source, positions: [{ ...position, verification: 'indexed' }] },
     {
       ...source,
@@ -71,11 +80,144 @@ await test('fee responses bind owner and chain, reject duplicate positions and i
     assert.throws(() => parseFees(value, owner, 8453, 'o1'));
 });
 
+await test('fee availability reasons are safe codes and never report a disconnected wallet', () => {
+  for (const reason of [
+    'fees_disabled',
+    'provider_not_configured',
+    'contracts_not_configured',
+    'not_configured',
+  ]) {
+    const parsed = parseFees(
+      { ...source, status: 'unavailable', positions: [], reason },
+      owner,
+      8453,
+      'o1',
+    );
+    assert.equal(parsed.reason, reason);
+    assert.match(unavailableFeeMessage(parsed), /balance unknown/);
+    assert.doesNotMatch(unavailableFeeMessage(parsed), /not connected/i);
+  }
+  for (const changes of [
+    { reason: 'synthetic confidential provider detail' },
+    { reason: { message: 'not_configured' } },
+    { reason: 'not_configured', status: 'ready' },
+  ])
+    assert.throws(() =>
+      parseFees(
+        { ...source, status: 'unavailable', positions: [], ...changes },
+        owner,
+        8453,
+        'o1',
+      ),
+    );
+});
+
+await test('disabled claims explain unverified balances and feature setup without enabling claims', () => {
+  for (const claimDisabledReason of [
+    'claims_disabled',
+    'contract_unverified',
+    'gas_oracle_not_configured',
+    'nothing_to_claim',
+  ]) {
+    const parsed = parseFees(
+      {
+        ...source,
+        positions: [{ ...position, claimable: false, claimDisabledReason }],
+      },
+      owner,
+      8453,
+      'o1',
+    );
+    assert.equal(parsed.positions[0].claimable, false);
+    assert.equal(parsed.positions[0].claimDisabledReason, claimDisabledReason);
+    assert.ok(disabledClaimMessage(parsed.positions[0]));
+  }
+  for (const invalidPosition of [
+    { ...position, claimDisabledReason: 'claims_disabled' },
+    { ...position, claimable: false, claimDisabledReason: 'upstream detail' },
+  ])
+    assert.throws(() =>
+      parseFees({ ...source, positions: [invalidPosition] }, owner, 8453, 'o1'),
+    );
+  assert.equal(disabledClaimMessage(position), null);
+  assert.match(
+    disabledClaimMessage({
+      ...position,
+      claimable: false,
+      verification: 'indexed',
+    })!,
+    /Contract verification/,
+  );
+  assert.equal(
+    disabledClaimMessage({
+      ...position,
+      claimable: false,
+      claimDisabledReason: 'claims_disabled',
+    }),
+    'Claims are not enabled yet.',
+  );
+});
+
+await test('escrow versions stay bound across fee pages and fresh claim preparation', async () => {
+  const legacyPosition = { ...position, escrowVersion: 'legacy' as const };
+  const legacySource = { ...source, positions: [legacyPosition] };
+  assert.equal(
+    parseFees(legacySource, owner, 8453, 'o1').positions[0].escrowVersion,
+    'legacy',
+  );
+  assert.throws(() =>
+    parseFees(
+      { ...source, positions: [{ ...position, escrowVersion: 'unknown' }] },
+      owner,
+      8453,
+      'o1',
+    ),
+  );
+  assert.throws(() =>
+    parseFees(
+      { ...legacySource, chainId: 4663, padId: 'long' },
+      owner,
+      4663,
+      'long',
+    ),
+  );
+  assert.throws(() => mergeFeePages(legacySource, source));
+  assert.throws(() => mergeFeePages(source, legacySource));
+
+  const original = globalThis.fetch;
+  globalThis.fetch = async () =>
+    Response.json({
+      ...quote(),
+      escrowVersion: 'legacy',
+      data: encodeFunctionData({
+        abi: legacyClaimAbi,
+        functionName: 'claim',
+        args: [owner, payout.asset],
+      }),
+      serverTime: Date.now(),
+      expiresAt: Date.now() + 20_000,
+    });
+  try {
+    assert.equal(
+      (await prepareClaim(owner, legacySource, legacyPosition)).escrowVersion,
+      'legacy',
+    );
+    await assert.rejects(prepareClaim(owner, source, position), {
+      code: 'invalid_response',
+    });
+  } finally {
+    globalThis.fetch = original;
+  }
+});
+
 await test('claim validation rejects recipient redirects, trailing data, native value, unsupported chains and excessive gas', () => {
   assert.equal(validateClaim(quote()).kind, 'o1');
+  assert.equal(validateClaim({ ...quote(), chainId: 4663 }).chainId, 4663);
   for (const change of [
     { value: '1' },
-    { chainId: 4663 },
+    { chainId: 1 },
+    { address: addr('0') },
+    { target: addr('0') },
     {
       data: encodeFunctionData({
         abi: claimAbi,
@@ -136,4 +278,98 @@ await test('provider details are not exposed through the fee client', async () =
   } finally {
     globalThis.fetch = original;
   }
+});
+
+await test('fee pagination validates opaque cursors and forwards only the selected page', async () => {
+  const cursor = 'b'.repeat(64);
+  assert.equal(
+    parseFees(
+      { ...source, nextCursor: cursor, coverage: 'wallet_index' },
+      owner,
+      8453,
+      'o1',
+    ).nextCursor,
+    cursor,
+  );
+  for (const changes of [
+    { nextCursor: 'https://invalid.example' },
+    { nextCursor: cursor, status: 'ready' },
+    { coverage: 'all_tokens_guaranteed' },
+    { progress: { scannedThroughBlock: '11', toBlock: '10' } },
+    { progress: { scannedThroughBlock: '-1', toBlock: '10' } },
+    { progress: { scannedThroughBlock: null, toBlock: 'not-a-block' } },
+  ])
+    assert.throws(() =>
+      parseFees({ ...source, ...changes }, owner, 8453, 'o1'),
+    );
+  const original = globalThis.fetch;
+  let calls = 0;
+  globalThis.fetch = async (_url, options) => {
+    calls++;
+    const body = options?.body;
+    assert.equal(typeof body, 'string');
+    if (typeof body !== 'string')
+      throw new Error('Expected a JSON request body.');
+    assert.deepEqual(JSON.parse(body), {
+      address: owner,
+      chainId: 8453,
+      padId: 'o1',
+      cursor,
+    });
+    return Response.json({
+      ...source,
+      nextCursor: null,
+      serverTime: Date.now(),
+      expiresAt: Date.now() + 45_000,
+    });
+  };
+  try {
+    await assert.rejects(loadFees(owner, 8453, 'o1', 'invalid'), {
+      code: 'invalid_request',
+    });
+    await loadFees(owner, 8453, 'o1', cursor);
+    assert.equal(calls, 1);
+  } finally {
+    globalThis.fetch = original;
+  }
+});
+
+await test('overlapping pages replace balances without double counting and retain incomplete verification', () => {
+  const first = {
+    ...source,
+    coverage: 'wallet_index' as const,
+    nextCursor: 'b'.repeat(64),
+  };
+  const next = {
+    ...first,
+    status: 'ready' as const,
+    nextCursor: null,
+    positions: [
+      { ...position, payouts: [{ ...payout, claimableRaw: '200' }] },
+      { ...position, id: 'c'.repeat(64), target: addr('3') },
+    ],
+  };
+  const merged = mergeFeePages(first, next);
+  assert.equal(merged.positions.length, 2);
+  assert.equal(merged.positions[0].payouts[0].claimableRaw, '200');
+  assert.equal(merged.status, 'ready');
+  assert.equal(merged.nextCursor, null);
+  const indexed = {
+    ...first,
+    positions: [
+      { ...position, verification: 'indexed' as const, claimable: false },
+    ],
+  };
+  assert.equal(
+    mergeFeePages(indexed, { ...next, positions: [next.positions[1]] }).status,
+    'partial',
+  );
+  for (const changes of [
+    { address: addr('b') },
+    { chainId: 4663 as const },
+    { coverage: 'configured_pools' as const },
+    { positions: [{ ...position, target: addr('4') }] },
+    { positions: [{ ...position, payouts: [{ ...payout, decimals: 18 }] }] },
+  ])
+    assert.throws(() => mergeFeePages(first, { ...next, ...changes }));
 });

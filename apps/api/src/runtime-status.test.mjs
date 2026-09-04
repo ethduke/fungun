@@ -57,14 +57,27 @@ test("blank optional fee configuration remains valid and cannot enable claims", 
     report.features.find((entry) => entry.id === "long_locked_pool_claims").status,
     "missing_configuration",
   );
-  for (const id of [
-    "o1_robinhood_claims",
-    "launch_execution",
-    "image_storage",
-    "paid_image_generation",
-  ])
+  for (const id of ["launch_execution", "image_storage", "paid_image_generation"])
     assert.equal(
       feature({ READ_UPSTREAMS: "true", READ_FEES: "true", WALLET_CLAIMS: "true" }, id).status,
       "not_implemented",
     );
+});
+
+test("fee readiness requires chain-specific escrow configuration", () => {
+  const escrow = `0x${"1".repeat(40)}`;
+  const codeHash = `0x${"2".repeat(64)}`;
+  const env = {
+    O1_API_KEY: "EXAMPLE",
+    ROBINHOOD_RPC: new URL("/rpc", "https://example.invalid").href,
+    READ_FEES: "true",
+    WALLET_CLAIMS: "true",
+    FEE_CONTRACTS_JSON: JSON.stringify({ o1: [{ chainId: 4663, escrow, codeHash }] }),
+  };
+  assert.equal(feature(env, "o1_robinhood_claims").status, "needs_live_verification");
+  assert.equal(feature(env, "o1_base_live_fees_and_claims").status, "missing_configuration");
+  assert.equal(
+    feature({ ...env, FEE_CONTRACTS_JSON: "{}" }, "o1_robinhood_claims").status,
+    "missing_configuration",
+  );
 });

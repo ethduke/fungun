@@ -28,6 +28,12 @@ Leave the committed
   `LONG_TICKER_REGISTRY_CODE_HASH`: server-only RPC configuration and independently
   verified deployed Long registry identity. Do not copy addresses into source/tests.
 - `APP_ORIGIN`: exact web origin; defaults to the local URL above.
+- `READ_SERVICE_PORT`: local API listening port, default 8787. Local ports must be
+  integers from 1024 to 65535; production keeps port 8787.
+- `READ_SERVICE_ORIGIN`: web server's API destination. For an isolated worktree,
+  choose a different web port, set `APP_ORIGIN` to that exact loopback HTTP origin,
+  and match `READ_SERVICE_ORIGIN` to the API's `READ_SERVICE_PORT`. Keep the shared
+  `BUDGET_DB_PATH` when the worktrees use the same providers so quotas persist.
 
 Run `npm run runtime:status` to list missing variable names and disabled features
 without printing their values. It performs no network calls or file writes.

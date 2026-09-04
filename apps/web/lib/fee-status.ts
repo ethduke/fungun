@@ -1,0 +1,36 @@
+import type { FeePosition, FeeSource } from './fee-service.ts';
+
+export function unavailableFeeMessage(source?: FeeSource) {
+  switch (source?.reason) {
+    case 'fees_disabled':
+      return 'Fee checks are not enabled yet · balance unknown';
+    case 'provider_not_configured':
+      return 'Fee lookup is not set up yet · balance unknown';
+    case 'contracts_not_configured':
+      return 'Fee lookup for this launchpad is not set up yet · balance unknown';
+    case 'not_configured':
+      return 'Fee lookup setup is incomplete · balance unknown';
+    default:
+      return 'Fee service unavailable · balance unknown';
+  }
+}
+
+export function disabledClaimMessage(position: FeePosition) {
+  if (position.claimable) return null;
+  switch (position.claimDisabledReason) {
+    case 'claims_disabled':
+      return 'Claims are not enabled yet.';
+    case 'contract_unverified':
+      return 'Contract verification is required before claiming.';
+    case 'gas_oracle_not_configured':
+      return 'Gas costs cannot be estimated yet.';
+    case 'nothing_to_claim':
+      return 'No fees to claim.';
+    default:
+      if (position.verification === 'indexed')
+        return 'Contract verification is required before claiming.';
+      if (!position.payouts.some((payout) => BigInt(payout.claimableRaw) > 0n))
+        return 'No fees to claim.';
+      return 'Claims are not available for this position yet.';
+  }
+}

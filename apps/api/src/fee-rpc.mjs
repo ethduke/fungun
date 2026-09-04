@@ -111,6 +111,28 @@ export class FeeRpc {
       ? load()
       : this.pins.get(JSON.stringify([chainId, contracts, block]), 300_000, load);
   }
+  async verifiedContracts(chainId, contracts, block) {
+    if (contracts.some((contract) => contract.implementation))
+      throw new ServiceError("invalid_request", 400);
+    // Discovery can retain one changed immutable escrow as indexed-only while
+    // verifying the other configured escrows in a single bounded RPC batch.
+    return this.pins.get(
+      JSON.stringify(["available", chainId, contracts, block]),
+      300_000,
+      async () => {
+        const [chain, ...codes] = await this.batch(chainId, [
+          { method: "eth_chainId", params: [] },
+          ...contracts.map(({ address }) => ({ method: "eth_getCode", params: [address, block] })),
+        ]);
+        if (rpcNumber(chain) !== BigInt(chainId)) throw new ServiceError("wrong_chain");
+        return contracts.filter(
+          (contract, index) =>
+            /^0x(?:[\da-f]{2})+$/i.test(codes[index] ?? "") &&
+            keccak256(codes[index]).toLowerCase() === contract.codeHash.toLowerCase(),
+        );
+      },
+    );
+  }
   async block(chainId) {
     const [block] = await this.batch(chainId, [{ method: "eth_blockNumber", params: [] }]);
     return toHex(rpcNumber(block));

@@ -44,7 +44,7 @@ export function AppShell({ children }: { children: ReactNode }) {
               prefetch={false}
               aria-current={pathname === '/fees' ? 'page' : undefined}
             >
-              FEE
+              FEES
             </Link>
           </nav>
           <div className="header-actions">

@@ -3,9 +3,11 @@ import { encodeFunctionData, serializeTransaction, zeroAddress } from "viem";
 import { ServiceError } from "./errors.mjs";
 import { ReadCache } from "./upstream.mjs";
 import { FeeRpc, rpcNumber } from "./fee-rpc.mjs";
+import { discoverLongFeePools } from "./long-fee-discovery.mjs";
 import {
   beneficiaryFees,
   escrowAbi,
+  legacyEscrowAbi,
   managerAbi,
   oracleAbi,
   poolId,
@@ -16,6 +18,9 @@ import {
 
 const O1_ORIGIN = "https://api.launch.o1.exchange";
 const TTL = 45_000;
+const HANDLE_TTL = 30 * 60_000;
+const O1_PAGE_SIZE = 8;
+const LONG_PAGE_SIZE = 2;
 const view = (address, abi, functionName, args, from) => ({
   address,
   abi,
@@ -24,11 +29,16 @@ const view = (address, abi, functionName, args, from) => ({
   from,
 });
 
-export function parseO1Positions(body, address, chainId) {
+export function parseO1Positions(body, address, chainId, limit = 25) {
   if (
     !Array.isArray(body?.data) ||
-    body.data.length > 25 ||
-    typeof body?.pagination?.has_more !== "boolean"
+    body.data.length > limit ||
+    typeof body?.pagination?.has_more !== "boolean" ||
+    (body.pagination.has_more
+      ? typeof body.pagination.next_cursor !== "string" ||
+        !body.pagination.next_cursor.length ||
+        body.pagination.next_cursor.length > 4096
+      : body.pagination.next_cursor !== null)
   )
     throw new ServiceError("invalid_response");
   const positions = new Map();
@@ -82,6 +92,7 @@ export function parseO1Positions(body, address, chainId) {
       ],
       verification: "indexed",
       claimable: false,
+      claimDisabledReason: "contract_unverified",
     };
     const key = `${position.target}:${currency}`;
     const previous = positions.get(key);
@@ -89,7 +100,11 @@ export function parseO1Positions(body, address, chainId) {
       throw new ServiceError("invalid_response");
     positions.set(key, position);
   }
-  return { positions: [...positions.values()], partial: body.pagination.has_more };
+  return {
+    positions: [...positions.values()],
+    partial: body.pagination.has_more,
+    nextCursor: body.pagination.next_cursor,
+  };
 }
 
 export class Fees {
@@ -101,6 +116,7 @@ export class Fees {
     this.cache = new ReadCache(now, 64);
     this.preflights = new ReadCache(now, 32);
     this.handles = new Map();
+    this.cursors = new Map();
     this.key = randomBytes(32);
   }
 
@@ -111,54 +127,108 @@ export class Fees {
       position.kind,
       position.target,
       position.poolId ?? position.payouts[0].asset,
+      position.escrowVersion,
     ];
     const id = createHmac("sha256", this.key).update(JSON.stringify(identity)).digest("hex");
     this.handles.delete(id);
-    while (this.handles.size >= 256) this.handles.delete(this.handles.keys().next().value);
-    this.handles.set(id, { position, expires: this.now() + 120_000 });
+    while (this.handles.size >= 4096) this.handles.delete(this.handles.keys().next().value);
+    // A position handle is discovery identity, never an executable quote. Every
+    // prepare still reads live balances, checks code and simulates its exact call.
+    this.handles.set(id, { position, expires: this.now() + HANDLE_TTL });
     return {
       id,
       target: position.target,
+      ...(position.escrowVersion ? { escrowVersion: position.escrowVersion } : {}),
       payouts: position.payouts,
       verification: position.verification,
       claimable: position.claimable,
+      ...(position.claimDisabledReason ? { claimDisabledReason: position.claimDisabledReason } : {}),
     };
+  }
+
+  continuation(input, state) {
+    if (!state) return null;
+    const id = randomBytes(32).toString("hex");
+    while (this.cursors.size >= 512) this.cursors.delete(this.cursors.keys().next().value);
+    this.cursors.set(id, {
+      address: input.address,
+      chainId: input.chainId,
+      padId: input.padId,
+      state,
+      expires: this.now() + HANDLE_TTL,
+    });
+    return id;
+  }
+
+  cursor(input) {
+    if (!input.cursor) return undefined;
+    const cursor = this.cursors.get(input.cursor);
+    if (
+      !cursor ||
+      cursor.expires <= this.now() ||
+      !sameAddress(cursor.address, input.address) ||
+      cursor.chainId !== input.chainId ||
+      cursor.padId !== input.padId
+    )
+      throw new ServiceError("cursor_expired", 409);
+    return cursor.state;
   }
 
   async list(input) {
     const { address, chainId, padId } = input;
+    const coverage =
+      padId === "o1"
+        ? "wallet_index"
+        : this.config.feeContracts.long?.discovery
+          ? "beneficiary_events"
+          : "configured_pools";
     const unavailable = {
-      ...input,
+      address,
+      chainId,
+      padId,
+      coverage,
+      nextCursor: null,
       status: "unavailable",
       reason: "not_configured",
       positions: [],
       expiresAt: this.now() + TTL,
     };
-    if (!this.config.feesEnabled) return unavailable;
+    if (!this.config.feesEnabled) return { ...unavailable, reason: "fees_disabled" };
     if (
       (padId === "o1" && !this.config.o1Key) ||
-      (padId === "long" && (!this.config.rpcUrl || !this.config.feeContracts.long?.pools.length))
+      (padId === "long" && !this.config.rpcUrl)
     )
-      return unavailable;
+      return { ...unavailable, reason: "provider_not_configured" };
+    if (padId === "long" && !this.config.feeContracts.long?.pools.length &&
+      !this.config.feeContracts.long?.discovery)
+      return { ...unavailable, reason: "contracts_not_configured" };
     return this.cache.get(`fees:${JSON.stringify(input)}`, TTL, async () => {
-      const result = padId === "o1" ? await this.o1(address, chainId) : await this.long(address);
+      const state = this.cursor(input);
+      const result =
+        padId === "o1" ? await this.o1(address, chainId, state) : await this.long(address, state);
       return {
-        ...input,
+        address,
+        chainId,
+        padId,
+        coverage,
+        nextCursor: this.continuation(input, result.nextState),
         status: result.partial ? "partial" : "ready",
         checkedAt: this.now(),
         expiresAt: this.now() + TTL,
         positions: result.positions.map((position) => this.remember(position)),
+        ...(result.progress ? { progress: result.progress } : {}),
       };
     });
   }
 
-  async o1(address, chainId) {
+  async o1(address, chainId, state) {
     const url = new URL(`/v1/wallets/${address}/fee-claims`, O1_ORIGIN);
     url.search = new URLSearchParams({
       chain_id: String(chainId),
       market: "all",
       state: "all",
-      limit: "25",
+      limit: String(O1_PAGE_SIZE),
+      ...(state?.cursor ? { cursor: state.cursor } : {}),
     }).toString();
     const result = parseO1Positions(
       await this.upstream.json(
@@ -170,50 +240,78 @@ export class Fees {
       ),
       address,
       chainId,
+      O1_PAGE_SIZE,
     );
-    const verified = result.positions
-      .filter(
-        (position) =>
-          chainId === 8453 &&
-          this.config.baseRpcUrl &&
-          this.config.feeContracts.o1.some((profile) =>
-            sameAddress(profile.escrow, position.target),
-          ),
-      )
-      .slice(0, 4);
+    const cursorHash = result.nextCursor
+      ? createHmac("sha256", this.key).update(result.nextCursor).digest("hex")
+      : null;
+    if (cursorHash && (state?.seen ?? []).includes(cursorHash))
+      throw new ServiceError("cursor_expired", 409);
+    if (cursorHash && (state?.seen.length ?? 0) >= 511) throw new ServiceError("scan_limit", 409);
+    const verified = result.positions.filter(
+      (position) =>
+        (chainId === 8453 ? this.config.baseRpcUrl : this.config.rpcUrl) &&
+        this.config.feeContracts.o1.some(
+          (profile) => profile.chainId === chainId && sameAddress(profile.escrow, position.target),
+        ),
+    );
     if (verified.length) {
       const profiles = [...new Set(verified.map((position) => position.target))].map((target) => {
-        const profile = this.config.feeContracts.o1.find((entry) =>
-          sameAddress(entry.escrow, target),
+        const profile = this.config.feeContracts.o1.find(
+          (entry) => entry.chainId === chainId && sameAddress(entry.escrow, target),
         );
         return { address: target, codeHash: profile.codeHash };
       });
       const block = await this.rpc.block(chainId);
-      await this.rpc.verify(chainId, profiles, false, block);
-      const amounts = await this.rpc.calls(
-        chainId,
-        verified.map((position) =>
-          view(position.target, escrowAbi, "owed", [address, position.payouts[0].asset]),
-        ),
-        block,
+      const available = await this.rpc.verifiedContracts(chainId, profiles, block);
+      const group = verified.filter((position) =>
+        available.some((profile) => sameAddress(position.target, profile.address)),
       );
-      verified.forEach((position, index) => {
-        position.payouts[0].claimableRaw = amounts[index].toString();
-        position.verification = "live";
-        position.claimable =
-          this.config.claimsEnabled && !!this.config.feeContracts.baseOracle && amounts[index] > 0n;
-      });
+      if (group.length) {
+        try {
+          const amounts = await this.rpc.calls(
+            chainId,
+            group.map((position) =>
+              view(position.target, escrowAbi, "owed", [address, position.payouts[0].asset]),
+            ),
+            block,
+          );
+          group.forEach((position, index) => {
+            const profile = this.config.feeContracts.o1.find(
+              (entry) => entry.chainId === chainId && sameAddress(entry.escrow, position.target),
+            );
+            position.escrowVersion = profile.version ?? "current";
+            position.payouts[0].claimableRaw = amounts[index].toString();
+            position.verification = "live";
+            position.claimable =
+              this.config.claimsEnabled &&
+              (chainId !== 8453 || !!this.config.feeContracts.baseOracle) &&
+              amounts[index] > 0n;
+            position.claimDisabledReason = amounts[index] === 0n ? "nothing_to_claim"
+              : !this.config.claimsEnabled ? "claims_disabled"
+              : chainId === 8453 && !this.config.feeContracts.baseOracle ? "gas_oracle_not_configured"
+              : undefined;
+          });
+        } catch (error) {
+          // An incompatible owed method remains visible as indexed-only;
+          // quota/network failures stop the page so its continuation can be retried.
+          if (!(error instanceof ServiceError) || error.code !== "reverted") throw error;
+        }
+      }
     }
     return {
       ...result,
+      nextState: result.nextCursor
+        ? { cursor: result.nextCursor, seen: [...(state?.seen ?? []), cursorHash] }
+        : null,
       partial:
         result.partial || result.positions.some((position) => position.verification !== "live"),
     };
   }
 
-  async long(address) {
+  async long(address, state) {
     const profile = this.config.feeContracts.long;
-    const block = await this.rpc.block(4663);
+    const block = state?.block ?? (await this.rpc.block(4663));
     await this.rpc.verify(
       4663,
       [
@@ -224,8 +322,34 @@ export class Fees {
       block,
     );
     const positions = [];
-    for (const pool of profile.pools) positions.push(await this.longPosition(address, pool, block));
-    return { positions, partial: true };
+    if (profile.discovery) {
+      const result = await discoverLongFeePools(
+        this.rpc,
+        profile,
+        address,
+        block,
+        state?.discovery,
+      );
+      for (const pool of result.pools)
+        positions.push(await this.longPosition(address, pool, block));
+      return {
+        positions,
+        progress: result.progress,
+        partial: !!result.nextState || !!result.partial,
+        nextState: result.nextState ? { block, discovery: result.nextState } : null,
+      };
+    }
+    const offset = state?.offset ?? 0;
+    for (const pool of profile.pools.slice(offset, offset + LONG_PAGE_SIZE))
+      positions.push(await this.longPosition(address, pool, block));
+    return {
+      positions,
+      partial: true,
+      nextState:
+        offset + LONG_PAGE_SIZE < profile.pools.length
+          ? { block, offset: offset + LONG_PAGE_SIZE }
+          : null,
+    };
   }
 
   async longPosition(address, pool, block) {
@@ -276,6 +400,8 @@ export class Fees {
       pool,
       verification: "live",
       claimable: this.config.claimsEnabled && shares > 0n && amounts.some((amount) => amount > 0n),
+      claimDisabledReason: shares === 0n || !amounts.some((amount) => amount > 0n)
+        ? "nothing_to_claim" : !this.config.claimsEnabled ? "claims_disabled" : undefined,
       payouts: [pool.currency0, pool.currency1].map((currency, index) => ({
         asset: currency.address,
         symbol: currency.symbol,
@@ -297,6 +423,7 @@ export class Fees {
       const chainId = position.chainId;
       const block = await this.rpc.block(chainId);
       let data;
+      let escrowVersion;
       if (position.kind === "long") {
         const profile = this.config.feeContracts.long;
         await this.rpc.verify(
@@ -316,13 +443,20 @@ export class Fees {
         });
       } else {
         const profile = this.config.feeContracts.o1.find(
-          (entry) => chainId === 8453 && sameAddress(entry.escrow, position.target),
+          (entry) => entry.chainId === chainId && sameAddress(entry.escrow, position.target),
         );
         const oracle = this.config.feeContracts.baseOracle;
-        if (!profile || !oracle) throw new ServiceError("contract_unverified", 409);
+        if (!profile || (chainId === 8453 && !oracle))
+          throw new ServiceError("contract_unverified", 409);
+        escrowVersion = profile.version ?? "current";
+        if ((position.escrowVersion ?? "current") !== escrowVersion)
+          throw new ServiceError("contract_unverified", 409);
         await this.rpc.verify(
           chainId,
-          [{ address: profile.escrow, codeHash: profile.codeHash }, oracle],
+          [
+            { address: profile.escrow, codeHash: profile.codeHash },
+            ...(chainId === 8453 ? [oracle] : []),
+          ],
           true,
           block,
         );
@@ -336,29 +470,24 @@ export class Fees {
           payouts: [{ ...position.payouts[0], claimableRaw: owed.toString() }],
         };
         data = encodeFunctionData({
-          abi: escrowAbi,
-          functionName: "claimFor",
+          abi: escrowVersion === "legacy" ? legacyEscrowAbi : escrowAbi,
+          functionName: escrowVersion === "legacy" ? "claim" : "claimFor",
           args: [address, position.payouts[0].asset],
         });
       }
       if (!position.payouts.some((payout) => uint(payout.claimableRaw) > 0n) || !position.claimable)
         throw new ServiceError("nothing_to_claim", 409);
       const transaction = { from: address, to: position.target, data, value: "0x0" };
-      const [gasHex, priceHex, balanceHex, nonceHex, simulation] = await this.rpc.batch(chainId, [
+      const [gasHex, priceHex, balanceHex, simulation, nonceHex] = await this.rpc.batch(chainId, [
         { method: "eth_estimateGas", params: [transaction, block] },
         { method: "eth_gasPrice", params: [] },
         { method: "eth_getBalance", params: [address, "pending"] },
+        { method: "eth_call", params: [transaction, block] },
         ...(chainId === 8453
-          ? [
-              { method: "eth_getTransactionCount", params: [address, "pending"] },
-              { method: "eth_call", params: [transaction, block] },
-            ]
+          ? [{ method: "eth_getTransactionCount", params: [address, "pending"] }]
           : []),
       ]);
-      if (
-        chainId === 8453 &&
-        (typeof simulation !== "string" || !/^0x(?:[\da-f]{2})*$/i.test(simulation))
-      )
+      if (typeof simulation !== "string" || !/^0x(?:[\da-f]{2})*$/i.test(simulation))
         throw new ServiceError("invalid_response");
       const gas = rpcNumber(gasHex);
       const gasLimit = (gas * 120n + 99n) / 100n;
@@ -398,6 +527,7 @@ export class Fees {
       return {
         positionId,
         kind: position.kind,
+        ...(escrowVersion ? { escrowVersion } : {}),
         chainId,
         address,
         target: position.target,

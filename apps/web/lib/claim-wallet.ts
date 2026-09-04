@@ -9,6 +9,7 @@ import {
 import { base, robinhood } from 'viem/chains';
 import {
   claimAbi,
+  legacyClaimAbi,
   validateClaim,
   type ClaimQuote,
   type FeePayout,
@@ -182,7 +183,7 @@ export function receiptPayouts(
     let event;
     try {
       event = decodeEventLog({
-        abi: claimAbi,
+        abi: quote.escrowVersion === 'legacy' ? legacyClaimAbi : claimAbi,
         data: log.data,
         topics: log.topics as [`0x${string}`, ...`0x${string}`[]],
       });
@@ -193,7 +194,9 @@ export function receiptPayouts(
       quote.kind === 'o1' &&
       event.eventName === 'Claimed' &&
       event.args.recipient.toLowerCase() === quote.address.toLowerCase() &&
-      event.args.destination.toLowerCase() === quote.address.toLowerCase() &&
+      (quote.escrowVersion === 'legacy' ||
+        ('destination' in event.args &&
+          event.args.destination.toLowerCase() === quote.address.toLowerCase())) &&
       event.args.currency.toLowerCase() === quote.payouts[0].asset.toLowerCase()
     )
       amounts[0] += event.args.amount;

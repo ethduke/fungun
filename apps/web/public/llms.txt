@@ -5,8 +5,10 @@
 Agents can help prepare a coin draft and explain its validation. Configured
 backends can load RWA catalogs and check Long ticker reservations on explicit
 request. External reads default to disabled; O1 ticker availability remains
-unverified; Longbow ticker checking is not connected. FEE supports configured
-Long locked-pool claims and indexed O1 Robinhood positions. Base fee lookups are
+unverified; Longbow ticker checking is not connected. Fees supports paginated
+Long beneficiary-pool discovery and O1 wallet-index positions, with claims for
+reviewed current contracts. Claim all queues eligible discovered positions with
+separate review, wallet confirmation and receipt proof for every claim. Base fee lookups are
 paused and Longbow fee lookup is not connected.
 Live launch quotes and paid image generation are not enabled.
 An unavailable balance is unknown, not zero. A reservation check is not proof
@@ -45,4 +47,4 @@ Links beginning with `/` resolve against the origin serving this file.
 ## Optional
 
 - [Launch composer](/): Interactive local draft, image upload, launchpad selection and inline validation.
-- [FEE](/fees): Address-driven fee balances and explicit wallet claim reviews where configured; coverage is partial and missing balances are unknown.
+- [Fees](/fees): Connected-wallet fee discovery, resumable pages and explicit individual or queued wallet claim reviews; incomplete coverage and unknown balances are labeled.

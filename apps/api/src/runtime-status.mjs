@@ -15,7 +15,10 @@ export function runtimeStatus(env) {
   const present = (value) => typeof value === "string" && value.trim().length > 0;
   const o1 = ["O1_API_KEY", present(config.o1Key)];
   const rpc = ["ROBINHOOD_RPC", present(config.rpcUrl)];
-  const longFees = ["FEE_CONTRACTS_JSON.long", !!config.feeContracts.long?.pools.length];
+  const longFees = [
+    "FEE_CONTRACTS_JSON.long",
+    !!(config.feeContracts.long?.pools.length || config.feeContracts.long?.discovery),
+  ];
   const reads = ["READ_UPSTREAMS"];
   const fees = ["READ_FEES"];
   const claims = ["READ_FEES", "WALLET_CLAIMS"];
@@ -61,14 +64,32 @@ export function runtimeStatus(env) {
         [
           o1,
           ["BASE_RPC_URL", present(config.baseRpcUrl)],
-          ["FEE_CONTRACTS_JSON.o1", config.feeContracts.o1.length > 0],
+          [
+            "FEE_CONTRACTS_JSON.o1",
+            config.feeContracts.o1.some((profile) => profile.chainId === 8453),
+          ],
           ["FEE_CONTRACTS_JSON.baseOracle", !!config.feeContracts.baseOracle],
         ],
         claims,
       ),
-      ...["o1_robinhood_claims", "launch_execution", "image_storage", "paid_image_generation"].map(
-        (id) => ({ id, status: "not_implemented", missing: [], disabled: [] }),
+      feature(
+        "o1_robinhood_claims",
+        [
+          o1,
+          rpc,
+          [
+            "FEE_CONTRACTS_JSON.o1",
+            config.feeContracts.o1.some((profile) => profile.chainId === 4663),
+          ],
+        ],
+        claims,
       ),
+      ...["launch_execution", "image_storage", "paid_image_generation"].map((id) => ({
+        id,
+        status: "not_implemented",
+        missing: [],
+        disabled: [],
+      })),
     ],
   };
 }

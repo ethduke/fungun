@@ -5,6 +5,10 @@ export const escrowAbi = parseAbi([
   "function owed(address recipient, address currency) view returns (uint256)",
   "function claimFor(address recipient, address currency)",
 ]);
+export const legacyEscrowAbi = parseAbi([
+  "function owed(address recipient, address currency) view returns (uint256)",
+  "function claim(address recipient, address currency)",
+]);
 export const managerAbi = parseAbi([
   "struct PoolKey { address currency0; address currency1; uint24 fee; int24 tickSpacing; address hooks; }",
   "function getState(address asset) view returns (address numeraire, uint256 totalTokensOnBondingCurve, address dopplerHook, bytes graduationDopplerHookCalldata, uint8 status, PoolKey poolKey, int24 farTick)",
@@ -61,12 +65,16 @@ export function readFeeContracts(raw = "{}") {
   const oracle = value.baseOracle;
   if (
     !Array.isArray(o1) ||
-    o1.length > 4 ||
+    o1.length > 32 ||
     o1.some(
       (entry) =>
-        !entry || entry.chainId !== 8453 || !validAddress(entry.escrow) || !hash(entry.codeHash),
+        !entry ||
+        ![8453, 4663].includes(entry.chainId) ||
+        !validAddress(entry.escrow) ||
+        !hash(entry.codeHash) ||
+        (entry.version !== undefined && !["current", "legacy"].includes(entry.version)),
     ) ||
-    new Set(o1.map((entry) => entry.escrow.toLowerCase())).size !== o1.length
+    new Set(o1.map((entry) => `${entry.chainId}:${entry.escrow.toLowerCase()}`)).size !== o1.length
   )
     throw new ServiceError("invalid_fee_configuration");
   if (
@@ -75,9 +83,9 @@ export function readFeeContracts(raw = "{}") {
       !hash(long.managerCodeHash) ||
       !validAddress(long.hook) ||
       !hash(long.hookCodeHash) ||
-      !Array.isArray(long.pools) ||
-      long.pools.length > 2 ||
-      long.pools.some(
+      (long.pools !== undefined && !Array.isArray(long.pools)) ||
+      (long.pools ?? []).length > 256 ||
+      (long.pools ?? []).some(
         (pool) =>
           !pool ||
           !validAddress(pool.asset) ||
@@ -98,7 +106,20 @@ export function readFeeContracts(raw = "{}") {
     throw new ServiceError("invalid_fee_configuration");
   if (
     long &&
-    new Set(long.pools.map((pool) => poolId(pool, long.manager))).size !== long.pools.length
+    new Set((long.pools ?? []).map((pool) => poolId(pool, long.manager))).size !==
+      (long.pools ?? []).length
+  )
+    throw new ServiceError("invalid_fee_configuration");
+  if (
+    long?.discovery &&
+    (typeof long.discovery !== "object" ||
+      Array.isArray(long.discovery) ||
+      Object.keys(long.discovery).some((key) => !["fromBlock", "blockRange"].includes(key)) ||
+      !Number.isSafeInteger(long.discovery.fromBlock) ||
+      long.discovery.fromBlock < 0 ||
+      !Number.isInteger(long.discovery.blockRange ?? 2000) ||
+      (long.discovery.blockRange ?? 2000) < 1 ||
+      (long.discovery.blockRange ?? 2000) > 10000)
   )
     throw new ServiceError("invalid_fee_configuration");
   if (
@@ -109,7 +130,19 @@ export function readFeeContracts(raw = "{}") {
       !hash(oracle.implementationCodeHash))
   )
     throw new ServiceError("invalid_fee_configuration");
-  return { o1, long, baseOracle: oracle };
+  return {
+    o1,
+    long: long
+      ? {
+          ...long,
+          pools: long.pools ?? [],
+          ...(long.discovery
+            ? { discovery: { ...long.discovery, blockRange: long.discovery.blockRange ?? 2000 } }
+            : {}),
+        }
+      : undefined,
+    baseOracle: oracle,
+  };
 }
 
 export function poolId(pool, manager) {

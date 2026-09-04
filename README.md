@@ -10,6 +10,8 @@ npm run dev
 
 In a second terminal, run `npm run dev:api` (Node 24.4+). External reads default
 to disabled; see [read-service setup](docs/read-service.md) for runtime configuration.
+Separate worktrees can use distinct local web and API ports with matching
+`APP_ORIGIN`, `READ_SERVICE_PORT` and `READ_SERVICE_ORIGIN` settings.
 
 Open http://127.0.0.1:3000. See [development notes](docs/development.md) for
 working controls, deliberate limitations, tests and the Fly backend boundary.
@@ -18,7 +20,9 @@ This milestone is a local webview with a guarded read-service backend. Configure
 O1 catalogs load through the read service; Long and Longbow use bundled ticker
 lists (56 and 194 choices). Long ticker reservations can be checked; O1 stays
 unverified and Longbow ticker checking is not connected. Configured fee adapters support bounded live reads
-and explicit wallet claims; see [fee setup and coverage](docs/fee-claims.md).
+and explicit wallet claims. The Fees tab discovers the connected wallet's beneficiary positions with
+resumable pages and queues all eligible claims for individual wallet confirmation;
+see [fee setup and coverage](docs/fee-claims.md).
 Launch transactions and paid image generation remain disabled. Telegram is out of scope.
 
 ## Agent documentation

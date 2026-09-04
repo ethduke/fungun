@@ -25,6 +25,10 @@ const messages: Record<string, string> = {
   wrong_account: 'Connect the wallet that owns these fees before claiming.',
   quote_expired:
     'This estimate expired. Refresh the fees and review a new claim.',
+  cursor_expired:
+    'This fee scan expired. Refresh the address to start a new scan.',
+  scan_limit:
+    'This scan reached its limit. Positions already found remain available; coverage is incomplete.',
   nothing_to_claim:
     'There are no fees to claim now. The balance may have changed; refresh the list.',
   contract_unverified:

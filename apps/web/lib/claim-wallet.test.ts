@@ -8,7 +8,7 @@ import {
   type EIP1193Provider,
   type Hash,
 } from 'viem';
-import { claimAbi, type ClaimQuote } from './fee-service.ts';
+import { claimAbi, legacyClaimAbi, validateClaim, type ClaimQuote } from './fee-service.ts';
 import {
   acknowledgeClaim,
   checkWalletClaim,
@@ -117,6 +117,44 @@ await test('Long Release confirms beneficiary payout; pool-wide Collect or succe
     ['55', '60'],
   );
   assert.equal(receiptPayouts({ ...receipt(), logs: [] }, input), null);
+});
+
+await test('legacy escrow requires its explicit version and proves recipient-bound payouts using the legacy event', () => {
+  const legacy: ClaimQuote = {
+    ...quote(),
+    escrowVersion: 'legacy',
+    data: encodeFunctionData({
+      abi: legacyClaimAbi,
+      functionName: 'claim',
+      args: [owner, currency],
+    }),
+  };
+  assert.equal(validateClaim(legacy).escrowVersion, 'legacy');
+  for (const escrowVersion of [undefined, 'current', 'unknown'])
+    assert.throws(() => validateClaim({ ...legacy, escrowVersion }));
+  assert.throws(() => validateClaim({ ...quote(), escrowVersion: 'legacy' }));
+  assert.throws(() => validateClaim({
+    ...legacy,
+    data: encodeFunctionData({ abi: legacyClaimAbi, functionName: 'claim', args: [addr('b'), currency] }),
+  }));
+  const log = {
+    address: target,
+    topics: encodeEventTopics({
+      abi: legacyClaimAbi,
+      eventName: 'Claimed',
+      args: { recipient: owner, currency },
+    }) as Hash[],
+    data: encodeAbiParameters([{ type: 'uint256' }], [125n]),
+  };
+  const proof = { ...receipt(), logs: [log] };
+  assert.equal(receiptPayouts(proof, legacy)?.[0].claimableRaw, '125');
+  assert.equal(receiptPayouts(proof, quote()), null);
+  assert.equal(receiptPayouts(receipt(), legacy), null);
+  assert.equal(receiptPayouts({ ...proof, logs: [{ ...log, topics: encodeEventTopics({
+    abi: legacyClaimAbi,
+    eventName: 'Claimed',
+    args: { recipient: addr('b'), currency },
+  }) as Hash[] }] }, legacy), null);
 });
 
 await test('wallet operations are explicit, never retried, identity-bound and retain ambiguous activity', async () => {

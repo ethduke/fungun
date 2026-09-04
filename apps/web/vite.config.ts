@@ -10,6 +10,9 @@ const localBindingConfig = {
 };
 
 export default defineConfig(async () => {
+  const apiPort = Number(process.env.READ_SERVICE_PORT || 8787);
+  if (!Number.isInteger(apiPort) || apiPort < 1024 || apiPort > 65535)
+    throw new Error('Invalid local read-service port.');
   if (process.env.FUNGUN_WEB_TARGET === 'fly') {
     return {
       css: { postcss: { plugins: [tailwindcss()] } },
@@ -31,7 +34,7 @@ export default defineConfig(async () => {
       strictPort: true,
       proxy: {
         '^/api/(catalog|ticker|fees|claim-prepare|tracked-prices)(?:[/?]|$)': {
-          target: 'http://127.0.0.1:8787',
+          target: `http://127.0.0.1:${apiPort}`,
           rewrite: (path: string) => path.replace(/^\/api(?=\/)/, '/v1'),
         },
       },

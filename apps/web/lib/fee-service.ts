@@ -9,19 +9,36 @@ export type FeePayout = {
   decimals: number;
   claimableRaw: string;
 };
+const feeUnavailableReasons = [
+  'fees_disabled',
+  'provider_not_configured',
+  'contracts_not_configured',
+  'not_configured',
+] as const;
+const claimDisabledReasons = [
+  'claims_disabled',
+  'contract_unverified',
+  'gas_oracle_not_configured',
+  'nothing_to_claim',
+] as const;
 export type FeePosition = {
   id: string;
   target: string;
   payouts: FeePayout[];
   verification: 'live' | 'indexed';
   claimable: boolean;
+  escrowVersion?: 'current' | 'legacy';
+  claimDisabledReason?: (typeof claimDisabledReasons)[number];
 };
 export type FeeSource = {
   address: string;
   chainId: ChainId;
   padId: PadId;
   status: 'ready' | 'partial' | 'unavailable';
-  reason?: string;
+  reason?: (typeof feeUnavailableReasons)[number];
+  nextCursor?: string | null;
+  coverage?: 'wallet_index' | 'configured_pools' | 'beneficiary_events';
+  progress?: { scannedThroughBlock: string | null; toBlock: string };
   positions: FeePosition[];
   expiresAt: number;
 };
@@ -31,6 +48,7 @@ export type ClaimQuote = {
   chainId: ChainId;
   address: string;
   target: string;
+  escrowVersion?: 'current' | 'legacy';
   data: `0x${string}`;
   poolId?: `0x${string}`;
   payouts: FeePayout[];
@@ -50,6 +68,10 @@ export const claimAbi = parseAbi([
   'event Claimed(address indexed recipient, address indexed currency, address indexed destination, uint256 amount)',
   'event Release(bytes32 indexed poolId, address indexed beneficiary, uint256 fees0, uint256 fees1)',
 ]);
+export const legacyClaimAbi = parseAbi([
+  'function claim(address recipient, address currency)',
+  'event Claimed(address indexed recipient, address indexed currency, uint256 amount)',
+]);
 const equal = (a: string, b: string) => a.toLowerCase() === b.toLowerCase();
 const amount = (value: unknown): value is string =>
   typeof value === 'string' &&
@@ -57,6 +79,8 @@ const amount = (value: unknown): value is string =>
   BigInt(value) < 1n << 256n;
 const address = (value: unknown): value is string =>
   typeof value === 'string' && isAddress(value, { strict: false });
+const nonzeroAddress = (value: unknown): value is string =>
+  address(value) && !/^0x0{40}$/i.test(value);
 const id = (value: unknown) =>
   typeof value === 'string' && /^[a-f0-9]{64}$/.test(value);
 function payouts(values: FeePayout[]) {
@@ -75,6 +99,8 @@ function payouts(values: FeePayout[]) {
         Number.isInteger(value.decimals) &&
         value.decimals >= 0 &&
         value.decimals <= 36 &&
+        (!/^0x0{40}$/i.test(value.asset) ||
+          (value.symbol === 'ETH' && value.decimals === 18)) &&
         amount(value.claimableRaw),
     )
   );
@@ -128,6 +154,8 @@ async function request(kind: 'fees' | 'claim-prepare', input: object) {
         'gas_limit_low',
         'fee_changed',
         'wrong_chain',
+        'cursor_expired',
+        'scan_limit',
       ];
       throw new AppError(
         value?.error && safeCodes.includes(value.error)
@@ -159,12 +187,28 @@ export function parseFees(
   const result = value as FeeSource;
   if (
     !result ||
-    !address(result.address) ||
+    !nonzeroAddress(result.address) ||
     !equal(result.address, owner) ||
     result.chainId !== chainId ||
     result.padId !== padId ||
     !['ready', 'partial', 'unavailable'].includes(result.status) ||
+    (result.reason !== undefined &&
+      (!feeUnavailableReasons.includes(result.reason) ||
+        result.status !== 'unavailable')) ||
     !Number.isFinite(result.expiresAt) ||
+    (result.nextCursor != null && !id(result.nextCursor)) ||
+    (result.nextCursor != null && result.status !== 'partial') ||
+    (result.coverage !== undefined &&
+      !['wallet_index', 'configured_pools', 'beneficiary_events'].includes(
+        result.coverage,
+      )) ||
+    (result.progress !== undefined &&
+      (!result.progress ||
+        !amount(result.progress.toBlock) ||
+        (result.progress.scannedThroughBlock !== null &&
+          (!amount(result.progress.scannedThroughBlock) ||
+            BigInt(result.progress.scannedThroughBlock) >
+              BigInt(result.progress.toBlock))))) ||
     !Array.isArray(result.positions) ||
     result.positions.length > 25 ||
     new Set(result.positions.map((position) => position?.id)).size !==
@@ -173,25 +217,92 @@ export function parseFees(
       (position) =>
         !position ||
         !id(position.id) ||
-        !address(position.target) ||
+        !nonzeroAddress(position.target) ||
         !payouts(position.payouts) ||
         !['live', 'indexed'].includes(position.verification) ||
         typeof position.claimable !== 'boolean' ||
+        (position.escrowVersion !== undefined &&
+          (padId !== 'o1' || !['current', 'legacy'].includes(position.escrowVersion))) ||
+        (position.claimDisabledReason !== undefined &&
+          (!claimDisabledReasons.includes(position.claimDisabledReason) ||
+            position.claimable)) ||
         (position.claimable && position.verification !== 'live'),
     ) ||
-    (result.status === 'unavailable' && result.positions.length)
+    (result.status === 'unavailable' && result.positions.length) ||
+    (result.status === 'ready' &&
+      (result.coverage === 'configured_pools' ||
+        result.positions.some((position) => position.verification !== 'live')))
   )
     throw new AppError('invalid_response');
   return result;
 }
 
-export async function loadFees(owner: string, chainId: ChainId, padId: PadId) {
+export async function loadFees(
+  owner: string,
+  chainId: ChainId,
+  padId: PadId,
+  cursor?: string,
+) {
+  if (cursor !== undefined && !id(cursor))
+    throw new AppError('invalid_request');
   return parseFees(
-    await request('fees', { address: owner, chainId, padId }),
+    await request('fees', {
+      address: owner,
+      chainId,
+      padId,
+      ...(cursor ? { cursor } : {}),
+    }),
     owner,
     chainId,
     padId,
   );
+}
+
+// Pages can overlap while the index changes. A shared escrow/currency position
+// is one balance, never additive; replace its amount only after identity checks.
+export function mergeFeePages(previous: FeeSource, page: FeeSource): FeeSource {
+  if (
+    !equal(previous.address, page.address) ||
+    previous.chainId !== page.chainId ||
+    previous.padId !== page.padId ||
+    previous.coverage !== page.coverage ||
+    page.status === 'unavailable'
+  )
+    throw new AppError('invalid_response');
+  const positions = new Map(
+    previous.positions.map((position) => [position.id, position]),
+  );
+  for (const position of page.positions) {
+    const existing = positions.get(position.id);
+    if (
+      existing &&
+      (!equal(existing.target, position.target) ||
+        (existing.escrowVersion ?? 'current') !== (position.escrowVersion ?? 'current') ||
+        existing.payouts.length !== position.payouts.length ||
+        existing.payouts.some(
+          (payout, index) =>
+            !equal(payout.asset, position.payouts[index].asset) ||
+            payout.symbol !== position.payouts[index].symbol ||
+            payout.decimals !== position.payouts[index].decimals,
+        ))
+    )
+      throw new AppError('invalid_response');
+    positions.set(position.id, position);
+  }
+  if (positions.size > 4096) throw new AppError('invalid_response');
+  const merged = [...positions.values()];
+  return {
+    ...page,
+    positions: merged,
+    expiresAt: Math.min(previous.expiresAt, page.expiresAt),
+    status:
+      page.status === 'partial' ||
+      page.nextCursor ||
+      page.coverage === 'configured_pools' ||
+      merged.some((position) => position.verification !== 'live')
+        ? 'partial'
+        : 'ready',
+  };
 }
 
 export function validateClaim(value: unknown): ClaimQuote {
@@ -200,9 +311,13 @@ export function validateClaim(value: unknown): ClaimQuote {
     !quote ||
     !id(quote.positionId) ||
     !['long', 'o1'].includes(quote.kind) ||
-    quote.chainId !== (quote.kind === 'long' ? 4663 : 8453) ||
-    !address(quote.address) ||
-    !address(quote.target) ||
+    !(quote.kind === 'long'
+      ? quote.chainId === 4663
+      : [4663, 8453].includes(quote.chainId)) ||
+    !nonzeroAddress(quote.address) ||
+    !nonzeroAddress(quote.target) ||
+    (quote.escrowVersion !== undefined &&
+      (quote.kind !== 'o1' || !['current', 'legacy'].includes(quote.escrowVersion))) ||
     !payouts(quote.payouts) ||
     !quote.payouts.some((payout) => BigInt(payout.claimableRaw) > 0n) ||
     quote.value !== '0' ||
@@ -225,7 +340,10 @@ export function validateClaim(value: unknown): ClaimQuote {
     throw new AppError('invalid_response');
   let decoded;
   try {
-    decoded = decodeFunctionData({ abi: claimAbi, data: quote.data });
+    decoded = decodeFunctionData({
+      abi: quote.escrowVersion === 'legacy' ? legacyClaimAbi : claimAbi,
+      data: quote.data,
+    });
   } catch {
     throw new AppError('invalid_response');
   }
@@ -236,7 +354,7 @@ export function validateClaim(value: unknown): ClaimQuote {
         quote.data.length !== 74 ||
         decoded.args[0] !== quote.poolId
       : quote.payouts.length !== 1 ||
-        decoded.functionName !== 'claimFor' ||
+        decoded.functionName !== (quote.escrowVersion === 'legacy' ? 'claim' : 'claimFor') ||
         quote.data.length !== 138 ||
         !equal(decoded.args[0], quote.address) ||
         !equal(decoded.args[1], quote.payouts[0].asset)
@@ -259,6 +377,7 @@ export async function prepareClaim(
     quote.kind !== source.padId ||
     quote.positionId !== position.id ||
     !equal(quote.target, position.target) ||
+    (quote.escrowVersion ?? 'current') !== (position.escrowVersion ?? 'current') ||
     quote.payouts.length !== position.payouts.length ||
     quote.payouts.some(
       (payout, index) =>

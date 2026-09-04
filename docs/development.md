@@ -80,18 +80,21 @@ Run `npm run dev:api` in a second terminal for the read service. See
   image with ticker/name context; it is not connected to paid generation yet.
 - Explicitly connect/disconnect a discovered EIP-6963 wallet using wagmi/viem.
 - Open FEE from the header: one payout-coin table, no console tabs.
-- FEE follows the connected account or a manually entered address after a 500 ms debounce.
+- FEE shows fees only for the connected wallet; while disconnected, it shows “Connect your wallet to show fees.” without making fee lookups.
 
 Fee reads and wallet claims are implemented behind runtime configuration; see
 [fee setup and coverage](fee-claims.md). Missing integrations show unknown balances,
 never fabricated zero balances. Lookup addresses are sent to the fee backend and
 providers, not stored in browser storage or added to the browser URL. Wallet connection stays mounted
-when navigating between Launch and FEE; disconnecting clears the automatic address.
+when navigating between Launch and FEE; switching accounts or disconnecting clears displayed fees.
 The launch draft and uploaded image also survive navigation in layout-owned memory;
 refreshing or closing the page clears them. Nothing is persisted to disk.
 
 O1 fee positions are shared escrow balances by payout
-asset, not per-token lifetime revenue. Long's reader covers locked-LP fees only;
+asset, not per-token lifetime revenue. O1 wallet-index pages are resumable, and
+every approved current escrow position can receive a live balance check. Long's
+reader discovers beneficiary event history or pages through configured pools;
+it covers locked-LP fees only;
 custom-hook payouts remain unknown. Group by chain and asset identity, with a
 launchpad breakdown, never by ticker alone. Claims must verify the connected
 beneficiary, chain, fresh amount and target contract before wallet simulation

@@ -16,10 +16,17 @@ export async function readJson(response, maxBytes) {
     await response.body?.cancel();
     throw new ServiceError("rate_limited", 429, retryAfter);
   }
-  if (!response.ok || !response.headers.get("content-type")?.includes("application/json")) {
+  const contentType = response.headers.get("content-type") ?? "";
+  const cursorProblem =
+    response.status === 409 && /application\/(?:problem\+)?json/.test(contentType);
+  if (
+    (!response.ok && !cursorProblem) ||
+    (!contentType.includes("application/json") && !cursorProblem)
+  ) {
     await response.body?.cancel();
     throw new ServiceError("upstream_unavailable");
   }
+  if (cursorProblem) maxBytes = Math.min(maxBytes, 4096);
   const declared = Number(response.headers.get("content-length"));
   if (declared > maxBytes) {
     await response.body?.cancel();
@@ -37,7 +44,13 @@ export async function readJson(response, maxBytes) {
       if (length > maxBytes) throw new ServiceError("upstream_unavailable");
       chunks.push(value);
     }
-    return JSON.parse(Buffer.concat(chunks).toString("utf8"));
+    const value = JSON.parse(Buffer.concat(chunks).toString("utf8"));
+    if (cursorProblem) {
+      if (["cursor_stale", "cursor_filter_mismatch"].includes(value?.code))
+        throw new ServiceError("cursor_expired", 409);
+      throw new ServiceError("upstream_unavailable");
+    }
+    return value;
   } finally {
     await reader.cancel();
   }
