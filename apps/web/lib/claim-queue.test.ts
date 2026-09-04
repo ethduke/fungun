@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import {
   claimQueueItems,
+  claimQueueActivities,
   queueClaimAttempt,
   reconcileClaimQueue,
   startClaimQueue,
@@ -181,4 +182,28 @@ await test('queue attempts stay bound to the expected wallet, chain, source and 
     { positionId: 'f'.repeat(64) },
   ])
     assert.throws(() => queueClaimAttempt(queue, { ...quote(), ...altered }));
+});
+
+await test('queue status keeps its own receipts and never takes an older same-position activity', () => {
+  const first = quote();
+  const old: ClaimActivity = { quote: { ...first }, status: 'confirmed' };
+  const pending: ClaimActivity = { quote: first, status: 'submitted' };
+  const started = startClaimQueue([source(), source('b'.repeat(64))]);
+  assert.deepEqual(claimQueueActivities(started, [old]), []);
+  const waiting = queueClaimAttempt(started, first);
+  assert.deepEqual(claimQueueActivities(waiting, [old, pending]), [pending]);
+  const paid: ClaimActivity = { ...pending, status: 'confirmed' };
+  const advanced = reconcileClaimQueue(waiting, [paid]);
+  assert.deepEqual(claimQueueActivities(advanced, [old, paid]), [paid]);
+  const second = quote(source('b'.repeat(64)));
+  const next: ClaimActivity = { quote: second, status: 'submitted' };
+  const continuing = queueClaimAttempt(advanced, second);
+  assert.deepEqual(claimQueueActivities(continuing, [old, paid, next]), [
+    paid,
+    next,
+  ]);
+  assert.deepEqual(
+    claimQueueActivities(startClaimQueue([source()]), [paid, next]),
+    [],
+  );
 });

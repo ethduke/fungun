@@ -7,7 +7,19 @@ export type ClaimQueue = {
   index: number;
   status: 'ready' | 'awaiting' | 'paused' | 'complete';
   attempt?: ClaimQuote;
+  attempts?: ClaimQuote[];
 };
+
+export function claimQueueActivities(
+  queue: ClaimQueue,
+  activities: ClaimActivity[],
+) {
+  const attempts = [
+    ...(queue.attempts ?? []),
+    ...(queue.attempt ? [queue.attempt] : []),
+  ];
+  return activities.filter((activity) => attempts.includes(activity.quote));
+}
 
 // One Long position can pay two currencies. It still needs only one transaction.
 export function claimQueueItems(sources: FeeSource[]): ClaimQueueItem[] {
@@ -54,7 +66,12 @@ export function queueClaimAttempt(
     quote.address.toLowerCase() !== item.source.address.toLowerCase()
   )
     throw new Error('The claim does not match the current queue item.');
-  return { ...queue, status: 'awaiting', attempt: quote };
+  return {
+    ...queue,
+    status: 'awaiting',
+    attempt: quote,
+    attempts: [...(queue.attempts ?? []), quote],
+  };
 }
 
 // Reconciliation never sends a transaction. The next item can be prepared by
@@ -80,6 +97,7 @@ export function reconcileClaimQueue(
     ...queue,
     index,
     attempt: undefined,
+    attempts: queue.attempts ?? [attempt],
     status: index === queue.items.length ? 'complete' : 'ready',
   };
 }
