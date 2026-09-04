@@ -41,6 +41,7 @@ import {
   DEFAULT_DESTINATIONS,
   IMAGE_LIMIT,
   imageFileError,
+  imageKind,
   pairingName,
   selectChain,
   supportsChain,
@@ -126,13 +127,14 @@ export default function Home() {
       const header = new Uint8Array(await file.slice(0, 32).arrayBuffer());
       const error = imageFileError(file.size, file.type, header);
       if (error) throw new Error(error);
-      const bitmap = await createImageBitmap(file);
+      const source = file.slice(0, file.size, imageKind(header) ?? '');
+      const bitmap = await createImageBitmap(source);
       const oversized = bitmap.width > 4096 || bitmap.height > 4096;
       bitmap.close();
       if (oversized)
         throw new Error('Use an image no larger than 4096 × 4096 pixels.');
       if (sequence === imageSequence.current)
-        setImage({ url: URL.createObjectURL(file), size: file.size });
+        setImage({ url: URL.createObjectURL(source), size: file.size });
     } catch (error) {
       if (sequence === imageSequence.current) {
         setImage(null);

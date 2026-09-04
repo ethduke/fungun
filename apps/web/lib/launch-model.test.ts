@@ -209,3 +209,52 @@ await test('image sniffing rejects unsupported or spoofed formats', () => {
   );
   assert.equal(imageKind(new Uint8Array([137, 80])), null);
 });
+
+const webpSamples = [
+  new Uint8Array([
+    82, 73, 70, 70, 22, 0, 0, 0, 87, 69, 66, 80, 86, 80, 56, 76, 9, 0, 0, 0, 47,
+    0, 0, 0, 0, 136, 136, 254, 7, 0,
+  ]),
+  new Uint8Array([
+    82, 73, 70, 70, 36, 0, 0, 0, 87, 69, 66, 80, 86, 80, 56, 32, 24, 0, 0, 0,
+    48, 1, 0, 157, 1, 42, 1, 0, 1, 0, 1, 64, 38, 37, 164, 0, 3, 112, 0, 254,
+    253, 54, 104, 0,
+  ]),
+];
+
+await test('valid lossy and lossless WebP accepts generic and legacy MIME labels', () => {
+  for (const bytes of webpSamples) {
+    const header = bytes.slice(0, 32);
+    assert.equal(imageKind(header), 'image/webp');
+    for (const mime of [
+      'image/webp',
+      '',
+      'application/octet-stream',
+      'image/x-webp',
+      ' IMAGE/WEBP ',
+    ])
+      assert.equal(imageFileError(bytes.length, mime, header), null, mime);
+  }
+});
+
+await test('WebP MIME compatibility does not bypass file validation or size limits', () => {
+  const bytes = webpSamples[0];
+  const corrupt = bytes.slice();
+  corrupt[8] = 0;
+  for (const mime of [
+    'image/webp',
+    'image/x-webp',
+    'application/octet-stream',
+    '',
+  ]) {
+    assert.ok(imageFileError(corrupt.length, mime, corrupt));
+    assert.ok(imageFileError(bytes.length, mime, bytes.slice(0, 12)));
+    assert.ok(imageFileError(0, mime, bytes));
+    assert.ok(imageFileError(IMAGE_LIMIT + 1, mime, bytes));
+    assert.ok(
+      imageFileError(100, mime, new TextEncoder().encode('<svg></svg>')),
+    );
+  }
+  assert.ok(imageFileError(bytes.length, 'image/png', bytes));
+  assert.ok(imageFileError(bytes.length, 'text/html', bytes));
+});

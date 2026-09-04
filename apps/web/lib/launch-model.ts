@@ -165,8 +165,12 @@ export function imageFileError(size: number, mime: string, header: Uint8Array) {
   if (size === 0 || size > IMAGE_LIMIT)
     return 'Choose an image smaller than 2 MiB.';
   const detected = imageKind(header);
-  const normalizedMime = mime === 'image/jpg' ? 'image/jpeg' : mime;
-  if (!detected || (normalizedMime && detected !== normalizedMime))
+  let normalizedMime = mime.trim().toLowerCase();
+  if (normalizedMime === 'image/jpg') normalizedMime = 'image/jpeg';
+  if (normalizedMime === 'image/x-webp') normalizedMime = 'image/webp';
+  const genericMime =
+    !normalizedMime || normalizedMime === 'application/octet-stream';
+  if (!detected || (!genericMime && detected !== normalizedMime))
     return 'Choose a valid PNG, JPEG, WebP or GIF image.';
   return null;
 }
