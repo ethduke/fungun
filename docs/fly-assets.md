@@ -47,6 +47,27 @@ memory ceiling passed. The 4096-pixel input reached its enforced timeout under
 AMD64 emulation on the local ARM host; it was rejected safely. Full-size target
 Fly performance is not verified.
 
+## Target-host diagnostics
+
+The local verifier intentionally requires no non-loopback interface and is not a
+Fly readiness test. The decoder image also includes a read-only diagnostic:
+
+```sh
+fly ssh console -a <decoder-app> -C 'node /service/src/decoder-diagnostics.mjs'
+```
+
+Run it only against the dedicated, reviewed decoder Machine. It emits booleans for
+baseline runtime validation, dropped effective capabilities, no-new-privileges,
+read-only root and the memory ceiling. It prints no environment values, addresses,
+process arguments or credentials. Missing/unsafe evidence is false. Exit success
+means the diagnostic ran, not that the decoder is ready.
+
+The report always leaves `networkIsolation` unverified and `publicationReady` false.
+Configuration inspection cannot prove outbound isolation, rejected private peers,
+backups or safe cutover. `/healthz` is liveness only, not publication readiness.
+Keep the local hardening checks unchanged and resolve any target-host differences
+before enabling uploads.
+
 ## Before enabling publication
 
 1. Create dedicated apps and a new persistent asset volume. Initialize its private

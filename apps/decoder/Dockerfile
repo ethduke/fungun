@@ -11,6 +11,7 @@ WORKDIR /service
 COPY --from=dependencies /service/node_modules ./node_modules
 COPY apps/decoder/package.json ./
 COPY apps/api/src/launch-image.mjs apps/api/src/launch-image-worker.mjs apps/api/src/errors.mjs apps/api/src/decoder-service.mjs apps/api/src/decoder-server.mjs apps/api/src/decoder-runtime.mjs ./src/
+COPY apps/api/src/decoder-diagnostics.mjs ./src/
 RUN node --input-type=module -e "import('./src/decoder-runtime.mjs').then(m => m.verifyDecoderExecutable())"
 USER decoder
 CMD ["node", "src/decoder-server.mjs"]
