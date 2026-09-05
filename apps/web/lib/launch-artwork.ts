@@ -60,7 +60,7 @@ export async function ensureLaunchArtwork({ bytes, wallet, draft, origin, storag
       guard();
       const result = await checkAssetStatus(ticket, account, storage, fetcher);
       guard();
-      if (result?.status === 'published' || result?.status === 'expired') return result;
+      if (result?.status === 'published' || result?.status === 'expired' || result?.status === 'pending') return result;
       if (result?.issue === 'gateway_access_denied') throw new AssetError('asset_gateway_unavailable');
       onProgress(result?.progress.image === 'verified' ? 'Finishing artwork…' : 'Uploading artwork…');
       if (attempt < 26) await pause(attempt < 5 ? 3000 : 5000);
@@ -69,14 +69,21 @@ export async function ensureLaunchArtwork({ bytes, wallet, draft, origin, storag
   };
   guard();
   const recovery = readAssetRecovery(storage, origin);
+  let pendingId: string | undefined;
   if (recovery) {
     onProgress('Checking artwork…');
     const result = await wait(recovery);
+    if (result.status === 'pending') pendingId = result.id;
     if (result.status === 'published' && binding?.id === recovery.id && binding.sourceKey === sourceKey) return result;
     // A completed older publication stays public. It must not be attached to
     // changed artwork, or to a legacy recovery without a source-byte binding.
-    clearAssetRecovery(storage, recovery);
-    storage.removeItem(bindingKey);
+    if (result.status !== 'pending') {
+      clearAssetRecovery(storage, recovery);
+      storage.removeItem(bindingKey);
+    }
+    // Pending means the server has not reserved or uploaded anything. Prepare
+    // the current bytes again to obtain the same content-bound capability and
+    // resume acceptance; reserved/uncertain uploads above remain read-only.
   } else if (cached?.ipfs) {
     const ticket: AssetRecovery = { id: cached.id, imageHash: cached.imageHash, metadataHash: cached.metadataHash,
       imageUrl: cached.imageUrl, metadataUrl: cached.metadataUrl, appOrigin: origin,
@@ -97,15 +104,22 @@ export async function ensureLaunchArtwork({ bytes, wallet, draft, origin, storag
   if (storage.getItem(bindingKey) !== JSON.stringify({ id: ticket.id, sourceKey })) throw new AssetError('asset_recovery_unavailable');
   onProgress('Uploading artwork…');
   let accepted;
-  try { accepted = await publishLaunchAsset(approval, ticket, storage, isCurrent, fetcher); }
+  let publicationError: AssetError | undefined;
+  try { accepted = await publishLaunchAsset(approval, ticket, storage, isCurrent, fetcher, pendingId === ticket.id); }
   catch (error) {
     if (!(error instanceof AssetError) || error.code !== 'asset_publication_uncertain') throw error;
+    publicationError = error;
     // The recovery record was saved before the request. Resolve a missing
     // acknowledgment through status, never by repeating the publication write.
   }
   guard();
   if (accepted?.status === 'published') return accepted;
   const result = await wait(ticket);
+  if (result.status === 'pending') {
+    // A refused request must not become minutes of polling an unstarted upload.
+    // Retain recovery: the next automatic preparation can resume this same id.
+    throw new AssetError(publicationError?.publicationCause || 'asset_publication_uncertain', publicationError?.retryAfter ?? 0);
+  }
   if (result.status !== 'published') throw new AssetError('asset_approval_expired');
   return result;
 }

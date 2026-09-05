@@ -30,6 +30,8 @@ const messages = {
   asset_storage_full: "Image storage is temporarily full. Please try again later.",
   asset_history_full: "Publication is paused while storage history is reviewed. Please try again later.",
   rate_limited: "Too many requests. Please wait before trying again.",
+  artwork_daily_limit: "Daily artwork limit reached: 20 per wallet. Try again after the daily reset.",
+  artwork_service_limit: "Today's artwork upload capacity is full. Please try again after the daily reset.",
   asset_busy: "Another image is being processed. Please try again shortly.",
   decoder_unavailable:
     "Image validation is temporarily unavailable. Your image has not been published.",

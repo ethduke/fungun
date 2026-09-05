@@ -158,7 +158,14 @@ export class IpfsStore {
       if (row.state !== "pending" || row.expires < this.clock()) throw new ServiceError("asset_approval_expired", 409);
       const disk = statfsSync(this.root);
       if (disk.bavail * disk.bsize < maximumBytes + bundle.totalBytes * 2) throw new ServiceError("asset_storage_full", 507);
-      this.budget.debit([["ipfs-publications", 30, day], [`ipfs-owner:${row.owner}`, 3, day]]);
+      try {
+        this.budget.debit([["ipfs-publications", 30, day], [`ipfs-owner:${row.owner}`, 20, day]]);
+      } catch (error) {
+        if (error?.code !== "rate_limited") throw error;
+        const scope = `ipfs-owner:${row.owner}:${day}:${Math.floor(this.clock() / day)}`;
+        const used = this.db.prepare("SELECT used FROM counters WHERE scope=?").get(scope)?.used ?? 0;
+        throw new ServiceError(used >= 20 ? "artwork_daily_limit" : "artwork_service_limit", 429, error.retryAfter);
+      }
       this.db.exec("BEGIN IMMEDIATE");
       try {
         const reserved = this.db.prepare("SELECT COALESCE(SUM(image_size+metadata_size),0) AS n FROM ipfs_publications WHERE approved IS NOT NULL").get().n;

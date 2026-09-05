@@ -170,6 +170,8 @@ export function createAssetProxy(
           'asset_history_full',
           'asset_integrity_failed',
           'rate_limited',
+          'artwork_daily_limit',
+          'artwork_service_limit',
           'asset_busy',
           'image_size',
           'image_dimensions',

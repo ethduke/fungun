@@ -10,7 +10,8 @@ import { createIpfsWorker } from './ipfs-worker.mjs';
 import { validateAssetInput } from './asset-service.mjs';
 import { createAssetProxy } from '../../web/lib/asset-proxy.ts';
 import { ensureLaunchArtwork } from '../../web/lib/launch-artwork.ts';
-import { assetHash, assetWallet } from '../../web/lib/asset-protocol.ts';
+import { assetHash, assetWallet, assetErrorText } from '../../web/lib/asset-protocol.ts';
+import { runLaunchFlow } from '../../web/lib/launch-flow.ts';
 
 async function fixture(t) {
   const root = realpathSync(mkdtempSync(join(tmpdir(), 'fungun-click-')));
@@ -26,14 +27,18 @@ async function fixture(t) {
     async inspectPin(){}, async verifyObject(){}, async findPin(){assert.fail('Unexpected retry');},
   }, {enabled:true});
   t.after(async()=>{await worker.stop();store.close();rmSync(root,{recursive:true});});
-  let loseResponse=false, delayedChecks=0, issue='verification_delayed';
+  let loseResponse=false, delayedChecks=0, issue='verification_delayed', refuseOnce=false;
   const proxy=createAssetProxy(()=>({appOrigin:origin,serviceOrigin:'https://backend.example.com',publicOrigin:`https://${gateway}`,enabled:true,production:true}),async(url,options)=>{
     const kind=url.pathname.slice('/v1/asset-'.length); requests.push(kind);
     const input=validateAssetInput(kind,JSON.parse(options.body));
     if(kind==='launch-prepare')return Response.json({...await store.launchChallenge(input.wallet,image,input.draft),imageBase64:image.toString('base64'),width:8,height:8,serverTime:store.clock()});
     if(kind==='launch-publish'){
       assert.equal('signature' in JSON.parse(options.body),false);
-      const result=await store.acceptLaunch(input);worker.kick();await worker.idle();
+      if(refuseOnce){refuseOnce=false;return Response.json({error:'asset_busy'},{status:429,headers:{'retry-after':'2'}});}
+      let result;
+      try { result=await store.acceptLaunch(input); }
+      catch(error){return Response.json({error:error.code},{status:error.status,headers:{'retry-after':String(error.retryAfter||0)}});}
+      worker.kick();await worker.idle();
       if(loseResponse)throw new TypeError('Simulated response loss');
       return Response.json(result);
     }
@@ -47,7 +52,7 @@ async function fixture(t) {
   const fetcher=(path,options)=>proxy(new Request(origin+path,{...options,headers:{...options.headers,origin}}),path.split('/').at(-1));
   const storage={getItem:key=>records.get(key)??null,setItem:(key,value)=>records.set(key,value),removeItem:key=>records.delete(key)};
   const run=(overrides={})=>ensureLaunchArtwork({bytes:image,wallet,draft,origin,storage,fetcher,isCurrent:()=>true,onProgress:()=>{},pause:async()=>worker.idle(),...overrides});
-  return {run,store,wallet,image,draft,writes,requests,records,storage,setLoseResponse:value=>{loseResponse=value;},setDelayedChecks:value=>{delayedChecks=value;},setIssue:value=>{issue=value;}};
+  return {run,store,wallet,image,draft,writes,requests,records,storage,setLoseResponse:value=>{loseResponse=value;},setDelayedChecks:value=>{delayedChecks=value;},setIssue:value=>{issue=value;},refuseNext:()=>{refuseOnce=true;}};
 }
 
 const recoveryKey = 'fungun.asset-publication.v1';
@@ -135,8 +140,37 @@ test('upload capability binds bytes and wallet, expires, and cannot bypass legac
 test('signature-free publication still honors the shared daily spending limit',async t=>{
  const f=await fixture(t);const approval=await f.store.launchChallenge(f.wallet,f.image,f.draft);
  f.store.budget.debit([['ipfs-publications',30,86400000]],30);
- await assert.rejects(f.store.acceptLaunch({id:approval.id,wallet:f.wallet,image:f.image,draft:f.draft,uploadToken:approval.uploadToken}),{code:'rate_limited'});
+ await assert.rejects(f.store.acceptLaunch({id:approval.id,wallet:f.wallet,image:f.image,draft:f.draft,uploadToken:approval.uploadToken}),{code:'artwork_service_limit'});
  assert.equal(f.store.get(approval.id).state,'pending');assert.equal(f.writes.length,0);
+});
+
+test('publication quota rejection returns immediately instead of polling unsubmitted artwork',async t=>{
+ const f=await fixture(t);
+ f.store.budget.debit([[`ipfs-owner:${f.store.owner(f.wallet)}`,20,86400000]],20);
+ await assert.rejects(runLaunchFlow({artwork:()=>f.run({pause:async()=>assert.fail('Do not poll an unsubmitted upload')}),quote:async()=>assert.fail('Quota must stop before the quote'),wallet:async()=>assert.fail('Quota must stop before the wallet'),isCurrent:()=>true,onProgress:()=>{},pause:async()=>assert.fail('Daily cap must not retry')}),e=>{
+  assert.equal(e.code,'artwork_daily_limit');assert.ok(e.retryAfter>0);
+  assert.equal(assetErrorText(e),'Daily artwork limit reached: 20 per wallet. Try again after the daily reset.');return true;
+ });
+ assert.equal(f.requests.filter(x=>x==='status').length,1);assert.equal(f.writes.length,0);
+ const id=JSON.parse(f.records.get((await keys(f.wallet)).recovery)).id;
+ assert.equal(f.store.get(id).state,'pending');
+ f.store.db.prepare('DELETE FROM counters WHERE scope LIKE ?').run(`ipfs-owner:${f.store.owner(f.wallet)}:%`);
+ const resumed=await f.run({pause:async()=>assert.fail('Pending recovery should resume immediately')});
+ assert.equal(resumed.id,id);assert.equal(resumed.status,'published');assert.equal(f.writes.length,2);
+});
+
+test('temporary refusal resumes the same publication and reaches the wallet within one launch action',async t=>{
+ const f=await fixture(t);f.refuseNext();let walletCalls=0,clock=0;
+ await runLaunchFlow({artwork:()=>f.run(),quote:async artwork=>artwork,wallet:async artwork=>{assert.equal(artwork.status,'published');walletCalls++;},isCurrent:()=>true,onProgress:()=>{},now:()=>clock,pause:async ms=>{clock+=ms;}});
+ assert.equal(walletCalls,1);assert.equal(f.writes.length,2);
+ assert.equal(f.store.db.prepare('SELECT COUNT(*) AS n FROM ipfs_publications').get().n,1);
+ assert.equal(f.requests.filter(x=>x==='launch-publish').length,2);
+});
+
+test('a wallet can publish beyond the former three-artwork limit',async t=>{
+ const f=await fixture(t);
+ f.store.budget.debit([[`ipfs-owner:${f.store.owner(f.wallet)}`,20,86400000]],3);
+ assert.equal((await f.run()).status,'published');assert.equal(f.writes.length,2);
 });
 
 test('switching wallets and refreshing keeps each publication separate and resumes without duplicate uploads',async t=>{

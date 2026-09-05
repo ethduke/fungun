@@ -97,6 +97,8 @@ const messages: Record<string, string> = {
   asset_rejected: 'You declined the wallet approval. Nothing was published.',
   asset_busy: 'An image request is already running. Please wait.',
   rate_limited: 'Too many requests. Please wait before trying again.',
+  artwork_daily_limit: 'Daily artwork limit reached: 20 per wallet. Try again after the daily reset.',
+  artwork_service_limit: "Today's artwork upload capacity is full. Please try again after the daily reset.",
   invalid_launch_details:
     'Enter a coin name, a ticker of 1–11 English letters, and a description under 2,000 bytes.',
   image_size: 'Choose an image no larger than 2 MiB.',

@@ -207,6 +207,7 @@ export async function publishAsset(
   isCurrent: () => boolean,
   fetcher: typeof fetch = fetch,
   launch = false,
+  resumePending = false,
 ): Promise<PublishedAsset | ProcessingAsset> {
   if (!isCurrent()) throw new AssetError('asset_context_changed');
   if (performance.now() >= approval.deadline)
@@ -220,7 +221,9 @@ export async function publishAsset(
   if (performance.now() >= approval.deadline)
     throw new AssetError('asset_approval_expired');
   try {
-    saveAssetRecovery(storage, recovery);
+    if (!(launch && resumePending &&
+      JSON.stringify(readAssetRecovery(storage, recovery.appOrigin)) === JSON.stringify(recovery)))
+      saveAssetRecovery(storage, recovery);
   } catch (error) {
     throw error instanceof AssetError
       ? error
@@ -255,7 +258,7 @@ export async function checkAssetStatus(
   wallet: string,
   storage: AssetStorage,
   fetcher: typeof fetch = fetch,
-): Promise<PublishedAsset | ProcessingAsset | ExpiredAsset | null> {
+): Promise<PublishedAsset | ProcessingAsset | ExpiredAsset | { id: string; status: 'pending' } | null> {
   const account = assetWallet(wallet);
   if (
     (await assetHash(new TextEncoder().encode(account))) !== recovery.walletHash
@@ -277,7 +280,7 @@ export async function checkAssetStatus(
     raw.id === recovery.id &&
     ['pending', 'uncertain'].includes(raw.status as string)
   )
-    return null;
+    return raw.status === 'pending' ? { id: recovery.id, status: 'pending' } : null;
   const result =
     raw &&
     typeof raw === 'object' &&
@@ -291,6 +294,6 @@ export async function checkAssetStatus(
   return result;
 }
 
-export function publishLaunchAsset(approval: AssetApproval, recovery: AssetRecovery, storage: AssetStorage, isCurrent: () => boolean, fetcher: typeof fetch = fetch) {
-  return publishAsset(approval, approval.uploadToken ?? '', recovery, storage, isCurrent, fetcher, true);
+export function publishLaunchAsset(approval: AssetApproval, recovery: AssetRecovery, storage: AssetStorage, isCurrent: () => boolean, fetcher: typeof fetch = fetch, resumePending = false) {
+  return publishAsset(approval, approval.uploadToken ?? '', recovery, storage, isCurrent, fetcher, true, resumePending);
 }

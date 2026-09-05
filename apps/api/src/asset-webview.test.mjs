@@ -296,7 +296,7 @@ test("pending, reserved and unknown status never unlock an uncertain publication
       },
     ),
   );
-  assert.equal(await checkAssetStatus(recovery, account.address, storage, client), null);
+  assert.deepEqual(await checkAssetStatus(recovery, account.address, storage, client), { id: recovery.id, status: 'pending' });
   for (const raw of [{ id: recovery.id, status: "uncertain" }, { error: "not_found" }]) {
     try {
       await checkAssetStatus(recovery, account.address, storage, async () => Response.json(raw));

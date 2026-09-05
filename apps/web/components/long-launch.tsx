@@ -543,6 +543,7 @@ function ScopedLongLaunch({
             </span>
             <LaunchGun />
           </Button>
+          {error && <p role="alert" className="launch-feedback">{error}</p>}
           <p className="launch-disclosure">
             Artwork becomes public. You pay the launch fee and gas.
           </p>
@@ -553,7 +554,7 @@ function ScopedLongLaunch({
         <BulletProgress label={activity.label} active={activity.animated} />
       )}
       {notice && <output className="launch-feedback">{notice}</output>}
-      {error && (
+      {error && recovery && (
         <p role="alert" className="launch-feedback">
           {error}
         </p>
