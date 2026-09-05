@@ -38,7 +38,9 @@ headers and feed observations are checked; they do not replace that feed.
 
 ## User flow
 
-1. Connect Rabby or MetaMask, choose only Long and NVDA, and complete the draft.
+1. Connect Rabby or MetaMask, choose Long and any listed pairing, and complete the draft.
+   The UI accepts all Long pairings; the server still requires a configured quote
+   and its guards before preparing a transaction.
 2. Click **Launch coin** once. This authorizes publication of the displayed artwork
    and metadata. The app validates, uploads and verifies them in the background.
    No wallet message signature or separate prepare/publish button is used.
@@ -168,7 +170,10 @@ Provider budget cooldowns take precedence. Already verified objects are not fetc
 again during another object's retry; uncertain uploads still use lookup only.
 Gateway 401/403 responses surface a concise service-unavailable error immediately,
 with recovery retained, rather than asking the user to wait for access to repair itself.
-O1 retains its native pinning path; this wallet release supports Long/NVDA only.
+O1 retains its native pinning path. All listed Long, O1 and Longbow pairs are
+eligible for draft selection. O1 catalog refreshes extend the saved choices and
+do not lock them when missing or expired. Wallet transactions use the Long handler
+and its configured server quotes; O1 and Longbow wallet handlers are not connected.
 
 Sources: [Robinhood network configuration](https://docs.robinhood.com/chain/connecting/),
 [gas and fees](https://docs.robinhood.com/chain/gas-and-fees/),

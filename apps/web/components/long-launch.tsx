@@ -8,6 +8,7 @@ import { watchLaunch, type LaunchReceipt } from '@/lib/long-recovery';
 import { launchActivity } from '@/lib/launch-progress';
 import { useConnectedAccount } from '@/lib/account-context';
 import { useDraftCache } from '@/lib/launch-draft';
+import { LONG_PAIRS } from '@/lib/launch-model';
 import {
   formatEth,
   formatUsd,
@@ -17,7 +18,6 @@ import {
 } from '@/lib/launch-cost';
 import {
   launchMessage,
-  isLongLaunchPair,
   launchRequest,
   LaunchError,
   readLaunchRecovery,
@@ -223,6 +223,7 @@ function ScopedLongLaunch({
   }, [recovery, busy, cooldown, recoveryScope]);
   const retryable =
     receipt?.id === recovery?.id && receipt?.status === 'retryable';
+  const eligiblePair = LONG_PAIRS.some((pair) => pair.id === pairId);
   const isReady =
     ready &&
     !!account.address &&
@@ -230,7 +231,7 @@ function ScopedLongLaunch({
     !!account.sendLong &&
     hydrated &&
     !!image &&
-    isLongLaunchPair(pairId) &&
+    eligiblePair &&
     !blocked &&
     (!recovery || retryable);
   const validPlan =
@@ -251,8 +252,8 @@ function ScopedLongLaunch({
       !hydrated
     )
       return;
-    if (!isLongLaunchPair(pairId)) {
-      setError('Wallet launches currently support Long / NVDA or TSLA.');
+    if (!eligiblePair) {
+      setError('Choose a Long pairing to launch.');
       return;
     }
     const walletAddress = account.address;
@@ -410,10 +411,10 @@ function ScopedLongLaunch({
     currentReceipt && ['confirmed', 'failed'].includes(currentReceipt.status);
   const transactionHash = currentReceipt?.hash || recovery?.hash;
   const guidance = !enabled
-    ? 'Choose Long / NVDA or TSLA to launch.'
+    ? 'Choose Long and a pairing to launch.'
     : account.address && !isReady
-      ? !isLongLaunchPair(pairId)
-        ? 'Choose Long / NVDA or TSLA to launch.'
+      ? !eligiblePair
+        ? 'Choose a Long pairing to launch.'
         : !ready
           ? 'Review your coin details above.'
           : account.chainId !== 4663
@@ -440,7 +441,7 @@ function ScopedLongLaunch({
                 !retryable ||
                 !ready ||
                 !image ||
-                !isLongLaunchPair(pairId)
+                !eligiblePair
               }
               onClick={startLaunch}
             >
@@ -521,7 +522,7 @@ function ScopedLongLaunch({
               blocked ||
               !hydrated ||
               (Boolean(account.address) &&
-                (!ready || !image || !isLongLaunchPair(pairId)))
+                (!ready || !image || !eligiblePair))
             }
             onClick={startLaunch}
           >

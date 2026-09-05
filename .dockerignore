@@ -3,6 +3,7 @@
 !apps/api/
 !apps/api/src/
 !apps/api/src/*.mjs
+!apps/api/src/fomo-users.json
 !apps/api/package.json
 !apps/api/package-lock.json
 !apps/api/Dockerfile

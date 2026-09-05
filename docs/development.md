@@ -181,3 +181,7 @@ No Fly app or public website has been deployed for this milestone.
 For a later backend deployment, attach an API hostname using `fly certs add
 api.example.com -a YOUR_APP`, install the exact DNS records from `fly certs setup`,
 then verify with `fly certs check`. Do not change existing DNS until the app works.
+
+The [FOMO purchase strip](fomo-tracking.md) tracks the configured traders against
+persisted Stream contracts, including while no browser is open. It uses one
+server-side WebSocket and a cached API; configure its key only in the read service.

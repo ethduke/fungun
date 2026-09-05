@@ -2,7 +2,7 @@ import {
   LONGBOW_PAIRS,
   type LONGBOW_MARKET_TICKERS,
 } from './longbow-markets.ts';
-import { O1_ROBINHOOD_PAIRS } from './o1-markets.ts';
+import { O1_ROBINHOOD_PAIRS, selectableO1Pairs } from './o1-markets.ts';
 
 export type PadId = 'long' | 'o1';
 export type LaunchpadId = PadId | 'longbow';
@@ -216,7 +216,7 @@ export function validateDraft(
   destinations: Destination[],
   chainId?: ChainId,
   catalog?: Catalog | null,
-  now = performance.now(),
+  _now = performance.now(),
 ) {
   const errors: Record<string, string> = {};
   const active = destinations.filter((pad) => pad.selected);
@@ -251,12 +251,10 @@ export function validateDraft(
         ? !LONG_PAIRS.some((pair) => pair.id === pad.pairId)
         : pad.id === 'longbow'
           ? !LONGBOW_PAIRS.some((pair) => pair.id === pad.pairId)
-          : !(
-              catalog?.chainId === pad.chainId &&
-              catalog.expiresAt > now &&
-              catalog.pads[pad.id]?.status === 'ready' &&
-              catalog.pads[pad.id]?.pairs.some((pair) => pair.id === pad.pairId)
-            ))
+          : !selectableO1Pairs(
+              pad.chainId,
+              catalog?.chainId === pad.chainId ? catalog.pads.o1 : undefined,
+            ).some((pair) => pair.id === pad.pairId))
     )
       errors.destinations = 'Choose an available RWA pairing.';
     if (pad.route === 'standard' && pad.pairId !== 'native')

@@ -5,6 +5,11 @@ import { validAddress } from "./fee-contracts.mjs";
 import { validatePriceInput } from "./tracked-prices.mjs";
 
 export function validateInput(kind, input) {
+  if (kind === "fomo") {
+    if (!input || typeof input !== "object" || Array.isArray(input) || Object.keys(input).length)
+      throw new ServiceError("invalid_request", 400);
+    return {};
+  }
   if (kind.startsWith("launch-")) return validateLongInput(kind, input);
   if (kind === "tracked-prices") return validatePriceInput(input);
   if (kind === "fees" || kind === "claim-prepare") {
@@ -81,7 +86,7 @@ async function readBody(request, limit = 2048) {
   }
 }
 
-export function createHandler(config, budget, adapters, fees, trackedPrices, launches) {
+export function createHandler(config, budget, adapters, fees, trackedPrices, launches, fomo) {
   let active = 0;
   return async (request, response) => {
     response.setHeader("content-type", "application/json; charset=utf-8");
@@ -110,7 +115,7 @@ export function createHandler(config, budget, adapters, fees, trackedPrices, lau
         request.headers["sec-fetch-site"] === "cross-site"
       )
         throw new ServiceError("origin_denied", 403);
-      const kind = ["catalog", "ticker", "fees", "claim-prepare", "tracked-prices", "launch-prepare", "launch-reserve", "launch-status", "launch-estimate"].find(
+      const kind = ["fomo", "catalog", "ticker", "fees", "claim-prepare", "tracked-prices", "launch-prepare", "launch-reserve", "launch-status", "launch-estimate"].find(
         (operation) => request.url === `/v1/${operation}`,
       );
       if (!kind || request.method !== "POST" || request.headers["x-fungun-intent"] !== kind)
@@ -121,6 +126,7 @@ export function createHandler(config, budget, adapters, fees, trackedPrices, lau
       budget.request(ip, kind === "ticker");
       const input = validateInput(kind, await readBody(request, kind.startsWith("launch-") ? 4096 : 2048));
       const value =
+        kind === "fomo" ? fomo.snapshot() :
         kind.startsWith("launch-")
           ? await launches.run(kind, input)
           : kind === "tracked-prices"

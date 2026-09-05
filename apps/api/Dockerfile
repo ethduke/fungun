@@ -4,6 +4,7 @@ WORKDIR /service
 COPY apps/api/package.json apps/api/package-lock.json ./
 RUN npm ci --omit=dev --ignore-scripts --no-audit --no-fund && npm cache clean --force
 COPY apps/api/src ./src
+COPY apps/web/lib/tracked-feed-*.mjs /web/lib/
 COPY apps/web/lib/long-encoding /web/lib/long-encoding
 RUN ln -s /service/node_modules /web/node_modules
 USER node

@@ -1,4 +1,4 @@
-import type { CatalogPair } from './read-service';
+import type { CatalogPad, CatalogPair } from './read-service';
 
 // Complete eligible Robinhood RWA response from O1 /v1/config (no pagination).
 // Captured through the validated local read service; no operational addresses.
@@ -205,4 +205,12 @@ export const O1_ROBINHOOD_PAIRS: CatalogPair[] = [
 
 export function savedO1Pairs(chainId: number): CatalogPair[] {
   return chainId === 4663 ? O1_ROBINHOOD_PAIRS : [];
+}
+
+// Catalog refreshes can add choices without locking saved draft pairings.
+export function selectableO1Pairs(chainId: number, catalog?: CatalogPad): CatalogPair[] {
+  const pairs = new Map(savedO1Pairs(chainId).map((pair) => [pair.id, pair]));
+  if (catalog?.status === 'ready')
+    for (const pair of catalog.pairs) pairs.set(pair.id, pair);
+  return [...pairs.values()];
 }
