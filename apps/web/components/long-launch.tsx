@@ -320,11 +320,12 @@ function ScopedLongLaunch({
               pads: [
                 {
                   id: 'long',
+                  launchFeeSource: checked.launchFeeSource,
                   steps: [
                     {
                       kind: 'launch',
-                      valueWei: 0n,
-                      launchpadFeeWei: 0n,
+                      valueWei: wei(checked.transaction.value),
+                      launchpadFeeWei: wei(checked.launchpadFeeWei),
                       network: {
                         chainId: 4663,
                         gasUnits: wei(checked.estimatedGas),

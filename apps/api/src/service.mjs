@@ -1,6 +1,6 @@
 import { validateLongInput } from "./long-live.mjs";
 import { isIP } from "node:net";
-import { ServiceError, safeError } from "./errors.mjs";
+import { ServiceError, safeError, serviceErrorBody } from "./errors.mjs";
 import { validAddress } from "./fee-contracts.mjs";
 import { validatePriceInput } from "./tracked-prices.mjs";
 
@@ -140,7 +140,7 @@ export function createHandler(config, budget, adapters, fees, trackedPrices, lau
       if (safe.retryAfter) response.setHeader("retry-after", String(safe.retryAfter));
       if (safe.status === 429 && safe.retryScope === "operation")
         response.setHeader("x-fungun-retry-scope", "operation");
-      send(safe.status, { error: safe.code });
+      send(safe.status, serviceErrorBody(safe));
     } finally {
       clearTimeout(deadline);
       active -= 1;

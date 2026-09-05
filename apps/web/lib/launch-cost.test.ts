@@ -346,6 +346,7 @@ await test('an incomplete network estimate preserves fully checked sibling launc
 
 await test('background estimates price gas without a draft and remain separate from exact transaction quotes', () => {
   const raw = { chainId: 4663, pairId: 'long-NVDA', gasUnits: '1000000', gasPriceWei: '1000000000',
+    launchFeeSource: {amountWei:'0',kind:'verified-contract',contract:'0x'+'1'.repeat(40),blockNumber:'100'},
     launchpadFeeWei: '0', basis: 'recent-simulations', quotedAt: 1000000, expiresAt: 1300000, serverTime: 1005000 };
   const estimate = parseApproximateLaunchCost(raw, 100);
   const quote = approximateLaunchQuote(estimate, 'new copied draft', 101);
@@ -357,13 +358,14 @@ await test('background estimates price gas without a draft and remain separate f
   assert.equal(approximateLaunchQuote(estimate, 'new copied draft', 295100), null);
   assert.equal(calculateLaunchCosts(quote, { ...selection, pads: ['long', 'o1'] }, 101).total, null);
   for (const change of [{chainId:8453}, {pairId:'long-TSLA'}, {launchpadFeeWei:'1'}, {gasPriceWei:'0'},
+    {launchFeeSource:undefined}, {launchFeeSource:{...raw.launchFeeSource,amountWei:'1'}},
     {gasUnits:'4000000'}, {serverTime:1300000}, {quotedAt:1100000}, {basis:'exact'}])
     assert.throws(() => parseApproximateLaunchCost({...raw,...change}, 100));
 });
 
 
 await test('TSLA estimate cannot reuse an NVDA response', () => {
-  const raw = {chainId:4663,pairId:'long-TSLA',gasUnits:'2000000',gasPriceWei:'1000000000',launchpadFeeWei:'0',basis:'recent-simulations',quotedAt:1000000,expiresAt:1300000,serverTime:1000000};
+  const raw = {chainId:4663,pairId:'long-TSLA',gasUnits:'2000000',gasPriceWei:'1000000000',launchpadFeeWei:'0',launchFeeSource:{amountWei:'0',kind:'verified-contract',contract:'0x'+'1'.repeat(40),blockNumber:'100'},basis:'recent-simulations',quotedAt:1000000,expiresAt:1300000,serverTime:1000000};
   assert.equal(parseApproximateLaunchCost(raw, 100, 'long-TSLA').pairId, 'long-TSLA');
   assert.throws(() => parseApproximateLaunchCost(raw, 100, 'long-NVDA'));
 });

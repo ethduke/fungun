@@ -1,4 +1,5 @@
 import type { ChainId, Destination, LaunchpadId } from './launch-model';
+import { parseLaunchFeeSource, type LaunchFeeSource } from './launch-fee-source.ts';
 
 const WEI_PER_ETH = 10n ** 18n;
 const MAX_AMOUNT = (1n << 256n) - 1n;
@@ -29,12 +30,13 @@ export type LaunchCostQuote = {
   quotedAt: number;
   expiresAt: number;
   nativeOnly: boolean;
-  pads: { id: LaunchpadId; steps: CostStep[] }[];
+  pads: { id: LaunchpadId; steps: CostStep[]; launchFeeSource?: LaunchFeeSource }[];
 };
 
 export type ApproximateLaunchCost = {
   chainId: 4663; pairId: 'long-NVDA' | 'long-TSLA'; gasUnits: bigint; gasPriceWei: bigint;
   basis: 'recent-simulations' | 'gas-limit'; expiresAt: number;
+  launchpadFeeWei: bigint; launchFeeSource: LaunchFeeSource;
 };
 export function parseApproximateLaunchCost(raw: unknown, started: number, pairId: 'long-NVDA' | 'long-TSLA' = 'long-NVDA'): ApproximateLaunchCost {
   const value = raw as Record<string, unknown>;
@@ -44,17 +46,19 @@ export function parseApproximateLaunchCost(raw: unknown, started: number, pairId
     || typeof value.gasPriceWei !== 'string' || !/^\d{1,13}$/.test(value.gasPriceWei)
     || ![value.quotedAt, value.expiresAt, value.serverTime].every(Number.isSafeInteger)) throw new Error('Invalid gas estimate');
   const gasUnits = BigInt(value.gasUnits), gasPriceWei = BigInt(value.gasPriceWei);
+  const launchFeeSource = parseLaunchFeeSource(value.launchFeeSource);
+  if (launchFeeSource.amountWei !== value.launchpadFeeWei) throw new Error('Invalid launch fee');
   const quoted = Number(value.quotedAt), expires = Number(value.expiresAt), server = Number(value.serverTime);
   if (gasUnits < 21000n || gasUnits > 3000000n || gasPriceWei <= 0n || gasPriceWei > 10n ** 12n
     || expires - quoted !== 300000 || server < quoted || server >= expires || !Number.isFinite(started) || started < 0)
     throw new Error('Invalid gas estimate');
-  return { chainId: 4663, pairId, gasUnits, gasPriceWei,
+  return { chainId: 4663, pairId, gasUnits, gasPriceWei, launchpadFeeWei: BigInt(value.launchpadFeeWei), launchFeeSource,
     basis: value.basis as ApproximateLaunchCost['basis'], expiresAt: started + expires - server };
 }
 export function approximateLaunchQuote(estimate: ApproximateLaunchCost | null, contextKey: string, now: number): LaunchCostQuote | null {
   if (!estimate || estimate.expiresAt <= now) return null;
   return { contextKey, chainId: 4663, quotedAt: now, expiresAt: now + 30000, nativeOnly: true,
-    pads: [{ id: 'long', steps: [{ kind: 'launch', valueWei: 0n, launchpadFeeWei: 0n,
+    pads: [{ id: 'long', launchFeeSource: estimate.launchFeeSource, steps: [{ kind: 'launch', valueWei: estimate.launchpadFeeWei, launchpadFeeWei: estimate.launchpadFeeWei,
       network: { chainId: 4663, gasUnits: estimate.gasUnits, gasPriceWei: estimate.gasPriceWei } }] }] };
 }
 

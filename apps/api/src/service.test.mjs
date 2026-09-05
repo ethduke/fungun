@@ -5,7 +5,7 @@ import { Budget } from "./budget.mjs";
 import { createHandler } from "./service.mjs";
 import { Fees } from "./fees.mjs";
 import { readConfig } from "./config.mjs";
-import { ServiceError } from "./errors.mjs";
+import { ServiceError, InsufficientFundsError } from "./errors.mjs";
 
 test("HTTP boundary rejects spoofing, excess input and leaks while keeping reads bounded", async (t) => {
   const budget = new Budget(":memory:");
@@ -189,4 +189,10 @@ test("launch HTTP endpoints enforce exact inputs and their bounded larger body",
   );
   assert.deepEqual(calls.map(([kind]) => kind), ["launch-prepare", "launch-reserve", "launch-status", "launch-estimate"]);
   assert.equal(calls[0][1].draft.description.length, 2000);
+  launches.run = async () => { throw new InsufficientFundsError(200n, 1000n); };
+  const low = await post("launch-prepare", prepare);
+  assert.equal(low.status, 409);
+  assert.deepEqual(await low.json(), { error: "insufficient_funds", funding: {
+    chainId:4663, balanceWei:"200", requiredWei:"1000", shortfallWei:"800", basis:"simulation",
+  } });
 });

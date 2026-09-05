@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { keccak256, toHex, type EIP1193Provider } from 'viem';
 import { buildUnsignedLongLaunch } from './long-encoding/long-launch.mjs';
-import { sendLongWallet, validateLongPlan, LaunchPreflightError, type LaunchInput, readLaunchRecovery, saveLaunchRecovery, prepareLongWallet, isLongLaunchPair } from './long-wallet.ts';
+import { sendLongWallet, validateLongPlan, LaunchError, launchMessage, launchRequest, LaunchPreflightError, type LaunchInput, readLaunchRecovery, saveLaunchRecovery, prepareLongWallet, isLongLaunchPair } from './long-wallet.ts';
 import { launchRecoveryScope } from './launch-draft-cache.ts';
 import { runLaunchFlow } from './launch-flow.ts';
 import type { PublishedAsset } from './asset-protocol.ts';
@@ -30,6 +30,7 @@ function response(pairId = 'long-NVDA') {
     startingTick: f.startingTick, intentId: f.intentId, predictedAsset: f.plan.predictedAsset, predictedPool: addr(200), review: f.plan.review,
     transaction: { ...f.plan.transaction, chainId: '0x1237', value: '0x0', nonce: '0x1', gas: toHex(1200000), gasPrice: toHex(1000000000) },
     estimatedGas: '1000000', maximumGasWei: String(1200000n * 1000000000n), launchpadFeeWei: '0',
+    launchFeeSource: { amountWei: '0', kind: 'verified-contract', contract: f.profile.launcher.address, blockNumber: '100' },
     usd: { sourceLabel: 'Coinbase ETH/USD spot', quotedAt: now, microUsdPerEth: '2500000000' } } };
 }
 
@@ -41,6 +42,8 @@ void test('browser reconstructs the exact reviewed calldata and rejects value, t
     assert.throws(() => validateLongPlan({ ...f.raw, transaction: { ...f.raw.transaction, ...change } }, f.input, f.published, start));
   }
   assert.throws(() => validateLongPlan({ ...f.raw, launchpadFeeWei: '1' }, f.input, f.published, start));
+  assert.throws(() => validateLongPlan({ ...f.raw, launchFeeSource: undefined }, f.input, f.published, start));
+  assert.throws(() => validateLongPlan({ ...f.raw, launchFeeSource: { ...f.raw.launchFeeSource, contract: addr(999) } }, f.input, f.published, start));
   assert.throws(() => validateLongPlan(f.raw, { ...f.input, draft: { ...f.input.draft, name: 'Changed' } }, f.published, start));
   assert.throws(() => validateLongPlan(f.raw, f.input, f.published, start, start + 31000));
 });
@@ -54,6 +57,7 @@ void test('only the wallet sends, once, after current identity checks and durabl
     if (method === 'eth_chainId') return '0x1237';
     if (method === 'eth_getCode') return '0x01';
     if (method === 'eth_getTransactionCount') return '0x1';
+    if (method === 'eth_getBalance') return toHex(10n ** 18n);
     if (method === 'eth_sendTransaction') { assert.ok(reserved); return hash(500); }
     throw new Error('unexpected wallet method');
   } } as EIP1193Provider;
@@ -76,6 +80,7 @@ void test('only errors before eth_sendTransaction are eligible for automatic pre
     if (method === 'eth_chainId') return '0x1237';
     if (method === 'eth_getCode') return '0x01';
     if (method === 'eth_getTransactionCount') return '0x1';
+    if (method === 'eth_getBalance') return toHex(10n ** 18n);
     if (method === 'eth_sendTransaction') { sends++; throw error; }
     throw new Error('unexpected');
   } } as EIP1193Provider;
@@ -141,4 +146,32 @@ void test('TSLA wallet launch reconstructs the selected pairing; other unsupport
   const checked = validateLongPlan(f.raw, f.input, f.published, performance.now());
   assert.equal(checked.transaction.data, f.plan.transaction.data);
   assert.throws(() => validateLongPlan(f.raw, {...f.input,pairId:'long-NVDA'}, f.published, performance.now()));
+});
+
+void test('insufficient funds retains exact balance, required budget and shortfall through the HTTP client', async t => {
+  const funding = { chainId:4663, balanceWei:'200000000000000', requiredWei:'1200000000000000', shortfallWei:'1000000000000000', basis:'simulation' };
+  t.mock.method(globalThis, 'fetch', async () => Response.json({ error:'insufficient_funds', funding }, {status:409}));
+  await assert.rejects(launchRequest('launch-prepare', {}), error => {
+    assert.equal(launchMessage(error), 'You have 0.0002 ETH on Robinhood Chain. This launch needs 0.0012 ETH including the gas buffer; add 0.001 ETH.');return true;
+  });
+  for(const change of [{chainId:8453},{balanceWei:'secret'},{requiredWei:'-1'},{shortfallWei:'1'},{basis:'unknown'},{unexpectedField:'must not appear'}]) {
+    const error = new LaunchError('insufficient_funds',0,{...funding,...change});
+    assert.equal(error.funding,undefined);assert.equal(launchMessage(error).includes('secret'),false);
+  }
+  assert.match(launchMessage(new LaunchError('insufficient_funds',0,{...funding,basis:'gas-limit'})), /Allow up to 0.0012 ETH for gas/);
+});
+
+void test('a balance spent after the server quote stops before reservation and wallet submission with amounts',async()=>{
+  const f=response(),plan=validateLongPlan(f.raw,f.input,f.published,performance.now());
+  const provider={request:async({method}:{method:string})=>{
+    if(method==='eth_accounts')return[f.input.wallet];
+    if(method==='eth_chainId')return '0x1237';
+    if(method==='eth_getCode')return '0x01';
+    if(method==='eth_getTransactionCount')return '0x1';
+    if(method==='eth_getBalance')return '0x0';
+    assert.fail('No transaction may be sent');
+  }} as EIP1193Provider;
+  await assert.rejects(sendLongWallet(provider,plan,()=>true,async()=>assert.fail('Do not reserve an underfunded launch')),error=>{
+    assert.ok(error instanceof LaunchPreflightError);assert.match(launchMessage(error),/You have 0 ETH.*needs 0.0012 ETH/);return true;
+  });
 });

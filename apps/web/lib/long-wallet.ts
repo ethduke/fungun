@@ -1,6 +1,8 @@
 import { keccak256, type EIP1193Provider } from 'viem';
 import { buildUnsignedLongLaunch, readLongLaunchProfile } from './long-encoding/long-launch.mjs';
 import { assetDraft, assetWallet, type AssetDraft, type PublishedAsset } from './asset-protocol.ts';
+import { parseLaunchFunding, fundingMessage, type LaunchFunding } from './launch-funding.ts';
+import { parseLaunchFeeSource, type LaunchFeeSource } from './launch-fee-source.ts';
 
 export type LaunchInput = { chainId: 4663; wallet: string; draft: AssetDraft; pairId: string;
   publication: { id: string; imageHash: string; metadataHash: string } };
@@ -10,6 +12,7 @@ export type LongPlan = {
   profile: ReturnType<typeof readLongLaunchProfile> & { launcher: { address: string; codeHash: string } }; startingTick: number; intentId: string;
   predictedAsset: string; predictedPool: string; review: ReturnType<typeof buildUnsignedLongLaunch>['review'];
   estimatedGas: string; maximumGasWei: string; launchpadFeeWei: '0';
+  launchFeeSource: LaunchFeeSource;
   usd: { microUsdPerEth: string; sourceLabel: string; quotedAt: number };
 };
 export const isLongLaunchPair = (pairId: string | undefined): pairId is 'long-NVDA' | 'long-TSLA' =>
@@ -17,7 +20,11 @@ export const isLongLaunchPair = (pairId: string | undefined): pairId is 'long-NV
 
 export class LaunchError extends Error {
   retryAfter: number;
-  constructor(message: string, retryAfter = 0) { super(message); this.retryAfter = retryAfter; }
+  funding?: LaunchFunding;
+  constructor(message: string, retryAfter = 0, funding?: unknown) {
+    super(message); this.retryAfter = retryAfter;
+    if (message === 'insufficient_funds') this.funding = parseLaunchFunding(funding);
+  }
 }
 export class LaunchPreflightError extends Error {
   override cause: unknown;
@@ -25,6 +32,7 @@ export class LaunchPreflightError extends Error {
 }
 export function launchMessage(error: unknown) {
   if (error instanceof LaunchPreflightError) return launchMessage(error.cause);
+  if (error instanceof LaunchError && error.funding) return fundingMessage(error.funding);
   let cause = error;
   for (let depth = 0; depth < 8 && cause && typeof cause === 'object'; depth++) {
     const entry = cause as { code?: number; cause?: unknown };
@@ -73,6 +81,10 @@ export function validateLongPlan(raw: unknown, input: LaunchInput, published: Pu
   assert(rebuilt.binding === p.binding && same(rebuilt.predictedAsset, p.predictedAsset)
     && JSON.stringify(rebuilt.review) === JSON.stringify(p.review));
   const tx = p.transaction;
+  let feeSource: LaunchFeeSource;
+  try { feeSource = parseLaunchFeeSource(p.launchFeeSource); }
+  catch { throw new LaunchError('contract_unverified'); }
+  assert(same(feeSource.contract, p.profile.launcher.address) && feeSource.amountWei === p.launchpadFeeWei);
   assert(tx && Object.keys(tx).sort().join(',') === 'chainId,data,from,gas,gasPrice,nonce,to,value'
     && tx.chainId === '0x1237' && tx.value === '0x0' && same(tx.from, input.wallet)
     && same(tx.to, rebuilt.transaction.to) && tx.data === rebuilt.transaction.data
@@ -110,7 +122,12 @@ export async function sendLongWallet(provider: EIP1193Provider, plan: LongPlan, 
   if (code === '0x' || !same(keccak256(code), plan.profile.launcher.codeHash)) throw new LaunchError('contract_unverified');
   const nonce = await provider.request({ method: 'eth_getTransactionCount', params: [tx.from as `0x${string}`, 'pending'] });
   if (BigInt(nonce) !== BigInt(tx.nonce)) throw new LaunchError('quote_expired');
+  const balanceRaw = await provider.request({ method: 'eth_getBalance', params: [tx.from as `0x${string}`, 'pending'] });
   await check();
+  if (typeof balanceRaw !== 'string' || !/^0x[0-9a-f]{1,64}$/i.test(balanceRaw)) throw new LaunchError('unavailable');
+  const balance = BigInt(balanceRaw), required = BigInt(tx.gas) * BigInt(tx.gasPrice) + BigInt(tx.value);
+  if (balance < required) throw new LaunchError('insufficient_funds', 0, { chainId:4663,
+    balanceWei:String(balance), requiredWei:String(required), shortfallWei:String(required-balance), basis:'simulation' });
   await reserve();
   await check();
   } catch (error) { throw new LaunchPreflightError(error); }
@@ -137,7 +154,7 @@ export async function launchRequest(operation: 'launch-prepare' | 'launch-reserv
   if (!response.ok) {
     const retry = Number(response.headers.get('retry-after'));
     throw new LaunchError(typeof result?.error === 'string' ? result.error : 'unavailable',
-      Number.isFinite(retry) && retry > 0 ? Math.min(retry, 86400) : 0);
+      Number.isFinite(retry) && retry > 0 ? Math.min(retry, 86400) : 0, result?.funding);
   }
   return result;
 }

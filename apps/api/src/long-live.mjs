@@ -7,7 +7,7 @@ import { normalizeLaunchDetails } from "./launch-metadata.mjs";
 import { ipfsContentId, ipfsUri, IPFS_IMPORT_PROFILE, LONG_IPFS_SCHEMA } from "./ipfs-content.mjs";
 import { rpcNumber } from "./fee-rpc.mjs";
 import { ReadCache, readJson, withinReadDeadline, checkReadDeadline } from "./upstream.mjs";
-import { ServiceError } from "./errors.mjs";
+import { ServiceError, InsufficientFundsError } from "./errors.mjs";
 
 export const LONG_STATE_ABI = parseAbi([
   "function AIRLOCK() view returns (address)",
@@ -124,14 +124,23 @@ export class LongLive {
       if (rpcNumber(chain) !== 4663n) fail("wrong_chain");
       const price = rpcNumber(rawPrice);
       if (price <= 0n || price > 10n ** 12n) fail("launch_gas_limit");
-      return { price, quotedAt: this.now() };
+      const block = await this.rpc.block(4663);
+      await this.rpc.verify(4663, [this.live.profile.launcher], true, block);
+      return { price, fee: this.launchFee(block), quotedAt: this.now() };
     });
     const { price, quotedAt } = market;
     // With no comparable simulation, disclose the configured gas-unit ceiling.
     const gasUnits = samples.length ? samples[Math.floor(samples.length / 2)] : 3000000;
     return { chainId: 4663, pairId: input.pairId, gasUnits: String(gasUnits), gasPriceWei: String(price),
-      launchpadFeeWei: "0", basis: samples.length ? "recent-simulations" : "gas-limit",
+      launchpadFeeWei: market.fee.amountWei, launchFeeSource: market.fee, basis: samples.length ? "recent-simulations" : "gas-limit",
       quotedAt, expiresAt: quotedAt + 300000 };
+  }
+  launchFee(block) {
+    // The reviewed create ABI is nonpayable and forwards no native value.
+    // Only call after verifying the deployed launcher against that reviewed code.
+    if (LONG_CREATE_ABI.find(entry => entry.name === "create")?.stateMutability !== "nonpayable") fail("contract_unverified");
+    return { amountWei: "0", kind: "verified-contract", contract: this.live.profile.launcher.address,
+      blockNumber: rpcNumber(block).toString() };
   }
   row(key) { return this.db.prepare("SELECT * FROM long_launches WHERE id=?").get(key); }
   async metadata(input) {
@@ -220,17 +229,32 @@ export class LongLive {
     if (vacancy !== "0x") fail("launch_already_exists");
     if (accountCode !== "0x") fail("launch_eoa_required");
     const tx = { from: input.wallet, to: plan.transaction.to, data: plan.transaction.data, value: "0x0" };
-    const [simulation, gasRaw, priceRaw, balanceRaw, nonceRaw] = await this.rpc.batch(4663, [
-      { method: "eth_call", params: [tx, "pending"] }, { method: "eth_estimateGas", params: [tx, "pending"] },
+    const [priceRaw, balanceRaw, nonceRaw] = await this.rpc.batch(4663, [
       { method: "eth_gasPrice", params: [] }, { method: "eth_getBalance", params: [input.wallet, "pending"] },
       { method: "eth_getTransactionCount", params: [input.wallet, "pending"] },
     ]);
+    const price = rpcNumber(priceRaw), balance = rpcNumber(balanceRaw);
+    if (price <= 0n || price > 10n ** 12n) fail("launch_gas_limit");
+    let simulation, gasRaw;
+    try {
+      [simulation, gasRaw] = await this.rpc.batch(4663, [
+        { method: "eth_call", params: [tx, "pending"] }, { method: "eth_estimateGas", params: [tx, "pending"] },
+      ]);
+    } catch (error) {
+      // Some nodes refuse gas estimation before returning units when the sender
+      // is underfunded. Report the disclosed gas ceiling, never an invented exact estimate.
+      if (error?.code === "insufficient_funds" && balance < 3000000n * price) {
+        if (3000000n * price > 5n * 10n ** 16n) fail("launch_gas_limit");
+        throw new InsufficientFundsError(balance, 3000000n * price, "gas-limit");
+      }
+      throw error;
+    }
     const simulated = decodeFunctionResult({ abi: LONG_CREATE_ABI, functionName: "create", data: simulation });
     if (!same(simulated[0], plan.predictedAsset) || same(simulated[1], zeroAddress)) fail("launch_simulation_failed");
-    const estimate = rpcNumber(gasRaw), gas = (estimate * 120n + 99n) / 100n, price = rpcNumber(priceRaw);
+    const estimate = rpcNumber(gasRaw), gas = (estimate * 120n + 99n) / 100n;
     if (retry && rpcNumber(nonceRaw) !== rpcNumber(retry.transaction.nonce)) fail("launch_pending");
     if (estimate < 21000n || gas > 3000000n || price <= 0n || price > 10n ** 12n || gas * price > 5n * 10n ** 16n) fail("launch_gas_limit");
-    if (rpcNumber(balanceRaw) < gas * price) fail("insufficient_funds");
+    if (balance < gas * price) throw new InsufficientFundsError(balance, gas * price);
     const usd = await this.cache.get("eth-usd", 30000, async () => {
       const body = await this.upstream.json("coinbase", "https://api.coinbase.com/v2/prices/ETH-USD/spot", {}, 8192);
       const amount = body?.data?.amount;
@@ -242,7 +266,8 @@ export class LongLive {
     const result = { id: key, binding: plan.binding, chainId: 4663, quotedAt, expiresAt: quotedAt + 30000,
       transaction: { ...tx, chainId: "0x1237", nonce: toHex(rpcNumber(nonceRaw)), gas: toHex(gas), gasPrice: toHex(price) },
       profile: p, startingTick: tick, intentId, predictedAsset: plan.predictedAsset, predictedPool: simulated[1], review: plan.review,
-      estimatedGas: estimate.toString(), launchpadFeeWei: "0", maximumGasWei: (gas * price).toString(), usd };
+      estimatedGas: estimate.toString(), launchpadFeeWei: this.launchFee(block).amountWei,
+      launchFeeSource: this.launchFee(block), maximumGasWei: (gas * price).toString(), usd };
     checkReadDeadline();
     this.db.exec("BEGIN IMMEDIATE");
     try {

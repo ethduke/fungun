@@ -352,6 +352,8 @@ export function LaunchSection({
               <CollapsibleContent className="launch-fee-panel">
                 {destinations.map((pad) => {
                   const amount = costs.pads[pad.id];
+                  const feeSource = useApproximate && pad.id === 'long' ? approximate?.launchFeeSource
+                    : costQuote?.pads.find(item => item.id === pad.id)?.launchFeeSource;
                   return (
                     <div key={pad.id} className="launch-fee-pad">
                       <strong>{launchpadName(pad.id)}</strong>
@@ -359,10 +361,14 @@ export function LaunchSection({
                         <div>
                           <dt>Launch fee</dt>
                           <dd>
-                            {amount
-                              ? formatEth(amount.launchpadWei)
+                            {amount && feeSource
+                              ? <a href={`https://robinhoodchain.blockscout.com/address/${feeSource.contract}?tab=contract`}
+                                  target="_blank" rel="noopener noreferrer" title={`Verified contract fee at block ${feeSource.blockNumber}`}>
+                                  {formatEth(amount.launchpadWei)} · Verified
+                                </a>
+                              : amount ? formatEth(amount.launchpadWei)
                               : pad.id === 'long' && supportsEstimate
-                                ? '0 ETH'
+                                ? estimateFailed ? 'Unavailable' : 'Checking…'
                                 : 'Unavailable'}
                           </dd>
                         </div>

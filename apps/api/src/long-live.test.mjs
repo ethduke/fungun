@@ -9,6 +9,7 @@ import { Budget } from "./budget.mjs";
 import { LongLive, LONG_STATE_ABI, readLongLiveConfig, validateLongInput } from "./long-live.mjs";
 import { LONG_CREATE_ABI } from "./long-launch.mjs";
 import { ipfsContentId } from "./ipfs-content.mjs";
+import { InsufficientFundsError, ServiceError, serviceErrorBody } from "./errors.mjs";
 const addr = (n) => toHex(BigInt(n), { size: 20 });
 const hash = (n) => toHex(BigInt(n), { size: 32 });
 const contract = (n) => ({ address: addr(n), codeHash: hash(n) });
@@ -33,7 +34,7 @@ async function fixture(t) {
   const changes = {}, seen = [], requests = [];
   const rpc = {
     block: async () => '0x64',
-    verify: async (...args) => { seen.push(args); if (changes.code) throw new Error('unverified'); },
+    verify: async (...args) => { seen.push(args); if (changes.code) throw new ServiceError('contract_unverified'); },
     calls: async (_chain, entries) => entries.map((e) => {
       switch(e.functionName) {
         case 'AIRLOCK': return p.airlock.address;
@@ -69,7 +70,9 @@ async function fixture(t) {
           const asset = getCreate2Address({ from: p.tokenFactory.address, salt: params.salt, bytecodeHash: p.tokenFactory.initCodeHash });
           return encodeFunctionResult({ abi: LONG_CREATE_ABI, functionName: 'create', result: [changes.badSimulation ? addr(55) : asset, addr(200), addr(201), addr(202), addr(203)] });
         }
-        case 'eth_estimateGas': return toHex(changes.gas ?? 1000000);
+        case 'eth_estimateGas':
+          if (changes.estimateUnderfunded) throw new ServiceError('insufficient_funds');
+          return toHex(changes.gas ?? 1000000);
         case 'eth_gasPrice': return toHex(changes.price ?? 1000000000);
         case 'eth_getBalance': return toHex(changes.balance ?? 10n ** 18n);
         case 'eth_getTransactionCount': return e.params[1] === 'pending' ? (changes.pendingNonce ?? '0x1') : (changes.latestNonce ?? '0x1');
@@ -296,4 +299,33 @@ test('TSLA has an independent launch intent, gas sample and verified numeraire w
   assert.equal(decoded.args[0].numeraire.toLowerCase(),q.token.address.toLowerCase());
   assert.equal((await f.service.run('launch-estimate',{chainId:4663,pairId:'long-TSLA'})).basis,'recent-simulations');
   assert.equal((await f.service.run('launch-prepare',f.input)).id,nvda.id);
+});
+
+test('underfunded launch reports exact balance and required buffered gas without journaling a transaction', async t => {
+  const f=await fixture(t);f.changes.balance=200000000000000n;
+  await assert.rejects(f.service.run('launch-prepare',f.input), error=>{
+    assert.ok(error instanceof InsufficientFundsError);
+    assert.deepEqual(serviceErrorBody(error),{error:'insufficient_funds',funding:{chainId:4663,balanceWei:'200000000000000',requiredWei:'1200000000000000',shortfallWei:'1000000000000000',basis:'simulation'}});
+    return true;
+  });
+  assert.equal(f.service.db.prepare('SELECT COUNT(*) AS n FROM long_launches').get().n,0);
+  const arbitrary=new ServiceError('insufficient_funds');arbitrary.funding={private:'not public'};
+  assert.deepEqual(serviceErrorBody(arbitrary),{error:'insufficient_funds'});
+});
+
+test('node rejection before gas estimation reports the configured ceiling with a clear basis',async t=>{
+  const f=await fixture(t);f.changes.balance=0n;f.changes.estimateUnderfunded=true;
+  await assert.rejects(f.service.run('launch-prepare',f.input),error=>{
+    assert.equal(error.funding.balanceWei,'0');assert.equal(error.funding.requiredWei,'3000000000000000');
+    assert.equal(error.funding.shortfallWei,'3000000000000000');assert.equal(error.funding.basis,'gas-limit');return true;
+  });
+});
+
+test('background launch fee requires current verified contract code and includes its source block',async t=>{
+  const f=await fixture(t), input={chainId:4663,pairId:'long-NVDA'};
+  const estimate=await f.service.run('launch-estimate',input);
+  assert.deepEqual(estimate.launchFeeSource,{amountWei:'0',kind:'verified-contract',contract:f.p.launcher.address,blockNumber:'100'});
+  assert.ok(f.seen.some(([,contracts,,block])=>contracts.length===1&&contracts[0].address===f.p.launcher.address&&block==='0x64'));
+  f.advance(301000);f.changes.code=true;
+  await assert.rejects(f.service.run('launch-estimate',input),/unverified/);
 });
