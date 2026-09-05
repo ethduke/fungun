@@ -130,7 +130,13 @@ records cannot be published through the capability endpoint. Their messages,
 signatures and status recovery remain intact. Browser recovery persists an opaque
 publication ID and hash of the original draft/image/wallet context before the
 write; the upload capability stays in memory only. Lost responses use status
-reads, never automatic publication retries. Polling continues through delayed
+reads, never automatic publication retries. Artwork recovery and its source-byte
+binding are stored under the normalized wallet's hash, so switching wallets cannot
+attach or block on another wallet's artwork. Existing unscoped recovery is copied
+only into its owner's storage, with read-back verification before any request;
+the original is retained for older tabs. Returning to that wallet resumes its
+saved publication. Transaction submission recovery remains unchanged.
+Polling continues through delayed
 verification for up to 27 checks: five three-second intervals, then five-second
 intervals (120 seconds of waiting). A timeout retains recovery without imposing
 an extra minute-long button lock. A changed draft cannot use an earlier recovery's image.

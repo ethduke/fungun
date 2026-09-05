@@ -27,6 +27,7 @@ export type AssetRecovery = Pick<
   | 'appOrigin'
   | 'assetOrigin'
 > & { walletHash: string; ipfs?: AssetApproval['ipfs']; version?: 2 };
+export type AssetStorage = Pick<Storage, 'getItem' | 'setItem' | 'removeItem'>;
 const storageKey = 'fungun.asset-publication.v1';
 const recoveryEvent = 'fungun:asset-recovery';
 export function assetRecoverySnapshot() {
@@ -123,13 +124,13 @@ export async function recoveryFor(
     ...(approval.ipfs ? { version: 2 as const, ipfs: approval.ipfs } : {}),
   };
 }
-export function saveAssetRecovery(storage: Storage, value: AssetRecovery) {
+export function saveAssetRecovery(storage: AssetStorage, value: AssetRecovery) {
   if (storage.getItem(storageKey))
     throw new AssetError('asset_publication_uncertain');
   storage.setItem(storageKey, JSON.stringify(value));
   notifyRecovery();
 }
-export function clearAssetRecovery(storage: Storage, value: AssetRecovery) {
+export function clearAssetRecovery(storage: AssetStorage, value: AssetRecovery) {
   const stored = readAssetRecovery(storage, value.appOrigin);
   if (stored?.id === value.id) storage.removeItem(storageKey);
   notifyRecovery();
@@ -202,7 +203,7 @@ export async function publishAsset(
   approval: AssetApproval,
   proof: string,
   recovery: AssetRecovery,
-  storage: Storage,
+  storage: AssetStorage,
   isCurrent: () => boolean,
   fetcher: typeof fetch = fetch,
   launch = false,
@@ -252,7 +253,7 @@ export async function publishAsset(
 export async function checkAssetStatus(
   recovery: AssetRecovery,
   wallet: string,
-  storage: Storage,
+  storage: AssetStorage,
   fetcher: typeof fetch = fetch,
 ): Promise<PublishedAsset | ProcessingAsset | ExpiredAsset | null> {
   const account = assetWallet(wallet);
@@ -290,6 +291,6 @@ export async function checkAssetStatus(
   return result;
 }
 
-export function publishLaunchAsset(approval: AssetApproval, recovery: AssetRecovery, storage: Storage, isCurrent: () => boolean, fetcher: typeof fetch = fetch) {
+export function publishLaunchAsset(approval: AssetApproval, recovery: AssetRecovery, storage: AssetStorage, isCurrent: () => boolean, fetcher: typeof fetch = fetch) {
   return publishAsset(approval, approval.uploadToken ?? '', recovery, storage, isCurrent, fetcher, true);
 }
