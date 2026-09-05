@@ -217,10 +217,12 @@ export default function Home() {
             </span>
           </div>
         </div>
-        <p className="sample-note" aria-live="polite">
-          {cacheState === 'loading' ? 'Restoring your draft…' : cacheState === 'saving' ? 'Saving your draft…' : cacheState === 'saved' ? 'Draft and picture saved in this browser.' : cacheError}
-          {cacheError && <Button variant="ghost" size="sm" onClick={() => void retryCache()}>Retry saving</Button>}
-        </p>
+        {(cacheState === 'loading' || cacheState === 'saving' || cacheError) && (
+          <p className="sample-note" aria-live="polite">
+            {cacheState === 'loading' ? 'Restoring your draft…' : cacheState === 'saving' ? 'Saving your draft…' : cacheError}
+            {cacheError && <Button variant="ghost" size="sm" onClick={() => void retryCache()}>Retry saving</Button>}
+          </p>
+        )}
         <form onSubmit={(event) => event.preventDefault()} noValidate>
           <fieldset disabled={!hydrated} style={{ border: 0, padding: 0, margin: 0, minWidth: 0 }}>
           <div className="composer-grid">
@@ -230,8 +232,7 @@ export default function Home() {
             >
               <div className="section-heading">
                 <span className="step-number">01</span>
-                <h2 id="coin-details-heading">Make it yours</h2>
-                <span className="section-aside">COIN DETAILS</span>
+                <h2 id="coin-details-heading">One shot. Many launchpads.</h2>
               </div>
               <Tabs defaultValue="upload" className="image-tabs">
                 <TabsList aria-label="Image source">
