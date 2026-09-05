@@ -3,7 +3,7 @@ import test from "node:test";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { Budget } from "./budget.mjs";
+import { Budget, READ_LIMITS } from "./budget.mjs";
 
 test("production refuses missing quota state instead of recreating it", () => {
   const directory = mkdtempSync(join(tmpdir(), "fungun-budget-schema-"));
@@ -85,24 +85,32 @@ test("request fairness limits and provider caps do not store raw client IPs", ()
   }
 });
 
-test('a fee refresh and launch preflights fit together while burst and daily caps remain bounded', () => {
+test('RPC allowance covers active-day estimates and launches while minute, provider and total caps still hold', () => {
   let now = 10;
   const budget = new Budget(':memory:', () => now);
+  const consume = (provider, units) => {
+    while (units > 0) {
+      now += 60000;
+      const batch = Math.min(30, units);
+      budget.upstream(provider, batch);
+      units -= batch;
+    }
+  };
   try {
-    // Fee scan plus launch/claim checks exceeds the former 60-read cap.
     for (let i = 0; i < 6; i++) budget.upstream('rpc', 30);
     assert.throws(() => budget.upstream('rpc'), { code: 'rate_limited' });
-    for (let i = 180; i < 1400; i++) {
-      if (i % 100 === 80) now += 60000;
-      budget.upstream('rpc');
-    }
+    consume('rpc', 1400 - 180);
+    // The already charged production counter can continue; no quota reset is needed.
+    consume('rpc', READ_LIMITS.rpcPerDay - 1400);
     now += 60000;
-    assert.throws(() => budget.upstream('rpc'), { code: 'rate_limited' });
-    for (let i = 0; i < 600; i++) {
-      if (i % 100 === 0) now += 60000;
-      budget.upstream('o1');
-    }
+    assert.throws(() => budget.upstream('rpc'), { code: 'read_daily_limit', status: 429 });
+    consume('o1', READ_LIMITS.o1PerDay);
     now += 60000;
-    assert.throws(() => budget.upstream('market'), { code: 'rate_limited' });
+    assert.throws(() => budget.upstream('o1'), { code: 'read_daily_limit' });
+    consume('market', READ_LIMITS.otherPerDay);
+    consume('coinbase', READ_LIMITS.otherPerDay);
+    consume('other', READ_LIMITS.perDay - READ_LIMITS.rpcPerDay - READ_LIMITS.o1PerDay - 2 * READ_LIMITS.otherPerDay);
+    now += 60000;
+    assert.throws(() => budget.upstream('other'), error => error.code === 'read_daily_limit' && error.retryAfter > 3600);
   } finally { budget.close(); }
 });

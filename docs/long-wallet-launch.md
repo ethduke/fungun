@@ -191,5 +191,5 @@ within the same user action, at most three preflight attempts. Once
 sends again. Wallet/account/draft changes or unmount cancel waiting work.
 Preparation retries stop after six attempts per stage or a wait beyond the
 three-minute flow deadline. Daily quota exhaustion remains an explicit error.
-The shared upstream burst allowance is 180 reads/minute; the 2,000 total daily,
-1,400 RPC daily, 600 O1 daily and three launch preparations/minute limits remain.
+The shared upstream burst allowance is 180 reads/minute; the 16,000 total daily,
+12,000 RPC daily, 600 O1 daily and three launch preparations/minute limits remain.

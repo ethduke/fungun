@@ -361,7 +361,7 @@ function ScopedLongLaunch({
         e instanceof AssetError
           ? e.retryAfter * 1000
           : e instanceof LaunchError &&
-              ['busy', 'rate_limited'].includes(e.message)
+              ['busy', 'rate_limited', 'read_daily_limit'].includes(e.message)
             ? e.retryAfter * 1000
             : 0,
       );

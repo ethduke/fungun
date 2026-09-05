@@ -4,6 +4,7 @@ import { ServiceError } from "./errors.mjs";
 
 const MINUTE = 60_000;
 const DAY = 86_400_000;
+export const READ_LIMITS = Object.freeze({ perMinute: 180, perDay: 16000, rpcPerDay: 12000, o1PerDay: 600, otherPerDay: 1400 });
 
 export class Budget {
   constructor(path, now = Date.now, initialize = true) {
@@ -46,7 +47,7 @@ export class Budget {
     this.lastPrune = 0;
   }
 
-  debit(rules, units = 1) {
+  debit(rules, units = 1, dailyCode = "rate_limited") {
     if (!Number.isInteger(units) || units < 1 || units > 30)
       throw new ServiceError("invalid_budget_units");
     this.db.exec("BEGIN IMMEDIATE");
@@ -68,12 +69,13 @@ export class Budget {
         scope: `${scope}:${period}:${Math.floor(now / period)}`,
         expires: (Math.floor(now / period) + 1) * period,
         limit,
+        period,
       }));
       for (const bucket of buckets) {
         const row = this.db.prepare("SELECT used FROM counters WHERE scope = ?").get(bucket.scope);
         if ((row?.used ?? 0) + units > bucket.limit)
           throw new ServiceError(
-            "rate_limited",
+            bucket.period >= DAY ? dailyCode : "rate_limited",
             429,
             Math.max(1, Math.ceil((bucket.expires - now) / 1000)),
           );
@@ -105,13 +107,15 @@ export class Budget {
   upstream(provider, units = 1) {
     this.debit(
       [
-        // Three admitted launch preparations plus a fee refresh can exceed 60 reads.
-        // Allow that bounded burst without increasing any daily allowance.
-        ["upstream", 180, MINUTE],
-        ["upstream", 2000, DAY],
-        [`provider:${provider}`, provider === "o1" ? 600 : 1400, DAY],
+        // Gas estimates alone need 1,728 RPC units per active day. Leave room for
+        // ticker, fee, launch and recovery reads while retaining a hard burst cap.
+        ["upstream", READ_LIMITS.perMinute, MINUTE],
+        ["upstream", READ_LIMITS.perDay, DAY],
+        [`provider:${provider}`, provider === "rpc" ? READ_LIMITS.rpcPerDay
+          : provider === "o1" ? READ_LIMITS.o1PerDay : READ_LIMITS.otherPerDay, DAY],
       ],
       units,
+      "read_daily_limit",
     );
   }
 

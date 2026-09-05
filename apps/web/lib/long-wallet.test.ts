@@ -194,3 +194,9 @@ void test('displayed gas budget matches the wallet transaction rather than the u
   const network=ceiling!.pads[0].steps[0].network;
   assert.equal(network.gasUnits,3000000n); // A maximum already includes all headroom.
 });
+
+void test('service limits disclose the actual retry interval instead of claiming a daily cap is brief congestion', () => {
+  assert.match(launchMessage(new LaunchError('read_daily_limit', 26000)), /Daily service read limit reached.*8 hours/);
+  assert.match(launchMessage(new LaunchError('rate_limited', 60)), /1 minute\./);
+  assert.match(launchMessage(new LaunchError('rate_limited', 5)), /5 seconds/);
+});

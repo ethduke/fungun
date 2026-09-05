@@ -157,3 +157,20 @@ void test('daily exhaustion and repeated preflight failures have bounded retries
   );
   assert.equal(opens, 3);
 });
+
+void test('daily read exhaustion does not retry or open the wallet', async () => {
+  const f = fixture(); let reads = 0, sends = 0;
+  await assert.rejects(runLaunchFlow({ ...f.options, artwork: async () => 1,
+    quote: async () => { reads++; throw new LaunchError('read_daily_limit', 26000); },
+    wallet: async () => { sends++; } }), /read_daily_limit/);
+  assert.equal(reads, 1); assert.equal(sends, 0); assert.equal(f.clock, 0);
+});
+void test('temporary read throttling counts down and continues without a second launch click', async () => {
+  const f = fixture(); let reads = 0, sends = 0; const progress: string[] = [];
+  await runLaunchFlow({ ...f.options, onProgress: message => { progress.push(message); }, artwork: async () => 1,
+    quote: async () => { if (++reads === 1) throw new LaunchError('rate_limited', 2); return 1; },
+    wallet: async () => { sends++; } });
+  assert.ok(progress.includes('Retrying launch preparation in 2s…'));
+  assert.ok(progress.includes('Retrying launch preparation in 1s…'));
+  assert.equal(sends, 1); assert.equal(f.clock, 2000);
+});

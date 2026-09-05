@@ -50,9 +50,14 @@ export async function runLaunchFlow<A, Q>({
         : 0;
     const delay = Math.max(1000, seconds * 1000 || 3000);
     if (now() + delay > deadline) throw original;
-    onProgress('Preparing your launch…');
+    let lastSecond = -1;
     for (let remaining = delay; remaining > 0; remaining -= 250) {
       guard();
+      const second = Math.ceil(remaining / 1000);
+      if (second !== lastSecond) {
+        onProgress(`Retrying launch preparation in ${second}s…`);
+        lastSecond = second;
+      }
       await pause(Math.min(remaining, 250));
     }
     guard();

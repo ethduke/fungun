@@ -39,6 +39,14 @@ export function launchMessage(error: unknown) {
     if (entry.code === 4001) return 'Wallet request cancelled. You can try Launch coin again.';
     cause = entry.cause;
   }
+  if (error instanceof LaunchError && ['rate_limited', 'read_daily_limit'].includes(error.message)) {
+    const seconds = Math.max(0, Math.ceil(error.retryAfter));
+    const count = seconds >= 3600 ? Math.ceil(seconds / 3600) : seconds >= 60 ? Math.ceil(seconds / 60) : seconds;
+    const unit = seconds >= 3600 ? 'hour' : seconds >= 60 ? 'minute' : 'second';
+    const duration = `${count} ${unit}${count === 1 ? '' : 's'}`;
+    const reason = error.message === 'read_daily_limit' ? 'Daily service read limit reached.' : 'Service request limit reached.';
+    return `${reason} ${seconds ? `Try again in ${duration}.` : 'Please retry shortly.'} Your draft is saved.`;
+  }
   const code = error instanceof Error ? error.message : '';
   const messages: Record<string, string> = {
     long_launch_disabled: 'Long launches are not enabled on this server yet.',
@@ -55,7 +63,6 @@ export function launchMessage(error: unknown) {
     wrong_account: 'The connected account changed. Restore the account used for this launch.',
     wrong_chain: 'Switch your wallet to Robinhood Chain before continuing.',
     launch_eoa_required: 'This launch currently supports ordinary wallet accounts only.',
-    rate_limited: 'The service is busy. Your draft is saved; please try again shortly.',
     busy: 'Another launch check is running. Try again shortly.',
     reverted: 'The launch simulation failed. No transaction was sent. Refresh the ticker and estimate.',
     launch_transaction_changed: 'The wallet changed this transaction. No matching launch was verified.',

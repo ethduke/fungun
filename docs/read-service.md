@@ -162,7 +162,7 @@ All results are advisory and can change before a transaction.
   only updates labels; it never automatically sends another request.
 - Every upstream attempt is debited before the request, even on timeout/failure.
   SQLite transactions persist caps across restarts and prevent clock rollback refill.
-- Hard caps: 60 upstream units/minute, 2,000/day total, 600/day O1 and 1,400/day RPC.
+- Hard caps: 180 upstream units/minute, 16,000/day total, 600/day O1 and 12,000/day RPC.
   Each fee RPC method is charged, including batched methods; O1 fee pages cost three units.
   Four concurrent upstream requests total, two per provider; eight pending cache keys,
   256 cache entries; no unbounded work queue.
