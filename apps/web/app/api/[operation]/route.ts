@@ -1,4 +1,5 @@
 const operations = new Set([
+  'fomo',
   'catalog',
   'ticker',
   'fees',

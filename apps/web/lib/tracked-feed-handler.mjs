@@ -73,6 +73,7 @@ export function createTrackedFeedHandler({
   now = () => performance.now(),
   loadHookRegistry = async () => null,
   loadStableRegistry = null,
+  onSnapshot = async () => {},
 } = {}) {
   // Shared only within this server process / Worker isolate, never per URL/user.
   let snapshot = null;
@@ -117,9 +118,13 @@ export function createTrackedFeedHandler({
         throw new Error('Feed unavailable');
       }
       const hooks = registry.status === 'fulfilled' ? registry.value : null;
-      const body = JSON.stringify(
-        projectTrackedPayload(await upstream.json(), hooks, stableAssets),
+      const projected = projectTrackedPayload(
+        await upstream.json(),
+        hooks,
+        stableAssets,
       );
+      await onSnapshot(projected);
+      const body = JSON.stringify(projected);
       snapshot = { body, expiresAt: now() + FEED_INTERVAL_MS };
       failures = 0;
       retryAt = 0;

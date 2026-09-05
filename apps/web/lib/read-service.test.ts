@@ -79,8 +79,10 @@ await test('catalog is validated and live pair IDs belong to the exact chain and
     },
   ];
   assert.deepEqual(validateDraft(draft, pads, 4663, catalog), {});
-  assert.ok(
-    validateDraft(draft, pads, 4663, { ...catalog, expiresAt: 0 }).destinations,
+  // Catalog age does not invalidate a listed pairing; chain identity still does.
+  assert.deepEqual(
+    validateDraft(draft, pads, 4663, { ...catalog, expiresAt: 0 }),
+    {},
   );
   assert.ok(
     validateDraft(draft, pads, 4663, { ...catalog, chainId: 8453 })

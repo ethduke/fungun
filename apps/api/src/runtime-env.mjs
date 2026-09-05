@@ -7,6 +7,9 @@ export const LONG_WALLET_LAUNCH_RUNTIME_NAMES = Object.freeze([
 
 export const API_RUNTIME_NAMES = Object.freeze([
   "NODE_ENV",
+  "FOMO_API_KEY",
+  "FOMO_ENABLED",
+  "FOMO_USERS_PATH",
   "APP_ORIGIN",
   "READ_SERVICE_PORT",
   "BUDGET_DB_PATH",

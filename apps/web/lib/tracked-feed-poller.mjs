@@ -10,10 +10,20 @@ export class TrackedFeedPoller {
     getUrl = () => '/api/tracked-feed',
     onSnapshot,
     onError,
+    intervalMs = FEED_INTERVAL_MS,
+    validateSnapshot = (snapshot) => Array.isArray(snapshot?.pools),
     fetcher = (url, options) => fetch(url, options),
     now = () => performance.now(),
   }) {
-    Object.assign(this, { getUrl, onSnapshot, onError, fetcher, now });
+    Object.assign(this, {
+      getUrl,
+      onSnapshot,
+      onError,
+      fetcher,
+      now,
+      intervalMs,
+      validateSnapshot,
+    });
     this.active = false;
     this.generation = 0;
     this.failures = 0;
@@ -48,9 +58,9 @@ export class TrackedFeedPoller {
     const controller = new AbortController();
     this.controller = controller;
     // Even an aborted request cannot be restarted rapidly by visibility changes.
-    this.nextAttemptAt = this.now() + FEED_INTERVAL_MS;
+    this.nextAttemptAt = this.now() + this.intervalMs;
     const timeout = setTimeout(() => controller.abort(), 10_000);
-    let delay = FEED_INTERVAL_MS;
+    let delay = this.intervalMs;
     let retryAfter = 0;
     try {
       const response = await this.fetcher(this.getUrl(), {
@@ -63,7 +73,7 @@ export class TrackedFeedPoller {
         throw new Error('Feed unavailable');
       }
       const snapshot = await response.json();
-      if (!Array.isArray(snapshot.pools))
+      if (!this.validateSnapshot(snapshot))
         throw new Error('Invalid feed response');
       if (!this.active || generation !== this.generation) return;
       this.failures = 0;
@@ -71,7 +81,7 @@ export class TrackedFeedPoller {
     } catch {
       if (!this.active || generation !== this.generation) return;
       this.failures = Math.min(this.failures + 1, 5);
-      delay = feedRetryMs(this.failures, retryAfter);
+      delay = Math.max(this.intervalMs, feedRetryMs(this.failures, retryAfter));
       this.onError();
     } finally {
       clearTimeout(timeout);

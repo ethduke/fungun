@@ -10,6 +10,7 @@ import { createCatalogRefresher } from "./catalog-refresher.mjs";
 import { createHandler } from "./service.mjs";
 import { verifyProductionStorage } from "./storage.mjs";
 import { Fees } from "./fees.mjs";
+import { createFomoService } from "./fomo-service.mjs";
 import { TrackedPrices } from "./tracked-prices.mjs";
 
 process.umask(0o077);
@@ -25,10 +26,11 @@ try {
   });
   const fees = new Fees(config, upstream);
   const launches = new LongLive(config, upstream, budget);
+  const fomo = createFomoService(budget.db);
   const trackedPrices = new TrackedPrices(config, upstream);
   const server = createServer(
     { maxHeaderSize: 8192 },
-    createHandler(config, budget, adapters, fees, trackedPrices, launches),
+    createHandler(config, budget, adapters, fees, trackedPrices, launches, fomo),
   );
   server.requestTimeout = 10_000;
   server.headersTimeout = 5000;
@@ -44,13 +46,14 @@ try {
       `Read service listening on port ${config.port}; upstream reads ${config.readsEnabled ? "enabled" : "disabled"}.`,
     );
     catalogRefresher.kick();
+    fomo.start();
   });
   let stopping = false;
   for (const signal of ["SIGINT", "SIGTERM"])
     process.once(signal, () => {
       if (stopping) return;
       stopping = true;
-      const stopped = catalogRefresher.stop();
+      const stopped = Promise.all([catalogRefresher.stop(), fomo.stop()]);
       server.close(async () => {
         await stopped;
         budget.close();
