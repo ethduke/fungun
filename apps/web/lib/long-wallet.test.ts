@@ -2,18 +2,18 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { keccak256, toHex, type EIP1193Provider } from 'viem';
 import { buildUnsignedLongLaunch } from './long-encoding/long-launch.mjs';
-import { sendLongWallet, validateLongPlan, LaunchPreflightError, type LaunchInput, readLaunchRecovery, saveLaunchRecovery, prepareLongWallet } from './long-wallet.ts';
+import { sendLongWallet, validateLongPlan, LaunchPreflightError, type LaunchInput, readLaunchRecovery, saveLaunchRecovery, prepareLongWallet, isLongLaunchPair } from './long-wallet.ts';
 import { launchRecoveryScope } from './launch-draft-cache.ts';
 import { runLaunchFlow } from './launch-flow.ts';
 import type { PublishedAsset } from './asset-protocol.ts';
 const addr = (n: number | bigint) => toHex(BigInt(n), { size: 20 });
 const hash = (n: number) => toHex(BigInt(n), { size: 32 });
 const contract = (n: number) => ({ address: addr(n), codeHash: keccak256('0x01') });
-function fixture() {
+function fixture(pairId = 'long-NVDA') {
   const profile = { chainId: 4663, launcher: contract(1), airlock: contract(2), tokenFactory: { ...contract(3), initCodeHash: hash(103) },
     governanceFactory: contract(4), poolInitializer: contract(5), liquidityMigrator: contract(6), dopplerHook: contract(7),
-    integrator: addr(8), protocolBeneficiary: addr(9), quotes: [{ id: 'long-NVDA', token: { ...contract(10), address: addr(2n ** 160n - 1n) }, oracle: contract(11), decimals: 18, oracleDecimals: 8 }] };
-  const input: LaunchInput = { chainId: 4663, wallet: addr(1001), draft: { name: 'Sample', ticker: 'SAMPLE', description: '' }, pairId: 'long-NVDA',
+    integrator: addr(8), protocolBeneficiary: addr(9), quotes: [{ id: pairId, token: { ...contract(10), address: addr(2n ** 160n - 1n) }, oracle: contract(11), decimals: 18, oracleDecimals: 8 }] };
+  const input: LaunchInput = { chainId: 4663, wallet: addr(1001), draft: { name: 'Sample', ticker: 'SAMPLE', description: '' }, pairId,
     publication: { id: 'a'.repeat(48), imageHash: 'b'.repeat(64), metadataHash: 'c'.repeat(64) } };
   const cid = 'bafkreia' + 'a'.repeat(51);
   const published: PublishedAsset = { ...input.publication, status: 'published', launchReady: false, imageUrl: '', metadataUrl: '',
@@ -23,8 +23,8 @@ function fixture() {
     pairId: input.pairId, metadataUri: `ipfs://${cid}`, startingTick, intentId }, profile);
   return { profile, input, published, plan, startingTick, intentId };
 }
-function response() {
-  const f = fixture(), now = Date.now();
+function response(pairId = 'long-NVDA') {
+  const f = fixture(pairId), now = Date.now();
   return { ...f, raw: { id: 'd'.repeat(64), binding: f.plan.binding, chainId: 4663,
     quotedAt: now, expiresAt: now + 30000, serverTime: now, profile: f.profile,
     startingTick: f.startingTick, intentId: f.intentId, predictedAsset: f.plan.predictedAsset, predictedPool: addr(200), review: f.plan.review,
@@ -131,4 +131,14 @@ void test('existing submitted intent resumes without wallet dispatch after a los
   assert.ok(resumed); assert.equal(sends, 0);
   t.mock.method(globalThis, 'fetch', async () => Response.json({ recovery: { ...recovery, hash: 'invalid' } }));
   await assert.rejects(prepareLongWallet(f.input, f.published), /recovery_unavailable/);
+});
+
+
+void test('TSLA wallet launch reconstructs the selected pairing; other unsupported routes remain disabled', () => {
+  assert.ok(isLongLaunchPair('long-TSLA')); assert.ok(isLongLaunchPair('long-NVDA'));
+  for (const pair of ['long-MU','longbow-TSLA',undefined]) assert.equal(isLongLaunchPair(pair), false);
+  const f = response('long-TSLA');
+  const checked = validateLongPlan(f.raw, f.input, f.published, performance.now());
+  assert.equal(checked.transaction.data, f.plan.transaction.data);
+  assert.throws(() => validateLongPlan(f.raw, {...f.input,pairId:'long-NVDA'}, f.published, performance.now()));
 });

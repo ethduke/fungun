@@ -43,7 +43,11 @@ import {
   type LaunchCostQuote,
   type UsdRate,
 } from '@/lib/launch-cost';
-import { launchRequest, LaunchError } from '@/lib/long-wallet';
+import {
+  launchRequest,
+  LaunchError,
+  isLongLaunchPair,
+} from '@/lib/long-wallet';
 import './launch-cost.css';
 import './launch-section.css';
 
@@ -82,16 +86,18 @@ export function LaunchSection({
   usdRate?: UsdRate | null;
   children?: ReactNode;
 }) {
-  const supportsEstimate =
-    chainId === 4663 &&
-    destinations.some((pad) => pad.id === 'long' && pad.pairId === 'long-NVDA');
+  const selectedPair = destinations.find((pad) => pad.id === 'long')?.pairId;
+  const estimatePair =
+    chainId === 4663 && isLongLaunchPair(selectedPair) ? selectedPair : null;
+  const supportsEstimate = !!estimatePair;
   const [approximate, setApproximate] = useState<ApproximateLaunchCost | null>(
     null,
   );
   const [estimateFailed, setEstimateFailed] = useState(false);
   const [costTick, setCostTick] = useState(0);
   useEffect(() => {
-    if (!supportsEstimate) return;
+    if (!estimatePair) return;
+    const pairId = estimatePair;
     let stopped = false;
     let timer: ReturnType<typeof setTimeout>;
     async function refresh() {
@@ -104,9 +110,9 @@ export function LaunchSection({
         const started = performance.now();
         const raw = await launchRequest('launch-estimate', {
           chainId: 4663,
-          pairId: 'long-NVDA',
+          pairId,
         });
-        const estimate = parseApproximateLaunchCost(raw, started);
+        const estimate = parseApproximateLaunchCost(raw, started, pairId);
         if (estimate.expiresAt <= performance.now())
           throw new Error('Estimate expired');
         if (stopped) return;
@@ -128,7 +134,7 @@ export function LaunchSection({
       stopped = true;
       clearTimeout(timer);
     };
-  }, [supportsEstimate]);
+  }, [estimatePair]);
   const costNow = Math.max(now, costTick);
   useEffect(() => {
     if (!approximate) return;
@@ -162,7 +168,7 @@ export function LaunchSection({
     costNow,
   );
   const fallbackCosts = calculateLaunchCosts(
-    supportsEstimate
+    supportsEstimate && approximate?.pairId === estimatePair
       ? approximateLaunchQuote(approximate, costContextKey, costNow)
       : null,
     {

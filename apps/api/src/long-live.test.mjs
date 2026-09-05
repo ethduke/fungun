@@ -41,7 +41,7 @@ async function fixture(t) {
         case 'RESERVATION_DURATION': return 86400;
         case 'paused': return changes.paused ?? false;
         case 'getModuleState': return ['tokenFactory','governanceFactory','poolInitializer','liquidityMigrator'].findIndex((r) => p[r].address === e.args[0]) + 1;
-        case 'decimals': return e.address === p.quotes[0].token.address ? 18 : 8;
+        case 'decimals': return p.quotes.some(q => q.token.address === e.address) ? 18 : 8;
         case 'latestRoundData': return [1n, changes.answer ?? 23000000000n, BigInt(now / 1000 - 20), BigInt(now / 1000 - (changes.age ?? 10)), 1n];
         case 'isTickerAvailable': return !changes.reserved;
         case 'implementation': return changes.implementation ?? g.tokenImplementation.address;
@@ -261,7 +261,7 @@ test('background estimate uses recent comparable simulations and cached live gas
   f.advance(301000); f.changes.price = 1000000000;
   assert.equal((await f.service.run('launch-estimate', input)).gasPriceWei, '1000000000');
   assert.equal(f.requests.length, reads + 4);
-  for (const change of [{wallet:f.input.wallet}, {pairId:'long-TSLA'}, {chainId:8453}, {transaction:{}}])
+  for (const change of [{wallet:f.input.wallet}, {pairId:'long-MU'}, {chainId:8453}, {transaction:{}}])
     await assert.rejects(f.service.run('launch-estimate', {...input,...change}), /invalid_request/);
 });
 
@@ -272,4 +272,28 @@ test('no simulation history uses a disclosed gas limit, and invalid gas prices n
   assert.equal(f.budget.db.prepare('SELECT COUNT(*) AS n FROM long_launches').get().n, 0);
   f.advance(301000); f.changes.price = 0;
   await assert.rejects(f.service.run('launch-estimate', input), /launch_gas_limit/);
+});
+
+
+test('TSLA has an independent launch intent, gas sample and verified numeraire while NVDA recovery is preserved', async t => {
+  const f = await fixture(t);
+  const nvda = await f.service.run('launch-prepare', f.input);
+  f.service.reserve(nvda);
+  const q = { ...f.p.quotes[0], id:'long-TSLA', token:{...contract(16),address:addr(2n**160n-2n)}, oracle:contract(17) };
+  f.p.quotes.push(q); f.config.longLaunch.guards['long-TSLA'] = f.g;
+  const nvdaEstimate = await f.service.run('launch-estimate', {chainId:4663,pairId:'long-NVDA'});
+  assert.equal(nvdaEstimate.basis, 'recent-simulations');
+  const reads = f.requests.length;
+  const tslaEstimate = await f.service.run('launch-estimate', {chainId:4663,pairId:'long-TSLA'});
+  assert.equal(tslaEstimate.basis, 'gas-limit');
+  assert.equal(f.requests.length, reads); // Same network gas-price cache, separate gas-unit history.
+  const tsla = await f.service.run('launch-prepare', {...f.input,pairId:'long-TSLA'});
+  assert.notEqual(tsla.id, nvda.id);
+  assert.notEqual(tsla.transaction.data, nvda.transaction.data);
+  assert.equal(f.service.row(nvda.id).state, 'wallet');
+  assert.equal(tsla.transaction.nonce, nvda.transaction.nonce);
+  const decoded = decodeFunctionData({abi:LONG_CREATE_ABI,data:tsla.transaction.data});
+  assert.equal(decoded.args[0].numeraire.toLowerCase(),q.token.address.toLowerCase());
+  assert.equal((await f.service.run('launch-estimate',{chainId:4663,pairId:'long-TSLA'})).basis,'recent-simulations');
+  assert.equal((await f.service.run('launch-prepare',f.input)).id,nvda.id);
 });

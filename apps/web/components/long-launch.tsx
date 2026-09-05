@@ -16,6 +16,7 @@ import {
 } from '@/lib/launch-cost';
 import {
   launchMessage,
+  isLongLaunchPair,
   launchRequest,
   LaunchError,
   readLaunchRecovery,
@@ -228,7 +229,7 @@ function ScopedLongLaunch({
     !!account.sendLong &&
     hydrated &&
     !!image &&
-    pairId === 'long-NVDA' &&
+    isLongLaunchPair(pairId) &&
     !blocked &&
     (!recovery || retryable);
   const validPlan =
@@ -249,8 +250,8 @@ function ScopedLongLaunch({
       !hydrated
     )
       return;
-    if (pairId !== 'long-NVDA') {
-      setError('Wallet launches currently support Long / NVDA.');
+    if (!isLongLaunchPair(pairId)) {
+      setError('Wallet launches currently support Long / NVDA or TSLA.');
       return;
     }
     const walletAddress = account.address;
@@ -418,10 +419,10 @@ function ScopedLongLaunch({
     currentReceipt && ['confirmed', 'failed'].includes(currentReceipt.status);
   const transactionHash = currentReceipt?.hash || recovery?.hash;
   const guidance = !enabled
-    ? 'Choose Long / NVDA to launch.'
+    ? 'Choose Long / NVDA or TSLA to launch.'
     : account.address && !isReady
-      ? pairId !== 'long-NVDA'
-        ? 'Choose Long / NVDA to launch.'
+      ? !isLongLaunchPair(pairId)
+        ? 'Choose Long / NVDA or TSLA to launch.'
         : !ready
           ? 'Select only Long and complete your coin details.'
           : account.chainId !== 4663
@@ -448,7 +449,7 @@ function ScopedLongLaunch({
                 !retryable ||
                 !ready ||
                 !image ||
-                pairId !== 'long-NVDA'
+                !isLongLaunchPair(pairId)
               }
               onClick={startLaunch}
             >
@@ -529,7 +530,7 @@ function ScopedLongLaunch({
               blocked ||
               !hydrated ||
               (Boolean(account.address) &&
-                (!ready || !image || pairId !== 'long-NVDA'))
+                (!ready || !image || !isLongLaunchPair(pairId)))
             }
             onClick={startLaunch}
           >

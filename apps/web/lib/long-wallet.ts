@@ -12,6 +12,9 @@ export type LongPlan = {
   estimatedGas: string; maximumGasWei: string; launchpadFeeWei: '0';
   usd: { microUsdPerEth: string; sourceLabel: string; quotedAt: number };
 };
+export const isLongLaunchPair = (pairId: string | undefined): pairId is 'long-NVDA' | 'long-TSLA' =>
+  pairId === 'long-NVDA' || pairId === 'long-TSLA';
+
 export class LaunchError extends Error {
   retryAfter: number;
   constructor(message: string, retryAfter = 0) { super(message); this.retryAfter = retryAfter; }
@@ -31,7 +34,7 @@ export function launchMessage(error: unknown) {
   const code = error instanceof Error ? error.message : '';
   const messages: Record<string, string> = {
     long_launch_disabled: 'Long launches are not enabled on this server yet.',
-    unsupported_pair: 'This pairing has not been verified for wallet launches yet. Choose NVDA.',
+    unsupported_pair: 'This pairing has not been verified for wallet launches yet. Choose NVDA or TSLA.',
     launch_assets_unverified: 'Artwork publication is not verified yet. Check its status before launching.',
     oracle_stale: 'The stock price is paused or out of date. Wait for a fresh market price before launching.',
     contract_unverified: 'A launch contract or price feed changed. Launching is paused for review.',

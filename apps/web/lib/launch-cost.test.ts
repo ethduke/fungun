@@ -360,3 +360,10 @@ await test('background estimates price gas without a draft and remain separate f
     {gasUnits:'4000000'}, {serverTime:1300000}, {quotedAt:1100000}, {basis:'exact'}])
     assert.throws(() => parseApproximateLaunchCost({...raw,...change}, 100));
 });
+
+
+await test('TSLA estimate cannot reuse an NVDA response', () => {
+  const raw = {chainId:4663,pairId:'long-TSLA',gasUnits:'2000000',gasPriceWei:'1000000000',launchpadFeeWei:'0',basis:'recent-simulations',quotedAt:1000000,expiresAt:1300000,serverTime:1000000};
+  assert.equal(parseApproximateLaunchCost(raw, 100, 'long-TSLA').pairId, 'long-TSLA');
+  assert.throws(() => parseApproximateLaunchCost(raw, 100, 'long-NVDA'));
+});

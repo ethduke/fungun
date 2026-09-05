@@ -40,7 +40,7 @@ const call = (address, functionName, args = []) => ({ address, abi: LONG_STATE_A
 
 export function validateLongInput(kind, value) {
   if (kind === "launch-estimate") {
-    if (!exact(value, ["chainId", "pairId"]) || value.chainId !== 4663 || value.pairId !== "long-NVDA") fail("invalid_request", 400);
+    if (!exact(value, ["chainId", "pairId"]) || value.chainId !== 4663 || !["long-NVDA", "long-TSLA"].includes(value.pairId)) fail("invalid_request", 400);
     return value;
   }
   if (kind === "launch-prepare") {
@@ -109,28 +109,29 @@ export class LongLive {
   async estimate(input) {
     if (!this.live.profile.quotes.some(q => q.id === input.pairId)) fail("unsupported_pair", 400);
     // Shared across visitors, independent of artwork, wallet, reservations and quote budgets.
-    return this.cache.get(`approximate:${input.pairId}`, 300000, async () => {
-      const samples = this.db.prepare("SELECT plan,context FROM long_launches WHERE expires>? ORDER BY expires DESC LIMIT 20")
-        .all(this.now() - 7 * 86400000).flatMap(row => {
-          const plan = JSON.parse(row.plan), context = JSON.parse(row.context);
-          if (context.pairId !== input.pairId || JSON.stringify(plan.profile) !== JSON.stringify(this.live.profile)
-            || !/^\d+$/.test(plan.estimatedGas)) return [];
-          const gas = Number(plan.estimatedGas);
-          return gas >= 21000 && gas <= 2500000 ? [gas] : [];
-        }).sort((a, b) => a - b);
+    const samples = this.db.prepare("SELECT plan,context FROM long_launches WHERE expires>? ORDER BY expires DESC LIMIT 20")
+      .all(this.now() - 7 * 86400000).flatMap(row => {
+        const plan = JSON.parse(row.plan), context = JSON.parse(row.context);
+        if (context.pairId !== input.pairId || JSON.stringify({ ...plan.profile, quotes: plan.profile.quotes.filter(q => q.id === input.pairId) }) !== JSON.stringify({ ...this.live.profile, quotes: this.live.profile.quotes.filter(q => q.id === input.pairId) })
+          || !/^\d+$/.test(plan.estimatedGas)) return [];
+        const gas = Number(plan.estimatedGas);
+        return gas >= 21000 && gas <= 2500000 ? [gas] : [];
+      }).sort((a, b) => a - b);
+    const market = await this.cache.get('approximate-gas-price', 300000, async () => {
       const [chain, rawPrice] = await this.rpc.batch(4663, [
         { method: "eth_chainId", params: [] }, { method: "eth_gasPrice", params: [] },
       ]);
       if (rpcNumber(chain) !== 4663n) fail("wrong_chain");
       const price = rpcNumber(rawPrice);
       if (price <= 0n || price > 10n ** 12n) fail("launch_gas_limit");
-      // With no comparable simulation, disclose the configured gas-unit ceiling.
-      const gasUnits = samples.length ? samples[Math.floor(samples.length / 2)] : 3000000;
-      const quotedAt = this.now();
-      return { chainId: 4663, pairId: input.pairId, gasUnits: String(gasUnits), gasPriceWei: String(price),
-        launchpadFeeWei: "0", basis: samples.length ? "recent-simulations" : "gas-limit",
-        quotedAt, expiresAt: quotedAt + 300000 };
+      return { price, quotedAt: this.now() };
     });
+    const { price, quotedAt } = market;
+    // With no comparable simulation, disclose the configured gas-unit ceiling.
+    const gasUnits = samples.length ? samples[Math.floor(samples.length / 2)] : 3000000;
+    return { chainId: 4663, pairId: input.pairId, gasUnits: String(gasUnits), gasPriceWei: String(price),
+      launchpadFeeWei: "0", basis: samples.length ? "recent-simulations" : "gas-limit",
+      quotedAt, expiresAt: quotedAt + 300000 };
   }
   row(key) { return this.db.prepare("SELECT * FROM long_launches WHERE id=?").get(key); }
   async metadata(input) {
@@ -149,7 +150,8 @@ export class LongLive {
     });
   }
   async prepare(input) {
-    const key = createHmac("sha256", this.budget.key).update(`${input.wallet}:${input.publication.metadataHash}`).digest("hex");
+    // Keep legacy NVDA IDs recoverable; other pairings have distinct transaction intents.
+    const key = createHmac("sha256", this.budget.key).update(`${input.wallet}:${input.publication.metadataHash}${input.pairId === "long-NVDA" ? "" : `:${input.pairId}`}`).digest("hex");
     const context = JSON.stringify(input), prior = this.row(key);
     if (prior && prior.context !== context) {
       // Re-publication can issue a new upload ID for identical immutable content.

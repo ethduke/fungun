@@ -33,12 +33,12 @@ export type LaunchCostQuote = {
 };
 
 export type ApproximateLaunchCost = {
-  chainId: 4663; pairId: 'long-NVDA'; gasUnits: bigint; gasPriceWei: bigint;
+  chainId: 4663; pairId: 'long-NVDA' | 'long-TSLA'; gasUnits: bigint; gasPriceWei: bigint;
   basis: 'recent-simulations' | 'gas-limit'; expiresAt: number;
 };
-export function parseApproximateLaunchCost(raw: unknown, started: number): ApproximateLaunchCost {
+export function parseApproximateLaunchCost(raw: unknown, started: number, pairId: 'long-NVDA' | 'long-TSLA' = 'long-NVDA'): ApproximateLaunchCost {
   const value = raw as Record<string, unknown>;
-  if (!value || value.chainId !== 4663 || value.pairId !== 'long-NVDA' || value.launchpadFeeWei !== '0'
+  if (!value || value.chainId !== 4663 || value.pairId !== pairId || value.launchpadFeeWei !== '0'
     || !['recent-simulations', 'gas-limit'].includes(String(value.basis))
     || typeof value.gasUnits !== 'string' || !/^\d{1,7}$/.test(value.gasUnits)
     || typeof value.gasPriceWei !== 'string' || !/^\d{1,13}$/.test(value.gasPriceWei)
@@ -48,7 +48,7 @@ export function parseApproximateLaunchCost(raw: unknown, started: number): Appro
   if (gasUnits < 21000n || gasUnits > 3000000n || gasPriceWei <= 0n || gasPriceWei > 10n ** 12n
     || expires - quoted !== 300000 || server < quoted || server >= expires || !Number.isFinite(started) || started < 0)
     throw new Error('Invalid gas estimate');
-  return { chainId: 4663, pairId: 'long-NVDA', gasUnits, gasPriceWei,
+  return { chainId: 4663, pairId, gasUnits, gasPriceWei,
     basis: value.basis as ApproximateLaunchCost['basis'], expiresAt: started + expires - server };
 }
 export function approximateLaunchQuote(estimate: ApproximateLaunchCost | null, contextKey: string, now: number): LaunchCostQuote | null {
