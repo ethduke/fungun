@@ -36,7 +36,7 @@ export function launchActivity({
   )
     return {
       phase: 'uncertain',
-      label: 'Check wallet history to continue.',
+      label: receiptStatus === 'retryable' ? '' : 'Connecting to your launch…',
       animated: false,
     };
   return { phase: 'pending', label: 'Awaiting confirmation…', animated: true };

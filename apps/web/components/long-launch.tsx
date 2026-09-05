@@ -1,9 +1,9 @@
 'use client';
 
 import { useEffect, useLayoutEffect, useRef, useState } from 'react';
-import { Input } from '@/components/ui/input';
 import { Button } from '@/components/ui/button';
 import { BulletProgress, LaunchGun } from '@/components/launch-motion';
+import { watchLaunch, type LaunchReceipt } from '@/lib/long-recovery';
 import { launchActivity } from '@/lib/launch-progress';
 import { useConnectedAccount } from '@/lib/account-context';
 import { useDraftCache } from '@/lib/launch-draft';
@@ -61,14 +61,7 @@ export function LongLaunch({
   const [busy, setBusy] = useState('');
   const [notice, setNotice] = useState('');
   const [error, setError] = useState('');
-  const [receipt, setReceipt] = useState<{
-    id: string;
-    status: string;
-    hash?: string;
-    asset?: string;
-    paidGasWei?: string;
-  } | null>(null);
-  const [recoveryHash, setRecoveryHash] = useState('');
+  const [receipt, setReceipt] = useState<LaunchReceipt | null>(null);
   const [expired, setExpired] = useState(false);
   const [cooldown, setCooldown] = useState(0);
   const flight = useRef(false);
@@ -120,6 +113,20 @@ export function LongLaunch({
     const timer = setTimeout(() => setCooldown(0), cooldown);
     return () => clearTimeout(timer);
   }, [cooldown]);
+  useEffect(() => {
+    if (!recovery || busy) return;
+    return watchLaunch(recovery, (result) => {
+      setReceipt(result);
+      setError('');
+      setNotice(result.status === 'failed' ? 'The transaction failed. Network gas was charged.' : '');
+      if (result.hash && result.hash !== recovery.hash) {
+        const saved = { ...recovery, hash: result.hash };
+        saveLaunchRecovery(saved);
+        setRecovery(saved);
+      }
+    }, (e) => setError(launchMessage(e)));
+  }, [recovery, busy]);
+  const retryable = receipt?.id === recovery?.id && receipt?.status === 'retryable';
   const isReady =
     ready &&
     !!account.address &&
@@ -129,7 +136,7 @@ export function LongLaunch({
     !!image &&
     pairId === 'long-NVDA' &&
     !blocked &&
-    !recovery;
+    (!recovery || retryable);
   const validPlan =
     plan && planContext === contextKey && !expired ? plan : null;
   async function startLaunch() {
@@ -143,7 +150,7 @@ export function LongLaunch({
       !image ||
       !pairId ||
       blocked ||
-      recovery ||
+      (recovery && !retryable) ||
       !hydrated
     )
       return;
@@ -198,6 +205,8 @@ export function LongLaunch({
         usdAge,
       } = await prepareLongWallet(input, artwork);
       if (current.current !== context) return;
+      if (recovery && checked.id !== recovery.id)
+        throw new LaunchError('launch_context_locked');
       setPlan(checked);
       setPlanContext(context);
       setExpired(false);
@@ -258,7 +267,9 @@ export function LongLaunch({
         launchPlan,
         () => mounted.current && current.current === context,
         async () => {
-          if (readLaunchRecovery()) throw new LaunchError('launch_pending');
+          const prior = readLaunchRecovery();
+          if (prior && (prior.id !== launchPlan.id || prior.hash))
+            throw new LaunchError('launch_pending');
           saved = {
             id: launchPlan.id,
             binding: launchPlan.binding,
@@ -266,6 +277,7 @@ export function LongLaunch({
           };
           saveLaunchRecovery(saved);
           setRecovery(saved);
+          setReceipt(null);
           await launchRequest('launch-reserve', {
             id: launchPlan.id,
             binding: launchPlan.binding,
@@ -279,70 +291,6 @@ export function LongLaunch({
       setNotice('');
     } catch (e) {
       setError(launchMessage(e));
-      if (saved)
-        setNotice(
-          'This launch stays locked after wallet approval opens, including cancellation or a lost response. Check wallet history; do not launch again.',
-        );
-    } finally {
-      flight.current = false;
-      setBusy('');
-    }
-  }
-  async function check() {
-    if (flight.current || !recovery) return;
-    flight.current = true;
-    setBusy('Checking confirmation…');
-    setError('');
-    try {
-      const hash = recovery.hash ?? (recoveryHash.trim() || null);
-      if (hash && !/^0x[a-f0-9]{64}$/i.test(hash))
-        throw new LaunchError('launch_unknown');
-      const result = await launchRequest('launch-status', {
-        id: recovery.id,
-        hash,
-      });
-      if (
-        result.id !== recovery.id ||
-        ![
-          'prepared',
-          'uncertain',
-          'submitted',
-          'confirming',
-          'confirmed',
-          'failed',
-        ].includes(result.status)
-      )
-        throw new LaunchError('launch_receipt_unverified');
-      if (['confirmed', 'failed'].includes(result.status)) {
-        if (
-          !/^0x[a-f0-9]{64}$/i.test(result.hash) ||
-          !/^\d+$/.test(result.paidGasWei) ||
-          (result.status === 'confirmed' &&
-            !/^0x[a-f0-9]{40}$/i.test(result.asset))
-        )
-          throw new LaunchError('launch_receipt_unverified');
-      }
-      if (hash && result.hash === hash) {
-        const saved = { ...recovery, hash };
-        saveLaunchRecovery(saved);
-        setRecovery(saved);
-      }
-      setReceipt(result);
-      setNotice(
-        result.status === 'confirmed'
-          ? ''
-          : result.status === 'failed'
-            ? 'The transaction failed onchain. Gas was spent; no successful launch was verified.'
-            : result.status === 'prepared'
-              ? 'No wallet submission was recorded, but this browser attempt remains locked. Contact support before retrying.'
-              : result.status === 'uncertain'
-                ? 'Check your wallet history; do not submit again.'
-                : '',
-      );
-      setCooldown(60000);
-    } catch (e) {
-      setError(launchMessage(e));
-      setCooldown(60000);
     } finally {
       flight.current = false;
       setBusy('');
@@ -388,27 +336,14 @@ export function LongLaunch({
               <LaunchGun confirmed />
             </output>
           )}
-          {!recovery.hash && !busy && (
-            <label htmlFor="launch-recovery-hash">
-              Transaction hash from wallet history (if submitted)
-              <Input
-                id="launch-recovery-hash"
-                value={recoveryHash}
-                onChange={(e) => setRecoveryHash(e.target.value)}
-                maxLength={66}
-                autoComplete="off"
-                spellCheck={false}
-              />
-            </label>
-          )}
           {!terminal && (
             <Button
               type="button"
               className="launch-button"
-              disabled={!!busy || !!cooldown}
-              onClick={check}
+              disabled={!!busy || !retryable || !ready || !image || pairId !== 'long-NVDA'}
+              onClick={startLaunch}
             >
-              <span>{busy ? 'Launch in progress…' : 'Check launch'}</span>
+              <span>{busy ? 'Launching coin…' : retryable ? 'Launch coin' : 'Confirming launch…'}</span>
               <LaunchGun />
             </Button>
           )}

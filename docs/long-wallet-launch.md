@@ -51,19 +51,16 @@ headers and feed observations are checked; they do not replace that feed.
    same portable encoder to reconstruct every calldata byte. It rechecks account,
    chain, launcher code and pending nonce, durably reserves one attempt, and asks
    the extension to sign and submit exactly once. The user must approve in the wallet.
-5. Check launch. Transaction identity, calldata, value, gas envelope, canonical
+5. Confirmation is checked automatically, including after refresh. Transaction identity, calldata, value, gas envelope, canonical
    receipt, 12-block confirmation depth, event and token/Airlock state are verified.
    Twelve L2 blocks are confirmation depth, not Ethereum settlement finality.
 
 The compact review card keeps the fee total above the single launch action and
 places individual fees in an expandable breakdown. A single bullet progress line
 follows artwork preparation/upload, gas estimation, wallet approval and pending
-confirmation. It is indeterminate, not a payment percentage. Errors and uncertain
-wallet responses stop the motion and retain recovery guidance. Only a verified
+confirmation. It is indeterminate, not a payment percentage. Errors show a concise status while automatic recovery continues. Only a verified
 confirmed receipt shows the gun recoil and coin arrival; a submitted transaction
-hash does not. Reduced-motion preferences disable both animations. Checking a
-receipt remains an explicit read-only action; the animation adds no polling,
-payments or retries.
+hash does not. Reduced-motion preferences disable both animations. Receipt polling is read-only; only a new user click can open another wallet request.
 
 The Long launchpad payment is zero ETH for this reviewed nonpayable path. Network
 gas is still charged. Robinhood's estimate includes both execution and L1 posting;
@@ -81,15 +78,38 @@ methods debit the existing durable provider/global budgets. There is one active
 launch read, bounded deadlines, cached publication/price reads and receipt checks.
 No arbitrary target, RPC URL, calldata, signature or gas override is accepted.
 
-Reservation uses a conditional SQLite update before the wallet opens. Attempted
-records never expire or get pruned automatically. Timeouts and cancellation keep
-that attempt locked. Browser recovery stores only opaque ID, binding and an optional
-transaction hash, never the wallet address, draft, signature or calldata. If the
-wallet returned no hash, its history hash can be entered for read-only recovery.
-A hash that does not match the stored transaction is rejected. Storage failure
-prevents wallet dispatch. A lost reservation response is uncertain, not retryable.
-A cancelled/uncertain attempt may require operator review; no unsafe reset endpoint
-is provided. Different browser profiles still share the server reservation.
+Reservation is durably saved before the wallet opens. Attempted records never
+expire or get pruned automatically. Browser recovery stores only opaque ID,
+binding and an optional transaction hash; it never asks the user to copy a hash.
+On refresh the client checks status automatically. An unused nonce restores the
+Launch coin action. A retry reruns publication, contract, oracle, simulation,
+balance and fee checks while retaining the original nonce. It never silently
+advances to a second nonce. Each user action sends at most one wallet request;
+there is no automatic signing or transaction submission.
+
+The additive `long_launch_attempts` journal retains up to 16 offered transaction
+envelopes per intent so a delayed original response remains verifiable after a
+requote changes price, calldata or gas. Legacy wallet records are retained before
+requote. Concurrent tabs and uncertain submissions use the same account/chain/
+nonce; at most one of those transactions can be mined on the canonical chain.
+The wallet must honor the explicit nonce supplied in its transaction request.
+No reset endpoint or user assertion is treated as proof of non-submission.
+
+When a hash is missing, server reads check the original sender's latest/pending
+nonce. If consumed, a bounded binary search locates its transaction in canonical
+blocks (six probes per request, at most 32 in-memory searches). Historical nonce
+reads must be supported by the configured RPC; unavailable reads retain recovery
+and retry after the service cooldown. Reorged search anchors are discarded.
+Discovered transactions undergo the same strict receipt/event/state checks as
+wallet-returned hashes. A different transaction consuming that nonce fails closed.
+
+Polling begins immediately, waits five seconds for the first three intervals,
+then fifteen seconds, and after twenty checks backs off to sixty seconds.
+Actual Retry-After headers take precedence. Polling stops on confirmed, failed or
+retryable results, and cleanup ignores in-flight responses after unmount. All
+reads still debit the existing provider/global budgets. Storage failure prevents
+wallet dispatch. No manual transaction-history input or minute-long Check launch
+button cooldown remains.
 
 ## Runtime and delivery
 
@@ -135,7 +155,7 @@ binding are stored under the normalized wallet's hash, so switching wallets cann
 attach or block on another wallet's artwork. Existing unscoped recovery is copied
 only into its owner's storage, with read-back verification before any request;
 the original is retained for older tabs. Returning to that wallet resumes its
-saved publication. Transaction submission recovery remains unchanged.
+saved publication. Transaction recovery follows the automatic nonce-bound flow above.
 Polling continues through delayed
 verification for up to 27 checks: five three-second intervals, then five-second
 intervals (120 seconds of waiting). A timeout retains recovery without imposing

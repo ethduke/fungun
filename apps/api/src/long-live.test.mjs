@@ -42,7 +42,7 @@ async function fixture(t) {
         case 'paused': return changes.paused ?? false;
         case 'getModuleState': return ['tokenFactory','governanceFactory','poolInitializer','liquidityMigrator'].findIndex((r) => p[r].address === e.args[0]) + 1;
         case 'decimals': return e.address === p.quotes[0].token.address ? 18 : 8;
-        case 'latestRoundData': return [1n, 23000000000n, BigInt(now / 1000 - 20), BigInt(now / 1000 - (changes.age ?? 10)), 1n];
+        case 'latestRoundData': return [1n, changes.answer ?? 23000000000n, BigInt(now / 1000 - 20), BigInt(now / 1000 - (changes.age ?? 10)), 1n];
         case 'isTickerAvailable': return !changes.reserved;
         case 'implementation': return changes.implementation ?? g.tokenImplementation.address;
         case 'aggregator': return g.oracleAggregator.address;
@@ -70,9 +70,9 @@ async function fixture(t) {
           return encodeFunctionResult({ abi: LONG_CREATE_ABI, functionName: 'create', result: [changes.badSimulation ? addr(55) : asset, addr(200), addr(201), addr(202), addr(203)] });
         }
         case 'eth_estimateGas': return toHex(changes.gas ?? 1000000);
-        case 'eth_gasPrice': return toHex(1000000000);
+        case 'eth_gasPrice': return toHex(changes.price ?? 1000000000);
         case 'eth_getBalance': return toHex(changes.balance ?? 10n ** 18n);
-        case 'eth_getTransactionCount': return '0x1';
+        case 'eth_getTransactionCount': return e.params[1] === 'pending' ? (changes.pendingNonce ?? '0x1') : (changes.latestNonce ?? '0x1');
         case 'eth_getTransactionByHash': return changes.tx ?? null;
         case 'eth_getTransactionReceipt': return changes.receipt ?? null;
         default: throw new Error('unexpected RPC');
@@ -102,16 +102,28 @@ test('preparation binds metadata, verifies dependencies at one block and returns
   assert.ok(!f.requests.some((m) => /send|sign/i.test(m)));
 });
 
-test('one durable reservation survives restart, repeat clicks, edited context and expired estimates', async (t) => {
+test('durable recovery survives restart and requotes only the original unused nonce', async (t) => {
   const f = await fixture(t), plan = await f.service.run('launch-prepare', f.input);
   assert.throws(() => f.service.reserve({ id: plan.id, binding: 'f'.repeat(64) }));
   assert.equal(f.service.reserve(plan).status, 'wallet');
-  assert.throws(() => f.service.reserve(plan), /launch_pending/);
+  assert.equal(f.service.reserve(plan).status, 'wallet');
   f.budget.close();
   const reopened = new Budget(f.path, f.options.now, false); t.after(() => reopened.close());
   const service = new LongLive(f.config, f.upstream, reopened, f.options);
+  f.advance(31000);
+  assert.equal((await service.run('launch-status', { id: plan.id, hash: null })).status, 'retryable');
+  f.changes.price = 2000000000;
+  const retry = await service.run('launch-prepare', f.input);
+  assert.equal(retry.transaction.nonce, plan.transaction.nonce);
+  assert.equal(retry.transaction.data, plan.transaction.data);
+  assert.notEqual(retry.transaction.gasPrice, plan.transaction.gasPrice);
+  assert.equal(service.reserve(retry).status, 'wallet');
+  assert.equal(reopened.db.prepare('SELECT COUNT(*) AS n FROM long_launch_attempts').get().n, 2);
+  assert.equal(service.row(plan.id).state, 'wallet');
+  f.changes.pendingNonce = '0x2';
   await assert.rejects(service.run('launch-prepare', f.input), /launch_pending/);
-  assert.equal((await service.run('launch-status', { id: plan.id, hash: null })).status, 'uncertain');
+  await assert.rejects(service.run('launch-prepare', { ...f.input, draft: {...f.input.draft, name:'Changed'} }), /launch_context_locked/);
+  assert.equal(service.row(plan.id).plan, JSON.stringify(retry));
 });
 
 test('changed metadata, stale or paused prices, changed implementations, occupied addresses and unsafe gas fail closed', async (t) => {
@@ -127,6 +139,11 @@ test('changed metadata, stale or paused prices, changed implementations, occupie
 test('receipt verification rejects substituted transactions and requires canonical confirmations plus matching event and state', async (t) => {
   const f = await fixture(t), plan = await f.service.run('launch-prepare', f.input); f.changes.plan = plan;
   f.service.reserve(plan);
+  f.advance(31000); f.changes.price = 2000000000; f.changes.answer = 24000000000n;
+  const retry = await f.service.run('launch-prepare', f.input);
+  f.service.reserve(retry);
+  assert.notEqual(retry.transaction.data, plan.transaction.data);
+  assert.equal(retry.transaction.nonce, plan.transaction.nonce);
   const txHash = hash(600), blockHash = hash(500);
   f.changes.tx = { ...plan.transaction, input: plan.transaction.data, hash: txHash, blockHash, blockNumber: '0x64', value: '0x1' };
   await assert.rejects(f.service.run('launch-status', { id: plan.id, hash: txHash }), /launch_transaction_changed/);

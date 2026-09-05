@@ -1,3 +1,4 @@
+import { LongRecovery } from "./long-recovery.mjs";
 import { LongRpc } from "./long-rpc.mjs";
 import { createHash, createHmac } from "node:crypto";
 import { decodeEventLog, decodeFunctionResult, isAddress, keccak256, parseAbi, toBytes, toHex, zeroAddress } from "viem";
@@ -79,11 +80,16 @@ export class LongLive {
     this.config = config; this.live = config.longLaunch; this.upstream = upstream; this.budget = budget;
     this.db = budget.db; this.now = now; this.fetcher = fetcher;
     this.rpc = rpc ?? new LongRpc(config, upstream, now);
+    this.recovery = new LongRecovery(this.rpc);
     this.cache = new ReadCache(now, 32); this.active = false;
     // Additive table on the existing durable volume; never prune an attempted launch.
     this.db.exec(`CREATE TABLE IF NOT EXISTS long_launches (
       id TEXT PRIMARY KEY, context TEXT NOT NULL, state TEXT NOT NULL,
       plan TEXT NOT NULL, expires INTEGER NOT NULL, tx_hash TEXT, result TEXT
+    )`);
+    this.db.exec(`CREATE TABLE IF NOT EXISTS long_launch_attempts (
+      id TEXT NOT NULL, envelope TEXT NOT NULL, plan TEXT NOT NULL,
+      PRIMARY KEY(id,envelope)
     )`);
   }
   async run(kind, raw) {
@@ -115,8 +121,10 @@ export class LongLive {
     const key = createHmac("sha256", this.budget.key).update(`${input.wallet}:${input.publication.metadataHash}`).digest("hex");
     const context = JSON.stringify(input), prior = this.row(key);
     if (prior && prior.context !== context) fail("launch_context_locked");
-    if (prior?.state !== undefined && prior.state !== "prepared") fail("launch_pending");
-    if (prior && prior.expires > this.now()) return JSON.parse(prior.plan);
+    const retry = prior?.state === "wallet" && !prior.tx_hash ? JSON.parse(prior.plan) : null;
+    if (prior?.state !== undefined && prior.state !== "prepared" && !retry) fail("launch_pending");
+    if (retry && (await this.recovery.find(key, retry.transaction)).status !== "retryable") fail("launch_pending");
+    if (!retry && prior && prior.expires > this.now()) return JSON.parse(prior.plan);
     this.budget.debit([["launch-prepare", 3, 60000], ["launch-prepare", 30, 86400000]]);
     if (!prior && this.db.prepare("SELECT COUNT(*) AS n FROM long_launches").get().n >= 4096) fail("launch_history_full");
     const publication = await this.metadata(input);
@@ -156,6 +164,8 @@ export class LongLive {
     if (oraclePaused || answer <= 0n || answer > 10n ** 20n || started === 0n || started > updated
       || answered < roundId || updated > BigInt(timestamp) || BigInt(timestamp) - updated > BigInt(g.heartbeatSeconds)) fail("oracle_stale");
     const tick = 8 * Math.round((-108202 - Math.log(Number(answer) / 1e8) / Math.log(1.0001)) / 8);
+    // Requotes retain the original nonce. Journal every offered envelope so a
+    // delayed original submission can still be verified after fees/prices change.
     const intentId = `${key.slice(0,8)}-${key.slice(8,12)}-${key.slice(12,16)}-${key.slice(16,20)}-${key.slice(20,32)}`;
     const plan = buildUnsignedLongLaunch({ chainId: 4663, wallet: input.wallet, draft: input.draft, pairId: q.id,
       metadataUri: ipfsUri(publication.ipfs.metadataCid), startingTick: tick, intentId }, p);
@@ -174,6 +184,7 @@ export class LongLive {
     const simulated = decodeFunctionResult({ abi: LONG_CREATE_ABI, functionName: "create", data: simulation });
     if (!same(simulated[0], plan.predictedAsset) || same(simulated[1], zeroAddress)) fail("launch_simulation_failed");
     const estimate = rpcNumber(gasRaw), gas = (estimate * 120n + 99n) / 100n, price = rpcNumber(priceRaw);
+    if (retry && rpcNumber(nonceRaw) !== rpcNumber(retry.transaction.nonce)) fail("launch_pending");
     if (estimate < 21000n || gas > 3000000n || price <= 0n || price > 10n ** 12n || gas * price > 5n * 10n ** 16n) fail("launch_gas_limit");
     if (rpcNumber(balanceRaw) < gas * price) fail("insufficient_funds");
     const usd = await this.cache.get("eth-usd", 30000, async () => {
@@ -189,15 +200,27 @@ export class LongLive {
       profile: p, startingTick: tick, intentId, predictedAsset: plan.predictedAsset, predictedPool: simulated[1], review: plan.review,
       estimatedGas: estimate.toString(), launchpadFeeWei: "0", maximumGasWei: (gas * price).toString(), usd };
     checkReadDeadline();
-    this.db.prepare(`INSERT INTO long_launches(id,context,state,plan,expires) VALUES (?,?,'prepared',?,?)
-      ON CONFLICT(id) DO UPDATE SET plan=excluded.plan,expires=excluded.expires WHERE state='prepared'`).run(key, context, JSON.stringify(result), result.expiresAt);
+    this.db.exec("BEGIN IMMEDIATE");
+    try {
+      if (retry) this.remember(key, retry);
+      this.remember(key, result);
+      this.db.prepare(`INSERT INTO long_launches(id,context,state,plan,expires) VALUES (?,?,'prepared',?,?)
+        ON CONFLICT(id) DO UPDATE SET plan=excluded.plan,expires=excluded.expires WHERE state IN ('prepared','wallet') AND tx_hash IS NULL`).run(key, context, JSON.stringify(result), result.expiresAt);
+      this.db.exec("COMMIT");
+    } catch (error) { this.db.exec("ROLLBACK"); throw error; }
     return result;
+  }
+  remember(key, plan) {
+    const envelope = digest(JSON.stringify(plan.transaction));
+    if (this.db.prepare("SELECT 1 FROM long_launch_attempts WHERE id=? AND envelope=?").get(key, envelope)) return;
+    if (this.db.prepare("SELECT COUNT(*) AS n FROM long_launch_attempts WHERE id=?").get(key).n >= 16) fail("launch_attempt_limit");
+    this.db.prepare("INSERT INTO long_launch_attempts(id,envelope,plan) VALUES (?,?,?)").run(key, envelope, JSON.stringify(plan));
   }
   reserve(input) {
     const row = this.row(input.id);
     if (!row || JSON.parse(row.plan).binding !== input.binding) fail("invalid_request", 400);
     if (row.expires <= this.now()) fail("quote_expired");
-    const changed = this.db.prepare("UPDATE long_launches SET state='wallet' WHERE id=? AND state='prepared' AND expires>?").run(input.id, this.now());
+    const changed = this.db.prepare("UPDATE long_launches SET state='wallet' WHERE id=? AND state IN ('prepared','wallet') AND tx_hash IS NULL AND expires>?").run(input.id, this.now());
     if (changed.changes !== 1) fail("launch_pending");
     return { id: input.id, status: "wallet" };
   }
@@ -206,8 +229,14 @@ export class LongLive {
     if (!row) fail("launch_unknown");
     if (row.tx_hash && input.hash && !same(row.tx_hash, input.hash)) fail("launch_transaction_changed");
     if (row.result) return JSON.parse(row.result);
-    const hash = row.tx_hash ?? input.hash;
-    if (!hash) return { id: input.id, status: row.state === "prepared" ? "prepared" : "uncertain" };
+    let hash = row.tx_hash ?? input.hash;
+    if (!hash) {
+      if (row.state === "prepared") return { id: input.id, status: "retryable" };
+      const found = await this.cache.get(`recover:${input.id}`, 5000,
+        () => this.recovery.find(input.id, JSON.parse(row.plan).transaction));
+      if (!found.hash) return { id: input.id, status: found.status };
+      hash = found.hash;
+    }
     if (row.state === "prepared") fail("launch_unknown");
     return this.cache.get(`receipt:${input.id}:${hash}`, 10000, async () => {
       const [chain, tx, receipt] = await this.rpc.batch(4663, [
@@ -216,7 +245,15 @@ export class LongLive {
       ]);
       if (rpcNumber(chain) !== 4663n) fail("wrong_chain");
       if (!tx) return { id: input.id, status: "uncertain" };
-      const plan = JSON.parse(row.plan), expected = plan.transaction;
+      const plans = [JSON.parse(row.plan), ...this.db.prepare("SELECT plan FROM long_launch_attempts WHERE id=?").all(input.id).map((r) => JSON.parse(r.plan))];
+      const plan = plans.find((candidate) => {
+        const expected = candidate.transaction;
+        return same(tx.from, expected.from) && same(tx.to, expected.to) && same(tx.input, expected.data)
+          && rpcNumber(tx.value) === 0n && rpcNumber(tx.nonce) === rpcNumber(expected.nonce)
+          && rpcNumber(tx.gas) === rpcNumber(expected.gas) && rpcNumber(tx.gasPrice) <= rpcNumber(expected.gasPrice);
+      });
+      if (!plan) fail("launch_transaction_changed");
+      const expected = plan.transaction;
       if (!same(tx.hash, hash) || !same(tx.from, expected.from) || !same(tx.to, expected.to)
         || !same(tx.input, expected.data) || rpcNumber(tx.value) !== 0n || rpcNumber(tx.nonce) !== rpcNumber(expected.nonce)
         || rpcNumber(tx.gas) !== rpcNumber(expected.gas) || rpcNumber(tx.gasPrice) > rpcNumber(expected.gasPrice)

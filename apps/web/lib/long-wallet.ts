@@ -12,12 +12,15 @@ export type LongPlan = {
   estimatedGas: string; maximumGasWei: string; launchpadFeeWei: '0';
   usd: { microUsdPerEth: string; sourceLabel: string; quotedAt: number };
 };
-export class LaunchError extends Error {}
+export class LaunchError extends Error {
+  retryAfter: number;
+  constructor(message: string, retryAfter = 0) { super(message); this.retryAfter = retryAfter; }
+}
 export function launchMessage(error: unknown) {
   let cause = error;
   for (let depth = 0; depth < 8 && cause && typeof cause === 'object'; depth++) {
     const entry = cause as { code?: number; cause?: unknown };
-    if (entry.code === 4001) return 'Wallet approval was cancelled. This request did not submit a transaction. Keep the attempt locked until wallet history has been checked.';
+    if (entry.code === 4001) return 'Wallet request cancelled. You can try Launch coin again.';
     cause = entry.cause;
   }
   const code = error instanceof Error ? error.message : '';
@@ -30,8 +33,8 @@ export function launchMessage(error: unknown) {
     ticker_reserved: 'This ticker is reserved. Choose another ticker.',
     insufficient_funds: 'Your wallet needs more ETH on Robinhood Chain for gas.',
     launch_gas_limit: 'Gas is above the launch limit. Wait for fees to fall and refresh the estimate.',
-    launch_pending: 'This launch already reached wallet approval. Check its status before doing anything else.',
-    launch_context_locked: 'This artwork already has a launch prepared with different settings. Restore those settings to continue.',
+    launch_pending: 'Your launch is being checked automatically.',
+    launch_context_locked: 'Restore the original coin details to resume this launch.',
     quote_expired: 'The gas estimate expired. Refresh it before opening your wallet.',
     wrong_account: 'The connected account changed. Restore the account used for this launch.',
     wrong_chain: 'Switch your wallet to Robinhood Chain before continuing.',
@@ -39,12 +42,12 @@ export function launchMessage(error: unknown) {
     rate_limited: 'The read limit was reached. Wait a minute before checking again.',
     busy: 'Another launch check is running. Try again shortly.',
     reverted: 'The launch simulation failed. No transaction was sent. Refresh the ticker and estimate.',
-    launch_transaction_changed: 'The wallet transaction differs from the reviewed launch. Keep this launch locked and review it in your wallet.',
-    launch_receipt_unverified: 'A transaction was found, but its launch result could not be verified. Do not submit again.',
+    launch_transaction_changed: 'The wallet changed this transaction. No matching launch was verified.',
+    launch_receipt_unverified: 'Verifying your launch on the network…',
     recovery_unavailable: 'Browser recovery storage is unavailable. Enable it before launching.',
-    launch_unknown: 'The server could not find this launch. Do not submit again; check your wallet history.',
+    launch_unknown: 'Reconnecting to your launch…',
   };
-  return messages[code] ?? 'The launch could not be verified. If wallet approval opened, check its history and do not submit again.';
+  return messages[code] ?? 'Could not complete the launch request. Reconnecting…';
 }
 const hex = (s: unknown) => typeof s === 'string' && /^0x(?:0|[1-9a-f][a-f0-9]*)$/i.test(s);
 const same = (a: unknown, b: unknown) => typeof a === 'string' && typeof b === 'string' && a.toLowerCase() === b.toLowerCase();
@@ -100,7 +103,8 @@ export async function sendLongWallet(provider: EIP1193Provider, plan: LongPlan, 
   await check();
   await reserve();
   await check();
-  // The extension owns signing and submission. Never retry this request.
+  // The extension owns signing and submission. One request per user action.
+  // Recovery can reopen only the identical transaction with its original nonce.
   const hash = await provider.request({ method: 'eth_sendTransaction', params: [tx as never] });
   if (typeof hash !== 'string' || !/^0x[a-f0-9]{64}$/i.test(hash)) throw new LaunchError('launch_unknown');
   return hash;
@@ -119,7 +123,11 @@ export async function launchRequest(operation: 'launch-prepare' | 'launch-reserv
   const bytes = new Uint8Array(size); let offset = 0;
   for (const c of chunks) { bytes.set(c, offset); offset += c.length; }
   const result = JSON.parse(new TextDecoder().decode(bytes));
-  if (!response.ok) throw new LaunchError(typeof result?.error === 'string' ? result.error : 'unavailable');
+  if (!response.ok) {
+    const retry = Number(response.headers.get('retry-after'));
+    throw new LaunchError(typeof result?.error === 'string' ? result.error : 'unavailable',
+      Number.isFinite(retry) && retry > 0 ? Math.min(retry, 86400) : 0);
+  }
   return result;
 }
 
