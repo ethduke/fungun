@@ -7,6 +7,7 @@ const operations = new Set([
   'launch-prepare',
   'launch-reserve',
   'launch-status',
+  'launch-estimate',
 ]);
 
 export async function POST(

@@ -265,7 +265,7 @@ await test('launch proxy fixes all routes, strips credentials and enforces the 4
     globalThis.fetch = async (url, options) => {
       const operation = (url as URL).pathname.slice('/v1/'.length);
       calls.push(operation);
-      assert.ok(['launch-prepare', 'launch-reserve', 'launch-status'].includes(operation));
+      assert.ok(['launch-prepare', 'launch-reserve', 'launch-status', 'launch-estimate'].includes(operation));
       const headers = new Headers(options?.headers);
       assert.equal(headers.get('x-fungun-intent'), operation);
       assert.equal(headers.get('cookie'), null);
@@ -275,7 +275,7 @@ await test('launch proxy fixes all routes, strips credentials and enforces the 4
       assert.ok(options.body.byteLength > 2048);
       return Response.json({ status: 'ok' });
     };
-    for (const operation of ['launch-prepare', 'launch-reserve', 'launch-status']) {
+    for (const operation of ['launch-prepare', 'launch-reserve', 'launch-status', 'launch-estimate']) {
       const body = JSON.stringify({ operation, padding: 'a'.repeat(2200) });
       const response = await POST(
         new Request(`${origin}/api/${operation}`, {
@@ -307,7 +307,7 @@ await test('launch proxy fixes all routes, strips credentials and enforces the 4
       { params: Promise.resolve({ operation: 'launch-prepare' }) },
     );
     assert.equal(oversized.status, 413);
-    assert.deepEqual(calls, ['launch-prepare', 'launch-reserve', 'launch-status']);
+    assert.deepEqual(calls, ['launch-prepare', 'launch-reserve', 'launch-status', 'launch-estimate']);
   } finally {
     globalThis.fetch = originalFetch;
     if (previousOrigin === undefined) delete process.env.APP_ORIGIN;

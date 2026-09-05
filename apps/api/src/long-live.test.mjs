@@ -239,3 +239,37 @@ test('a verified new upload ticket for the same immutable artwork resumes the or
   f.service.metadata = async () => ({ ...published, ipfs: { ...published.ipfs, metadataCid: published.ipfs.imageCid } });
   await assert.rejects(f.service.run('launch-prepare', input), /launch_assets_unverified/);
 });
+
+
+test('background estimate uses recent comparable simulations and cached live gas without reserving or uploading', async t => {
+  const f = await fixture(t);
+  const plan = await f.service.run('launch-prepare', f.input);
+  const before = f.service.row(plan.id), reads = f.requests.length;
+  f.changes.price = 2000000000;
+  const input = { chainId: 4663, pairId: 'long-NVDA' };
+  const [estimate, shared] = await Promise.all([f.service.run('launch-estimate', input), f.service.run('launch-estimate', input)]);
+  assert.deepEqual(estimate, shared);
+  assert.equal(estimate.gasUnits, plan.estimatedGas);
+  assert.equal(estimate.gasPriceWei, '2000000000');
+  assert.equal(estimate.launchpadFeeWei, '0');
+  assert.equal(estimate.basis, 'recent-simulations');
+  assert.equal(estimate.expiresAt - estimate.quotedAt, 300000);
+  assert.deepEqual(f.requests.slice(reads), ['eth_chainId', 'eth_gasPrice']);
+  assert.deepEqual(f.service.row(plan.id), before);
+  assert.deepEqual(await f.service.run('launch-estimate', input), estimate);
+  assert.equal(f.requests.length, reads + 2);
+  f.advance(301000); f.changes.price = 1000000000;
+  assert.equal((await f.service.run('launch-estimate', input)).gasPriceWei, '1000000000');
+  assert.equal(f.requests.length, reads + 4);
+  for (const change of [{wallet:f.input.wallet}, {pairId:'long-TSLA'}, {chainId:8453}, {transaction:{}}])
+    await assert.rejects(f.service.run('launch-estimate', {...input,...change}), /invalid_request/);
+});
+
+test('no simulation history uses a disclosed gas limit, and invalid gas prices never become estimates', async t => {
+  const f = await fixture(t), input = { chainId:4663, pairId:'long-NVDA' };
+  const estimate = await f.service.run('launch-estimate', input);
+  assert.equal(estimate.basis, 'gas-limit'); assert.equal(estimate.gasUnits, '3000000');
+  assert.equal(f.budget.db.prepare('SELECT COUNT(*) AS n FROM long_launches').get().n, 0);
+  f.advance(301000); f.changes.price = 0;
+  await assert.rejects(f.service.run('launch-estimate', input), /launch_gas_limit/);
+});

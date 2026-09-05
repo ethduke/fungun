@@ -3,6 +3,8 @@ import test from 'node:test';
 import { DEFAULT_DESTINATIONS } from './launch-model.ts';
 import {
   calculateLaunchCosts,
+  parseApproximateLaunchCost,
+  approximateLaunchQuote,
   costRefreshDelay,
   estimateNetworkFee,
   formatEth,
@@ -339,4 +341,22 @@ await test('an incomplete network estimate preserves fully checked sibling launc
   assert.equal(result.pads.long?.totalWei, 200n);
   assert.equal(result.pads.o1, undefined);
   assert.equal(result.total, null);
+});
+
+
+await test('background estimates price gas without a draft and remain separate from exact transaction quotes', () => {
+  const raw = { chainId: 4663, pairId: 'long-NVDA', gasUnits: '1000000', gasPriceWei: '1000000000',
+    launchpadFeeWei: '0', basis: 'recent-simulations', quotedAt: 1000000, expiresAt: 1300000, serverTime: 1005000 };
+  const estimate = parseApproximateLaunchCost(raw, 100);
+  const quote = approximateLaunchQuote(estimate, 'new copied draft', 101);
+  const selection = { contextKey: 'new copied draft', chainId: 4663 as const, pads: ['long'] as const };
+  const costs = calculateLaunchCosts(quote, { ...selection, pads: ['long'] }, 101);
+  assert.equal(costs.total?.launchpadWei, 0n);
+  assert.equal(costs.total?.networkWei, 1000000000000000n);
+  assert.equal(costs.total?.transactions, 1);
+  assert.equal(approximateLaunchQuote(estimate, 'new copied draft', 295100), null);
+  assert.equal(calculateLaunchCosts(quote, { ...selection, pads: ['long', 'o1'] }, 101).total, null);
+  for (const change of [{chainId:8453}, {pairId:'long-TSLA'}, {launchpadFeeWei:'1'}, {gasPriceWei:'0'},
+    {gasUnits:'4000000'}, {serverTime:1300000}, {quotedAt:1100000}, {basis:'exact'}])
+    assert.throws(() => parseApproximateLaunchCost({...raw,...change}, 100));
 });

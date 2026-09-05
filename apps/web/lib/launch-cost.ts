@@ -32,6 +32,32 @@ export type LaunchCostQuote = {
   pads: { id: LaunchpadId; steps: CostStep[] }[];
 };
 
+export type ApproximateLaunchCost = {
+  chainId: 4663; pairId: 'long-NVDA'; gasUnits: bigint; gasPriceWei: bigint;
+  basis: 'recent-simulations' | 'gas-limit'; expiresAt: number;
+};
+export function parseApproximateLaunchCost(raw: unknown, started: number): ApproximateLaunchCost {
+  const value = raw as Record<string, unknown>;
+  if (!value || value.chainId !== 4663 || value.pairId !== 'long-NVDA' || value.launchpadFeeWei !== '0'
+    || !['recent-simulations', 'gas-limit'].includes(String(value.basis))
+    || typeof value.gasUnits !== 'string' || !/^\d{1,7}$/.test(value.gasUnits)
+    || typeof value.gasPriceWei !== 'string' || !/^\d{1,13}$/.test(value.gasPriceWei)
+    || ![value.quotedAt, value.expiresAt, value.serverTime].every(Number.isSafeInteger)) throw new Error('Invalid gas estimate');
+  const gasUnits = BigInt(value.gasUnits), gasPriceWei = BigInt(value.gasPriceWei);
+  const quoted = Number(value.quotedAt), expires = Number(value.expiresAt), server = Number(value.serverTime);
+  if (gasUnits < 21000n || gasUnits > 3000000n || gasPriceWei <= 0n || gasPriceWei > 10n ** 12n
+    || expires - quoted !== 300000 || server < quoted || server >= expires || !Number.isFinite(started) || started < 0)
+    throw new Error('Invalid gas estimate');
+  return { chainId: 4663, pairId: 'long-NVDA', gasUnits, gasPriceWei,
+    basis: value.basis as ApproximateLaunchCost['basis'], expiresAt: started + expires - server };
+}
+export function approximateLaunchQuote(estimate: ApproximateLaunchCost | null, contextKey: string, now: number): LaunchCostQuote | null {
+  if (!estimate || estimate.expiresAt <= now) return null;
+  return { contextKey, chainId: 4663, quotedAt: now, expiresAt: now + 30000, nativeOnly: true,
+    pads: [{ id: 'long', steps: [{ kind: 'launch', valueWei: 0n, launchpadFeeWei: 0n,
+      network: { chainId: 4663, gasUnits: estimate.gasUnits, gasPriceWei: estimate.gasPriceWei } }] }] };
+}
+
 export type UsdRate = {
   microUsdPerEth: bigint;
   sourceLabel: string;

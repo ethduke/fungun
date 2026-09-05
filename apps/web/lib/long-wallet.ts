@@ -118,7 +118,7 @@ export async function sendLongWallet(provider: EIP1193Provider, plan: LongPlan, 
   return hash;
 }
 
-export async function launchRequest(operation: 'launch-prepare' | 'launch-reserve' | 'launch-status', input: unknown) {
+export async function launchRequest(operation: 'launch-prepare' | 'launch-reserve' | 'launch-status' | 'launch-estimate', input: unknown) {
   const response = await fetch(`/api/${operation}`, { method: 'POST', credentials: 'omit', redirect: 'error',
     signal: AbortSignal.timeout(24000), headers: { 'content-type': 'application/json', 'x-fungun-intent': operation }, body: JSON.stringify(input) });
   const reader = response.body?.getReader();

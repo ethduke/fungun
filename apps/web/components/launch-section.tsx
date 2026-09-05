@@ -32,6 +32,9 @@ import {
 } from '@/lib/read-service';
 import {
   calculateLaunchCosts,
+  approximateLaunchQuote,
+  parseApproximateLaunchCost,
+  type ApproximateLaunchCost,
   costRefreshDelay,
   costNotice,
   formatEth,
@@ -40,6 +43,7 @@ import {
   type LaunchCostQuote,
   type UsdRate,
 } from '@/lib/launch-cost';
+import { launchRequest, LaunchError } from '@/lib/long-wallet';
 import './launch-cost.css';
 import './launch-section.css';
 
@@ -78,8 +82,62 @@ export function LaunchSection({
   usdRate?: UsdRate | null;
   children?: ReactNode;
 }) {
+  const supportsEstimate =
+    chainId === 4663 &&
+    destinations.some((pad) => pad.id === 'long' && pad.pairId === 'long-NVDA');
+  const [approximate, setApproximate] = useState<ApproximateLaunchCost | null>(
+    null,
+  );
+  const [estimateFailed, setEstimateFailed] = useState(false);
   const [costTick, setCostTick] = useState(0);
+  useEffect(() => {
+    if (!supportsEstimate) return;
+    let stopped = false;
+    let timer: ReturnType<typeof setTimeout>;
+    async function refresh() {
+      if (document.visibilityState === 'hidden') {
+        timer = setTimeout(refresh, 30000);
+        return;
+      }
+      let delay = 30000;
+      try {
+        const started = performance.now();
+        const raw = await launchRequest('launch-estimate', {
+          chainId: 4663,
+          pairId: 'long-NVDA',
+        });
+        const estimate = parseApproximateLaunchCost(raw, started);
+        if (estimate.expiresAt <= performance.now())
+          throw new Error('Estimate expired');
+        if (stopped) return;
+        setApproximate(estimate);
+        setEstimateFailed(false);
+        setCostTick(performance.now());
+        delay = Math.max(1000, estimate.expiresAt - performance.now() + 50);
+      } catch (error) {
+        if (stopped) return;
+        setEstimateFailed(true);
+        setCostTick(performance.now());
+        if (error instanceof LaunchError)
+          delay = Math.max(delay, error.retryAfter * 1000);
+      }
+      if (!stopped) timer = setTimeout(refresh, delay);
+    }
+    void refresh();
+    return () => {
+      stopped = true;
+      clearTimeout(timer);
+    };
+  }, [supportsEstimate]);
   const costNow = Math.max(now, costTick);
+  useEffect(() => {
+    if (!approximate) return;
+    const timer = setTimeout(
+      () => setCostTick(performance.now()),
+      Math.max(0, approximate.expiresAt - performance.now() + 1),
+    );
+    return () => clearTimeout(timer);
+  }, [approximate]);
   useEffect(() => {
     const delay = costRefreshDelay(
       costQuote,
@@ -94,7 +152,7 @@ export function LaunchSection({
     );
     return () => clearTimeout(timer);
   }, [costQuote, usdRate, costNow]);
-  const costs = calculateLaunchCosts(
+  const exactCosts = calculateLaunchCosts(
     imagePending ? null : costQuote,
     {
       contextKey: costContextKey,
@@ -103,6 +161,24 @@ export function LaunchSection({
     },
     costNow,
   );
+  const fallbackCosts = calculateLaunchCosts(
+    supportsEstimate
+      ? approximateLaunchQuote(approximate, costContextKey, costNow)
+      : null,
+    {
+      contextKey: costContextKey,
+      chainId,
+      pads: destinations.map((pad) => pad.id),
+    },
+    costNow,
+  );
+  const useApproximate = !exactCosts.total && !!fallbackCosts.pads.long;
+  const costs = useApproximate ? fallbackCosts : exactCosts;
+  const prefix = useApproximate
+    ? approximate?.basis === 'gas-limit'
+      ? 'Up to '
+      : '≈ '
+    : '';
   const gasWarning = highGasNotice(
     Object.values(costs.pads).reduce(
       (sum, pad) => sum + (pad?.networkWei ?? 0n),
@@ -120,11 +196,19 @@ export function LaunchSection({
   const hasUsd = usdTotal !== 'USD unavailable';
   const costMessage = !destinations.length
     ? 'Select a launchpad to see its fees.'
-    : costs.reason === 'not_ready'
-      ? 'Fees appear before wallet approval.'
-      : costs.reason
-        ? costNotice(costs.reason)
-        : '';
+    : useApproximate && !costs.total
+      ? 'Long gas is shown below. Estimates for other launchpads are unavailable.'
+      : useApproximate
+        ? approximate?.basis === 'gas-limit'
+          ? 'Gas limit at the current gas price. Checked again before wallet approval.'
+          : 'Approximate gas. Checked again before wallet approval.'
+        : !costs.total && supportsEstimate
+          ? estimateFailed
+            ? 'Gas estimate temporarily unavailable. Launch will check again.'
+            : 'Calculating approximate gas…'
+          : costs.reason
+            ? costNotice(costs.reason)
+            : '';
 
   return (
     <section className="launch-section" aria-labelledby="launch-heading">
@@ -260,8 +344,14 @@ export function LaunchSection({
               data-pending={!costs.total}
               aria-live="polite"
             >
-              {costs.total ? formatEth(costs.total.totalWei) : 'Estimate on launch'}
-              {hasUsd && <span>≈ {usdTotal}</span>}
+              {costs.total
+                ? `${prefix}${formatEth(costs.total.totalWei)}`
+                : supportsEstimate &&
+                    !estimateFailed &&
+                    !fallbackCosts.pads.long
+                  ? 'Estimating…'
+                  : 'Unavailable'}
+              {hasUsd && <span>{usdTotal}</span>}
             </output>
           </div>
           {costMessage && (
@@ -286,13 +376,21 @@ export function LaunchSection({
                           <dd>
                             {amount
                               ? formatEth(amount.launchpadWei)
-                              : '—'}
+                              : pad.id === 'long' && supportsEstimate
+                                ? '0 ETH'
+                                : 'Unavailable'}
                           </dd>
                         </div>
                         <div>
                           <dt>Estimated gas</dt>
                           <dd>
-                            {amount ? formatEth(amount.networkWei) : '—'}
+                            {amount
+                              ? `${prefix}${formatEth(amount.networkWei)}`
+                              : supportsEstimate &&
+                                  pad.id === 'long' &&
+                                  !estimateFailed
+                                ? 'Estimating…'
+                                : 'Unavailable'}
                           </dd>
                         </div>
                         {!!amount?.otherValueWei && (

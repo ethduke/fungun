@@ -110,7 +110,7 @@ export function createHandler(config, budget, adapters, fees, trackedPrices, lau
         request.headers["sec-fetch-site"] === "cross-site"
       )
         throw new ServiceError("origin_denied", 403);
-      const kind = ["catalog", "ticker", "fees", "claim-prepare", "tracked-prices", "launch-prepare", "launch-reserve", "launch-status"].find(
+      const kind = ["catalog", "ticker", "fees", "claim-prepare", "tracked-prices", "launch-prepare", "launch-reserve", "launch-status", "launch-estimate"].find(
         (operation) => request.url === `/v1/${operation}`,
       );
       if (!kind || request.method !== "POST" || request.headers["x-fungun-intent"] !== kind)

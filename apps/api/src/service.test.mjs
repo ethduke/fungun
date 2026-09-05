@@ -176,6 +176,7 @@ test("launch HTTP endpoints enforce exact inputs and their bounded larger body",
   const id = "d".repeat(64);
   assert.equal((await post("launch-reserve", { id, binding: "e".repeat(64) })).status, 200);
   assert.equal((await post("launch-status", { id, hash: null })).status, 200);
+  assert.equal((await post("launch-estimate", { chainId: 4663, pairId: "long-NVDA" })).status, 200);
   assert.equal(
     (await post("launch-status", { id, hash: null, transaction: "0x" })).status,
     400,
@@ -186,6 +187,6 @@ test("launch HTTP endpoints enforce exact inputs and their bounded larger body",
     (await post("launch-status", { id, hash: null }, { "x-fungun-intent": "catalog" })).status,
     404,
   );
-  assert.deepEqual(calls.map(([kind]) => kind), ["launch-prepare", "launch-reserve", "launch-status"]);
+  assert.deepEqual(calls.map(([kind]) => kind), ["launch-prepare", "launch-reserve", "launch-status", "launch-estimate"]);
   assert.equal(calls[0][1].draft.description.length, 2000);
 });

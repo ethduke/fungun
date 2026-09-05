@@ -39,6 +39,10 @@ const beaconSlot = toHex(BigInt(keccak256(toBytes("eip1967.proxy.beacon"))) - 1n
 const call = (address, functionName, args = []) => ({ address, abi: LONG_STATE_ABI, functionName, args });
 
 export function validateLongInput(kind, value) {
+  if (kind === "launch-estimate") {
+    if (!exact(value, ["chainId", "pairId"]) || value.chainId !== 4663 || value.pairId !== "long-NVDA") fail("invalid_request", 400);
+    return value;
+  }
   if (kind === "launch-prepare") {
     if (!exact(value, ["chainId", "wallet", "draft", "pairId", "publication"]) || value.chainId !== 4663
       || typeof value.wallet !== "string" || !isAddress(value.wallet) || same(value.wallet, zeroAddress)
@@ -96,10 +100,37 @@ export class LongLive {
     const input = validateLongInput(kind, raw);
     if (!this.live || !this.config.readsEnabled) fail("long_launch_disabled", 503);
     if (kind === "launch-reserve") return this.reserve(input);
+    if (kind === "launch-estimate") return withinReadDeadline(() => this.estimate(input));
     if (this.active) throw new ServiceError("busy", 429, 5);
     this.active = true;
     try { return await withinReadDeadline(() => kind === "launch-prepare" ? this.prepare(input) : this.status(input)); }
     finally { this.active = false; }
+  }
+  async estimate(input) {
+    if (!this.live.profile.quotes.some(q => q.id === input.pairId)) fail("unsupported_pair", 400);
+    // Shared across visitors, independent of artwork, wallet, reservations and quote budgets.
+    return this.cache.get(`approximate:${input.pairId}`, 300000, async () => {
+      const samples = this.db.prepare("SELECT plan,context FROM long_launches WHERE expires>? ORDER BY expires DESC LIMIT 20")
+        .all(this.now() - 7 * 86400000).flatMap(row => {
+          const plan = JSON.parse(row.plan), context = JSON.parse(row.context);
+          if (context.pairId !== input.pairId || JSON.stringify(plan.profile) !== JSON.stringify(this.live.profile)
+            || !/^\d+$/.test(plan.estimatedGas)) return [];
+          const gas = Number(plan.estimatedGas);
+          return gas >= 21000 && gas <= 2500000 ? [gas] : [];
+        }).sort((a, b) => a - b);
+      const [chain, rawPrice] = await this.rpc.batch(4663, [
+        { method: "eth_chainId", params: [] }, { method: "eth_gasPrice", params: [] },
+      ]);
+      if (rpcNumber(chain) !== 4663n) fail("wrong_chain");
+      const price = rpcNumber(rawPrice);
+      if (price <= 0n || price > 10n ** 12n) fail("launch_gas_limit");
+      // With no comparable simulation, disclose the configured gas-unit ceiling.
+      const gasUnits = samples.length ? samples[Math.floor(samples.length / 2)] : 3000000;
+      const quotedAt = this.now();
+      return { chainId: 4663, pairId: input.pairId, gasUnits: String(gasUnits), gasPriceWei: String(price),
+        launchpadFeeWei: "0", basis: samples.length ? "recent-simulations" : "gas-limit",
+        quotedAt, expiresAt: quotedAt + 300000 };
+    });
   }
   row(key) { return this.db.prepare("SELECT * FROM long_launches WHERE id=?").get(key); }
   async metadata(input) {
