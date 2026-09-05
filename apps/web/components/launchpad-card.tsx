@@ -56,7 +56,7 @@ export function LaunchpadCard({
   const selectedPair = pairs.find((pair) => pair.id === pad.pairId);
   const feeInfo = launchpadFeeInfo(pad);
   return (
-    <div className="launchpad-card">
+    <div className="launchpad-card" data-selected={pad.selected}>
       <label className="launchpad-top">
         <Checkbox
           checked={pad.selected}
@@ -132,8 +132,6 @@ export function LaunchpadCard({
         <div className="pad-fee-share">
           <span>
             {feeInfo.label} <strong>{feeInfo.creatorPercent}%</strong>
-            {' · '}
-            {feeInfo.remainder}
           </span>
           <Popover>
             <PopoverTrigger

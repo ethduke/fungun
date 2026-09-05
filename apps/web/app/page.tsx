@@ -227,7 +227,7 @@ export default function Home() {
           <fieldset disabled={!hydrated} style={{ border: 0, padding: 0, margin: 0, minWidth: 0 }}>
           <div className="composer-grid">
             <section
-              className="composer-panel"
+              className="composer-panel coin-editor"
               aria-labelledby="coin-details-heading"
             >
               <div className="section-heading">
@@ -481,98 +481,100 @@ export default function Home() {
                 </CollapsibleContent>
               </Collapsible>
             </section>
-            <section
-              className="composer-panel destinations"
-              aria-labelledby="launchpads-heading"
-            >
-              <div className="section-heading">
-                <span className="step-number">02</span>
-                <h2 id="launchpads-heading">Choose your launchpads</h2>
-              </div>
-              <RadioGroup
-                className="chain-filter"
-                aria-label="Launch chain"
-                value={String(chainId)}
-                onValueChange={(value) => {
-                  if (isWebviewChain(Number(value)))
-                    updateChain(Number(value) as ChainId);
-                }}
+            <div className="launch-column">
+              <section
+                className="composer-panel destinations"
+                aria-labelledby="launchpads-heading"
               >
-                <label className="chain-choice" htmlFor="chain-robinhood">
-                  <RadioGroupItem id="chain-robinhood" value="4663" />
-                  Robinhood
-                </label>
-                <label className="chain-choice" htmlFor="chain-base">
-                  <RadioGroupItem id="chain-base" value="8453" disabled />
-                  Base (paused)
-                </label>
-              </RadioGroup>
-              {destinations
-                .filter((pad) => supportsChain(pad.id, chainId))
-                .map((pad) => (
-                  <LaunchpadCard
-                    key={pad.id}
-                    destination={pad}
-                    onChange={updateDestination}
-                    catalog={pad.id === 'longbow' ? undefined : reads.catalog?.pads[pad.id]}
-                    loading={reads.catalogLoading}
-                    onPairingOpen={reads.ensureCatalog}
-                  />
-                ))}
-              {errors.destinations && (
-                <p role="alert" className="field-error">
-                  {errors.destinations}
-                </p>
-              )}
-              {reads.catalogError && (
-                <p role="alert" className="notice">
-                  {reads.catalogError}
-                </p>
-              )}
-            </section>
+                <div className="section-heading">
+                  <span className="step-number">02</span>
+                  <h2 id="launchpads-heading">Choose your launchpads</h2>
+                </div>
+                <RadioGroup
+                  className="chain-filter"
+                  aria-label="Launch chain"
+                  value={String(chainId)}
+                  onValueChange={(value) => {
+                    if (isWebviewChain(Number(value)))
+                      updateChain(Number(value) as ChainId);
+                  }}
+                >
+                  <label className="chain-choice" htmlFor="chain-robinhood">
+                    <RadioGroupItem id="chain-robinhood" value="4663" />
+                    Robinhood
+                  </label>
+                  <label className="chain-choice" htmlFor="chain-base">
+                    <RadioGroupItem id="chain-base" value="8453" disabled />
+                    Base (paused)
+                  </label>
+                </RadioGroup>
+                {destinations
+                  .filter((pad) => supportsChain(pad.id, chainId))
+                  .map((pad) => (
+                    <LaunchpadCard
+                      key={pad.id}
+                      destination={pad}
+                      onChange={updateDestination}
+                      catalog={pad.id === 'longbow' ? undefined : reads.catalog?.pads[pad.id]}
+                      loading={reads.catalogLoading}
+                      onPairingOpen={reads.ensureCatalog}
+                    />
+                  ))}
+                {errors.destinations && (
+                  <p role="alert" className="field-error">
+                    {errors.destinations}
+                  </p>
+                )}
+                {reads.catalogError && (
+                  <p role="alert" className="notice">
+                    {reads.catalogError}
+                  </p>
+                )}
+              </section>
+              <LaunchSection
+                chainId={chainId}
+                costQuote={longCosts?.quote}
+                usdRate={longCosts?.usd}
+                costContextKey={launchCostKey({
+                  name,
+                  ticker,
+                  description,
+                  imageRevision: image?.url ?? '',
+                  account: account.address,
+                  walletChainId: account.chainId,
+                  destinations,
+                })}
+                name={name}
+                ticker={ticker}
+                image={image}
+                imagePending={imagePending}
+                errors={errors}
+                destinations={active}
+                onChange={updateDestination}
+                catalog={reads.catalog}
+                tickerCheck={reads.check}
+                checking={reads.checking}
+                now={reads.now}
+              >
+                <LongLaunch
+                  enabled={chainId === 4663 && active.some((pad) => pad.id === 'long')}
+                  ready={active.length === 1 && active[0]?.id === 'long' && !imagePending && !Object.keys(errors).length}
+                  pairId={active.find((pad) => pad.id === 'long')?.pairId}
+                  name={name} ticker={ticker} description={description} image={image}
+                  contextKey={launchCostKey({
+                  name,
+                  ticker,
+                  description,
+                  imageRevision: image?.url ?? '',
+                  account: account.address,
+                  walletChainId: account.chainId,
+                  destinations,
+                })}
+                  onCosts={setLongCosts}
+                />
+              </LaunchSection>
+            </div>
           </div>
-          <LaunchSection
-            chainId={chainId}
-            costQuote={longCosts?.quote}
-            usdRate={longCosts?.usd}
-            costContextKey={launchCostKey({
-              name,
-              ticker,
-              description,
-              imageRevision: image?.url ?? '',
-              account: account.address,
-              walletChainId: account.chainId,
-              destinations,
-            })}
-            name={name}
-            ticker={ticker}
-            image={image}
-            imagePending={imagePending}
-            errors={errors}
-            destinations={active}
-            onChange={updateDestination}
-            catalog={reads.catalog}
-            tickerCheck={reads.check}
-            checking={reads.checking}
-            now={reads.now}
-          >
-            <LongLaunch
-              enabled={chainId === 4663 && active.some((pad) => pad.id === 'long')}
-              ready={active.length === 1 && active[0]?.id === 'long' && !imagePending && !Object.keys(errors).length}
-              pairId={active.find((pad) => pad.id === 'long')?.pairId}
-              name={name} ticker={ticker} description={description} image={image}
-              contextKey={launchCostKey({
-              name,
-              ticker,
-              description,
-              imageRevision: image?.url ?? '',
-              account: account.address,
-              walletChainId: account.chainId,
-              destinations,
-            })}
-              onCosts={setLongCosts}
-            />
-          </LaunchSection>
           </fieldset>
         </form>
         <footer className="workspace-footer">
