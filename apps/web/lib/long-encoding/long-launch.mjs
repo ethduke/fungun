@@ -1,9 +1,7 @@
 import {
   encodeAbiParameters,
   encodeFunctionData,
-  getCreate2Address,
   isAddress,
-  keccak256,
   sha256,
   parseAbi,
   parseAbiParameters,
@@ -12,6 +10,7 @@ import {
 } from "viem";
 import { ServiceError } from "./errors.mjs";
 import { normalizeLaunchDetails, validatePublishedUri } from "./launch-metadata.mjs";
+import { mineLongSalt, mineLongSaltAsync } from './long-salt.mjs';
 
 export const LONG_CREATE_ABI = parseAbi([
   "function create((uint256 initialSupply,uint256 numTokensToSell,address numeraire,address tokenFactory,bytes tokenFactoryData,address governanceFactory,bytes governanceFactoryData,address poolInitializer,bytes poolInitializerData,address liquidityMigrator,bytes liquidityMigratorData,address integrator,bytes32 salt) createData) returns (address asset,address pool,address governance,address timelock,address migrationPool)",
@@ -120,20 +119,7 @@ function normalizeContract(value) {
   });
 }
 
-function mineSalt(profile, quote, binding) {
-  for (let attempt = 0; attempt < 1024; attempt += 1) {
-    const salt = keccak256(toBytes(JSON.stringify(["fungun:long:1", binding, attempt])));
-    const predictedAsset = getCreate2Address({
-      from: profile.tokenFactory.address,
-      salt,
-      bytecodeHash: profile.tokenFactory.initCodeHash,
-    });
-    if (BigInt(predictedAsset) < BigInt(quote.token.address)) return { salt, predictedAsset };
-  }
-  throw new ServiceError("long_salt_unavailable");
-}
-
-export function buildUnsignedLongLaunch(input, configuredProfile, publicOrigin) {
+function launchContext(input, configuredProfile, publicOrigin) {
   const profile = readLongLaunchProfile(configuredProfile);
   if (
     !exactObject(input, [
@@ -163,6 +149,7 @@ export function buildUnsignedLongLaunch(input, configuredProfile, publicOrigin) 
   const wallet = input.wallet.toLowerCase();
   const binding = sha256(toBytes(
       JSON.stringify([
+        'fungun:long:canonical:2',
         profile,
         wallet,
         draft,
@@ -172,11 +159,25 @@ export function buildUnsignedLongLaunch(input, configuredProfile, publicOrigin) 
         input.intentId,
       ]),
     )).slice(2);
-  const { salt, predictedAsset } = mineSalt(profile, quote, binding);
+  return { profile, quote, draft, metadataUri, wallet, binding, input };
+}
+
+export function buildUnsignedLongLaunch(input, configuredProfile, publicOrigin, saltAttempt) {
+  const context = launchContext(input, configuredProfile, publicOrigin);
+  return assembleLaunch(context, mineLongSalt(context.profile.tokenFactory, context.quote.token.address, context.binding, saltAttempt));
+}
+
+export async function buildUnsignedLongLaunchAsync(input, configuredProfile, publicOrigin, check) {
+  const context = launchContext(input, configuredProfile, publicOrigin);
+  const mined = await mineLongSaltAsync(context.profile.tokenFactory, context.quote.token.address, context.binding, check);
+  return assembleLaunch(context, mined);
+}
+
+function assembleLaunch({ profile, quote, draft, metadataUri, wallet, binding, input }, { salt, predictedAsset, saltAttempt }) {
   const tokenFactoryData = encodeAbiParameters(LONG_TOKEN_PARAMETERS, [
     draft.name,
     draft.ticker,
-    [{ cliff: 0n, duration: 0n }],
+    [],
     [],
     [],
     [],
@@ -257,6 +258,7 @@ export function buildUnsignedLongLaunch(input, configuredProfile, publicOrigin) 
     status: "requires_verification",
     binding,
     predictedAsset,
+    saltAttempt,
     transaction: Object.freeze({
       chainId: 4663,
       from: wallet,

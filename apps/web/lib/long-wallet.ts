@@ -1,5 +1,6 @@
 import { keccak256, type EIP1193Provider } from 'viem';
 import { buildUnsignedLongLaunch, readLongLaunchProfile } from './long-encoding/long-launch.mjs';
+import { LONG_SALT_ATTEMPTS, isCanonicalLongAsset } from './long-encoding/long-salt.mjs';
 import { assetDraft, assetWallet, type AssetDraft, type PublishedAsset } from './asset-protocol.ts';
 import { parseLaunchFunding, fundingMessage, type LaunchFunding } from './launch-funding.ts';
 import { parseLaunchFeeSource, type LaunchFeeSource } from './launch-fee-source.ts';
@@ -10,7 +11,7 @@ export type LongPlan = {
   id: string; binding: string; chainId: 4663; quotedAt: number; expiresAt: number; deadline: number;
   transaction: { chainId: '0x1237'; from: string; to: string; data: `0x${string}`; value: '0x0'; nonce: `0x${string}`; gas: `0x${string}`; gasPrice: `0x${string}` };
   profile: ReturnType<typeof readLongLaunchProfile> & { launcher: { address: string; codeHash: string } }; startingTick: number; intentId: string;
-  predictedAsset: string; predictedPool: string; review: ReturnType<typeof buildUnsignedLongLaunch>['review'];
+  predictedAsset: string; saltAttempt: number; predictedPool: string; review: ReturnType<typeof buildUnsignedLongLaunch>['review'];
   estimatedGas: string; maximumGasWei: string; launchpadFeeWei: '0';
   launchFeeSource: LaunchFeeSource;
   usd: { microUsdPerEth: string; sourceLabel: string; quotedAt: number };
@@ -49,6 +50,8 @@ export function launchMessage(error: unknown) {
   }
   const code = error instanceof Error ? error.message : '';
   const messages: Record<string, string> = {
+    long_salt_unavailable: 'A Long-compatible token address could not be prepared in time. No transaction was sent. Try preparing again.',
+    invalid_long_salt: 'The prepared token address does not meet Long’s requirements. Refresh the launch estimate.',
     long_launch_disabled: 'Long launches are not enabled on this server yet.',
     unsupported_pair: 'This pairing is not configured on the launch server yet. Choose another pairing.',
     launch_assets_unverified: 'Artwork publication is not verified yet. Check its status before launching.',
@@ -65,7 +68,7 @@ export function launchMessage(error: unknown) {
     launch_eoa_required: 'This launch currently supports ordinary wallet accounts only.',
     busy: 'Another launch check is running. Try again shortly.',
     reverted: 'The launch simulation failed. No transaction was sent. Refresh the ticker and estimate.',
-    launch_transaction_changed: 'The wallet changed this transaction. No matching launch was verified.',
+    launch_transaction_changed: 'This transaction does not match the prepared launch. Check the transaction details before trying again.',
     launch_receipt_unverified: 'Verifying your launch on the network…',
     recovery_unavailable: 'Browser recovery storage is unavailable. Enable it before launching.',
     launch_unknown: 'Reconnecting to your launch…',
@@ -83,8 +86,10 @@ export function validateLongPlan(raw: unknown, input: LaunchInput, published: Pu
   const deadline = started + p.expiresAt - p.serverTime;
   assert(deadline > now);
   const inputDraft = assetDraft(input.draft);
+  assert(Number.isInteger(p.saltAttempt) && p.saltAttempt >= 0 && p.saltAttempt < LONG_SALT_ATTEMPTS
+    && isCanonicalLongAsset(p.predictedAsset));
   const rebuilt = buildUnsignedLongLaunch({ chainId: 4663, wallet: assetWallet(input.wallet), draft: inputDraft,
-    pairId: input.pairId, metadataUri: `ipfs://${published.ipfs!.metadataCid}`, startingTick: p.startingTick, intentId: p.intentId }, p.profile);
+    pairId: input.pairId, metadataUri: `ipfs://${published.ipfs!.metadataCid}`, startingTick: p.startingTick, intentId: p.intentId }, p.profile, undefined, p.saltAttempt);
   assert(rebuilt.binding === p.binding && same(rebuilt.predictedAsset, p.predictedAsset)
     && JSON.stringify(rebuilt.review) === JSON.stringify(p.review));
   const tx = p.transaction;

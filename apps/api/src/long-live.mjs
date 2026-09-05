@@ -2,7 +2,8 @@ import { LongRecovery } from "./long-recovery.mjs";
 import { LongRpc } from "./long-rpc.mjs";
 import { createHash, createHmac } from "node:crypto";
 import { decodeEventLog, decodeFunctionResult, isAddress, keccak256, parseAbi, toBytes, toHex, zeroAddress } from "viem";
-import { buildUnsignedLongLaunch, LONG_CREATE_ABI, readLongLaunchProfile } from "./long-launch.mjs";
+import { buildUnsignedLongLaunchAsync, LONG_CREATE_ABI, readLongLaunchProfile } from "./long-launch.mjs";
+import { isCanonicalLongAsset } from '../../web/lib/long-encoding/long-salt.mjs';
 import { normalizeLaunchDetails } from "./launch-metadata.mjs";
 import { ipfsContentId, ipfsUri, IPFS_IMPORT_PROFILE, LONG_IPFS_SCHEMA } from "./ipfs-content.mjs";
 import { rpcNumber } from "./fee-rpc.mjs";
@@ -177,7 +178,10 @@ export class LongLive {
     const resume = () => ({ recovery: { id: key, binding: JSON.parse(prior.plan).binding, hash: prior.tx_hash ?? null } });
     if (prior?.state !== undefined && prior.state !== "prepared" && !retry) return resume();
     if (retry && (await this.recovery.find(key, retry.transaction)).status !== "retryable") return resume();
-    if (!retry && prior && prior.expires > this.now()) return JSON.parse(prior.plan);
+    if (!retry && prior && prior.expires > this.now()) {
+      const cached = JSON.parse(prior.plan);
+      if (isCanonicalLongAsset(cached.predictedAsset) && Number.isInteger(cached.saltAttempt)) return cached;
+    }
     this.budget.debit([["launch-prepare", 3, 60000], ["launch-prepare", 30, 86400000]]);
     if (!prior && this.db.prepare("SELECT COUNT(*) AS n FROM long_launches").get().n >= 4096) fail("launch_history_full");
     const publication = await this.metadata(input);
@@ -220,8 +224,8 @@ export class LongLive {
     // Requotes retain the original nonce. Journal every offered envelope so a
     // delayed original submission can still be verified after fees/prices change.
     const intentId = `${key.slice(0,8)}-${key.slice(8,12)}-${key.slice(12,16)}-${key.slice(16,20)}-${key.slice(20,32)}`;
-    const plan = buildUnsignedLongLaunch({ chainId: 4663, wallet: input.wallet, draft: input.draft, pairId: q.id,
-      metadataUri: ipfsUri(publication.ipfs.metadataCid), startingTick: tick, intentId }, p);
+    const plan = await buildUnsignedLongLaunchAsync({ chainId: 4663, wallet: input.wallet, draft: input.draft, pairId: q.id,
+      metadataUri: ipfsUri(publication.ipfs.metadataCid), startingTick: tick, intentId }, p, undefined, checkReadDeadline);
     const [vacancy, accountCode] = await this.rpc.batch(4663, [
       { method: "eth_getCode", params: [plan.predictedAsset, block] },
       { method: "eth_getCode", params: [input.wallet, block] },
@@ -265,7 +269,7 @@ export class LongLive {
     const quotedAt = this.now();
     const result = { id: key, binding: plan.binding, chainId: 4663, quotedAt, expiresAt: quotedAt + 30000,
       transaction: { ...tx, chainId: "0x1237", nonce: toHex(rpcNumber(nonceRaw)), gas: toHex(gas), gasPrice: toHex(price) },
-      profile: p, startingTick: tick, intentId, predictedAsset: plan.predictedAsset, predictedPool: simulated[1], review: plan.review,
+      profile: p, startingTick: tick, intentId, predictedAsset: plan.predictedAsset, saltAttempt: plan.saltAttempt, predictedPool: simulated[1], review: plan.review,
       estimatedGas: estimate.toString(), launchpadFeeWei: this.launchFee(block).amountWei,
       launchFeeSource: this.launchFee(block), maximumGasWei: (gas * price).toString(), usd };
     checkReadDeadline();
@@ -315,17 +319,19 @@ export class LongLive {
       if (rpcNumber(chain) !== 4663n) fail("wrong_chain");
       if (!tx) return { id: input.id, status: "uncertain" };
       const plans = [JSON.parse(row.plan), ...this.db.prepare("SELECT plan FROM long_launch_attempts WHERE id=?").all(input.id).map((r) => JSON.parse(r.plan))];
+      // Match the launch intent, not wallet-controlled fee settings. Extensions
+      // may buffer gas again or convert a legacy quote to EIP-1559. The receipt,
+      // event and deployed state below determine whether the launch succeeded;
+      // preparation and wallet dispatch still enforce our quoted gas budget.
       const plan = plans.find((candidate) => {
         const expected = candidate.transaction;
         return same(tx.from, expected.from) && same(tx.to, expected.to) && same(tx.input, expected.data)
-          && rpcNumber(tx.value) === 0n && rpcNumber(tx.nonce) === rpcNumber(expected.nonce)
-          && rpcNumber(tx.gas) === rpcNumber(expected.gas) && rpcNumber(tx.gasPrice) <= rpcNumber(expected.gasPrice);
+          && rpcNumber(tx.value) === 0n && rpcNumber(tx.nonce) === rpcNumber(expected.nonce);
       });
       if (!plan) fail("launch_transaction_changed");
       const expected = plan.transaction;
       if (!same(tx.hash, hash) || !same(tx.from, expected.from) || !same(tx.to, expected.to)
         || !same(tx.input, expected.data) || rpcNumber(tx.value) !== 0n || rpcNumber(tx.nonce) !== rpcNumber(expected.nonce)
-        || rpcNumber(tx.gas) !== rpcNumber(expected.gas) || rpcNumber(tx.gasPrice) > rpcNumber(expected.gasPrice)
         || rpcNumber(tx.chainId) !== 4663n) fail("launch_transaction_changed");
       this.db.prepare("UPDATE long_launches SET tx_hash=?,state='submitted' WHERE id=? AND tx_hash IS NULL").run(hash, input.id);
       if (!receipt) return { id: input.id, status: "submitted", hash };

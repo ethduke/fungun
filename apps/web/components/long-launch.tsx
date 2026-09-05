@@ -4,7 +4,8 @@ import { useEffect, useLayoutEffect, useRef, useState, useReducer } from 'react'
 import { Button } from '@/components/ui/button';
 import { BulletProgress, LaunchGun } from '@/components/launch-motion';
 import { runLaunchFlow } from '@/lib/launch-flow';
-import { watchLaunch, type LaunchReceipt } from '@/lib/long-recovery';
+import { watchLaunch, confirmedLongTokenUrl, type LaunchReceipt } from '@/lib/long-recovery';
+import { LaunchSuccessDialog } from '@/components/launch-success-dialog';
 import { launchActivity } from '@/lib/launch-progress';
 import { launchFeedback, emptyLaunchFeedback } from '@/lib/launch-feedback';
 import { useConnectedAccount } from '@/lib/account-context';
@@ -421,6 +422,7 @@ function ScopedLongLaunch({
   const terminal =
     currentReceipt && ['confirmed', 'failed'].includes(currentReceipt.status);
   const transactionHash = currentReceipt?.hash || recovery?.hash;
+  const tokenUrl = confirmedLongTokenUrl(currentReceipt);
   const guidance = !enabled
     ? 'Choose Long and a pairing to launch.'
     : account.address && !isReady
@@ -437,10 +439,21 @@ function ScopedLongLaunch({
       {recovery ? (
         <div className="launch-recovery">
           {activity.phase === 'confirmed' && (
-            <output className="launch-confirmed" key={recovery.id}>
-              <strong>Coin is live</strong>
+            <output className="launch-confirmed" data-compatible={!!tokenUrl} key={recovery.id}>
+              <strong>{tokenUrl ? 'Coin deployed' : 'Token deployed · Long incompatible'}</strong>
               <LaunchGun confirmed />
             </output>
+          )}
+          {currentReceipt?.status === 'confirmed' && currentReceipt.asset && currentReceipt.hash && image && (
+            <LaunchSuccessDialog
+              key={currentReceipt.id}
+              name={name}
+              ticker={ticker}
+              imageUrl={image.url}
+              tokenUrl={tokenUrl ?? `https://robinhoodchain.blockscout.com/address/${currentReceipt.asset}`}
+              longCompatible={!!tokenUrl}
+              transactionUrl={`https://robinhoodchain.blockscout.com/tx/${currentReceipt.hash}`}
+            />
           )}
           {!terminal && (
             <Button
@@ -477,13 +490,13 @@ function ScopedLongLaunch({
                 View transaction
               </a>
             )}
-            {currentReceipt?.asset && (
+            {tokenUrl && (
               <a
-                href={`https://robinhoodchain.blockscout.com/address/${currentReceipt.asset}`}
+                href={tokenUrl}
                 target="_blank"
                 rel="noopener noreferrer"
               >
-                View token
+                View on Long
               </a>
             )}
           </div>

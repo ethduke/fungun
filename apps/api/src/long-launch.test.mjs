@@ -12,6 +12,7 @@ import {
 import {
   assertUnsignedLongTransaction,
   buildUnsignedLongLaunch,
+  buildUnsignedLongLaunchAsync,
   LONG_CREATE_ABI,
   LONG_HOOK_PARAMETERS,
   LONG_POOL_PARAMETERS,
@@ -81,7 +82,7 @@ test("ordinary Long encodes exact nonpayable create parameters without creator a
   assert.deepEqual(token, [
     "Moon",
     "MOON",
-    [{ cliff: 0n, duration: 0n }],
+    [],
     [],
     [],
     [],
@@ -173,6 +174,10 @@ test("CREATE2 is deterministic and bound to the reviewed launch context", () => 
     plan.predictedAsset,
   );
   assert.ok(BigInt(plan.predictedAsset) < BigInt(params.numeraire));
+  assert.ok(plan.predictedAsset.toLowerCase().endsWith('1e18'));
+  assert.deepEqual(buildUnsignedLongLaunch(input(), profile(), publicOrigin, plan.saltAttempt), plan);
+  for (const attempt of [-1, 3_000_000, 1.5, plan.saltAttempt + 1])
+    assert.throws(() => buildUnsignedLongLaunch(input(), profile(), publicOrigin, attempt), /invalid_long_salt/);
   for (const change of [
     { wallet: address(1002) },
     { draft: { ...input().draft, ticker: "SUN" } },
@@ -184,6 +189,22 @@ test("CREATE2 is deterministic and bound to the reviewed launch context", () => 
       buildUnsignedLongLaunch({ ...input(), ...change }, profile(), publicOrigin).binding,
       plan.binding,
     );
+});
+
+test('canonical mining yields to other requests and honors the preparation deadline', async () => {
+  const fresh = { ...input(), intentId: '00000000-0000-4000-8000-000000000099' };
+  let checks = 0, responsive = false;
+  const timer = setTimeout(() => { responsive = true; }, 0);
+  await assert.rejects(buildUnsignedLongLaunchAsync(fresh, profile(), publicOrigin, () => {
+    if (++checks === 2) throw new Error('deadline reached');
+  }), /deadline reached/);
+  clearTimeout(timer);
+  assert.equal(responsive, true);
+  const plan = await buildUnsignedLongLaunchAsync(fresh, profile(), publicOrigin);
+  assert.ok(plan.predictedAsset.toLowerCase().endsWith('1e18'));
+  assert.deepEqual(buildUnsignedLongLaunch(fresh, profile(), publicOrigin, plan.saltAttempt), plan);
+  const impossible = profile(); impossible.quotes[0].token.address = address(1);
+  await assert.rejects(buildUnsignedLongLaunchAsync(fresh, impossible, publicOrigin), /long_salt_unavailable/);
 });
 
 test("unreviewed chains, pairs, module profiles, mutable options and invalid curves fail closed", () => {

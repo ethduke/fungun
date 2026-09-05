@@ -1,8 +1,14 @@
 import { LaunchError, launchRequest, type LaunchRecovery } from './long-wallet.ts';
+import { isCanonicalLongAsset } from './long-encoding/long-salt.mjs';
 
 export type LaunchReceipt = {
   id: string; status: string; hash?: string; asset?: string; paidGasWei?: string;
 };
+export function confirmedLongTokenUrl(receipt: LaunchReceipt | null) {
+  return receipt?.status === 'confirmed' && isCanonicalLongAsset(receipt.asset)
+    ? `https://app.long.xyz/tokens/${receipt.asset!.toLowerCase()}`
+    : null;
+}
 export function validateLaunchStatus(value: LaunchReceipt, recovery: LaunchRecovery) {
   if (!value || value.id !== recovery.id || !['retryable', 'locating', 'uncertain', 'prepared', 'submitted', 'confirming', 'confirmed', 'failed'].includes(value.status)
     || (value.hash !== undefined && !/^0x[a-f0-9]{64}$/i.test(value.hash))

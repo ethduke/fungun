@@ -12,4 +12,11 @@ function checked(operation, args) {
 }
 export const readLongLaunchProfile = (...args) => checked("readLongLaunchProfile", args);
 export const buildUnsignedLongLaunch = (...args) => checked("buildUnsignedLongLaunch", args);
+export async function buildUnsignedLongLaunchAsync(...args) {
+  try { return await encoder.buildUnsignedLongLaunchAsync(...args); }
+  catch (error) {
+    if (error instanceof EncodingError) throw new ServiceError(error.code, error.status, error.retryAfter);
+    throw error;
+  }
+}
 export const assertUnsignedLongTransaction = (...args) => checked("assertUnsignedLongTransaction", args);

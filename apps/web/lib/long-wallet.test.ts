@@ -28,7 +28,7 @@ function response(pairId = 'long-NVDA') {
   const f = fixture(pairId), now = Date.now();
   return { ...f, raw: { id: 'd'.repeat(64), binding: f.plan.binding, chainId: 4663,
     quotedAt: now, expiresAt: now + 30000, serverTime: now, profile: f.profile,
-    startingTick: f.startingTick, intentId: f.intentId, predictedAsset: f.plan.predictedAsset, predictedPool: addr(200), review: f.plan.review,
+    startingTick: f.startingTick, intentId: f.intentId, predictedAsset: f.plan.predictedAsset, saltAttempt: f.plan.saltAttempt, predictedPool: addr(200), review: f.plan.review,
     transaction: { ...f.plan.transaction, chainId: '0x1237', value: '0x0', nonce: '0x1', gas: toHex(1200000), gasPrice: toHex(1000000000) },
     estimatedGas: '1000000', maximumGasWei: String(1200000n * 1000000000n), launchpadFeeWei: '0',
     launchFeeSource: { amountWei: '0', kind: 'verified-contract', contract: f.profile.launcher.address, blockNumber: '100' },
@@ -39,6 +39,10 @@ void test('browser reconstructs the exact reviewed calldata and rejects value, t
   const f = response(), start = performance.now();
   const checked = validateLongPlan(f.raw, f.input, f.published, start);
   assert.equal(checked.transaction.data, f.plan.transaction.data);
+  assert.ok(checked.predictedAsset.toLowerCase().endsWith('1e18'));
+  for (const change of [{ saltAttempt: undefined }, { saltAttempt: -1 }, { saltAttempt: 3_000_000 },
+    { saltAttempt: f.raw.saltAttempt + 1 }, { predictedAsset: addr(999) }])
+    assert.throws(() => validateLongPlan({ ...f.raw, ...change }, f.input, f.published, start));
   for (const change of [ { to: addr(999) }, { from: addr(999) }, { value: '0x1' }, { chainId: '0x1' }, { data: '0x' }, { gas: '0x1' }, { authorizationList: [] } ]) {
     assert.throws(() => validateLongPlan({ ...f.raw, transaction: { ...f.raw.transaction, ...change } }, f.input, f.published, start));
   }

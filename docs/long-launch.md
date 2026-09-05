@@ -20,7 +20,8 @@ Every returned plan is marked `requires_verification`.
   identities fail closed. A valid configuration shape is not contract verification.
 - The token has one billion units at 18 decimals, all for sale. There is no
   creator/team vesting allocation, mutable metadata controller or balance limit.
-  Longbow's separate allocation and address-suffix rules are not included.
+  Long's canonical `1e18` address suffix is required. Longbow's separate allocation
+  recipe is not included.
 - Nested token-factory parameters, the pool tuple and hook data match the
   reference adapter's distinct ABI encodings. The pool uses the connected wallet
   as its creator beneficiary. This module does not add or change fee-claim coverage.
@@ -29,9 +30,13 @@ Every returned plan is marked `requires_verification`.
 
 CREATE2 salt selection binds the complete reviewed profile, creator, public token
 details, pair, metadata URI, curve tick and intent ID. It ensures the predicted
-token sorts below the quote token and stops after 1,024 candidates. Repeating
+token sorts below the quote token and ends in `1e18`, stopping after 3,000,000
+candidates or the preparation deadline. The API yields every 4,096 candidates;
+the browser checks the supplied attempt and CREATE2 address without repeating
+the search. Repeating
 the same context produces the same plan. This is not durable replay protection;
-it does not prove the address is vacant or reserve the ticker.
+it does not prove the address is vacant or reserve the ticker. The suffix is a
+Long compatibility requirement, not proof of authenticity or guaranteed listing.
 
 `assertUnsignedLongTransaction` reconstructs the expected bytes and rejects any
 wallet, chain, target, native-value, calldata or extra-field substitution. The

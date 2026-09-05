@@ -38,6 +38,34 @@ headers and feed observations are checked; they do not replace that feed.
 
 ## User flow
 
+### Canonical address correction — September 5, 2026
+
+A mined ROBOTAXI launch passed contract/event/state verification but Long's token
+page showed “Fake LONG asset”. The previous encoder enforced token ordering but
+omitted Long's `1e18` CREATE2 suffix. The accepted BONER reference used the same
+launcher, factory/module suite, supply, hook configuration and 95/5 beneficiary
+split. Its token parameters used an empty vesting-schedules array; the encoder
+now matches that no-vesting representation too. The reference was compared using
+`cast tx`; application acceptance/rejection was observed on Long's actual pages.
+The published [integration implementation](https://www.npmjs.com/package/@framononhood/launcher-core)
+independently documents the suffix requirement. It is third-party evidence, not
+Long's promise to list a future token.
+
+New preparations mine a context-bound address below the numeraire ending in
+`1e18`, with a 3-million-attempt cap and the existing request deadline. Mining
+yields to the event loop. The browser verifies the supplied attempt in constant
+work before wallet dispatch. Unsent old quotes are refreshed. Existing mined
+attempts remain recoverable using their original journaled calldata and address.
+Nonconforming deployed tokens show an explicit incompatibility notice and an
+explorer link, without being presented as accepted by Long. An address cannot
+be changed after deployment; repairing this class of existing token requires a
+new deployment or a Long-side listing exception.
+
+A read-only replay of the corrected ROBOTAXI recipe at block 55,285,630 returned
+the predicted suffix-bearing address and estimated 1,968,454 gas. No transaction
+was signed or broadcast. This verifies the contract recipe and address invariant;
+it does not prove future Long indexing or acceptance before an actual launch.
+
 1. Connect Rabby or MetaMask, choose Long and any listed pairing, and complete the draft.
    The UI accepts all Long pairings; the server still requires a configured quote
    and its guards before preparing a transaction.
@@ -55,9 +83,16 @@ headers and feed observations are checked; they do not replace that feed.
    same portable encoder to reconstruct every calldata byte. It rechecks account,
    chain, launcher code and pending nonce, durably reserves one attempt, and asks
    the extension to sign and submit exactly once. The user must approve in the wallet.
-5. Confirmation is checked automatically, including after refresh. Transaction identity, calldata, value, gas envelope, canonical
+5. Confirmation is checked automatically, including after refresh. Transaction identity, calldata, value, nonce, chain, canonical
    receipt, 12-block confirmation depth, event and token/Airlock state are verified.
    Twelve L2 blocks are confirmation depth, not Ethereum settlement finality.
+
+Wallet-adjusted gas limits, gas prices and EIP-1559 conversion do not change the
+launch intent and do not invalidate an otherwise verified deployment. The quoted
+budget remains enforced before submission; gas paid comes from the mined receipt.
+Confirmed launches open a dismissible dialog with the recovery-scoped coin artwork,
+name and ticker, a link to `https://app.long.xyz/tokens/<confirmed asset>`, and the
+transaction receipt. The success dialog can be reopened from the launch card.
 
 The compact review card keeps the fee total above the single launch action and
 places individual fees in an expandable breakdown. A single bullet progress line

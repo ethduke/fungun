@@ -1,10 +1,21 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { watchLaunch, validateLaunchStatus } from './long-recovery.ts';
+import { watchLaunch, validateLaunchStatus, confirmedLongTokenUrl } from './long-recovery.ts';
 import { LaunchError } from './long-wallet.ts';
 const recovery = { id: 'a'.repeat(64), binding: 'b'.repeat(64), hash: null };
 const hash = `0x${'c'.repeat(64)}`;
 const flush = () => new Promise<void>((resolve) => setImmediate(resolve));
+void test('launchpad links use only the confirmed token address, including recovered launches', () => {
+  const asset = `0x${'aB'.repeat(18)}1E18`;
+  const receipt = { id: recovery.id, status: 'confirmed', hash, asset, paidGasWei: '826443600918000' };
+  const recovered = validateLaunchStatus(receipt, recovery);
+  assert.equal(confirmedLongTokenUrl(recovered), `https://app.long.xyz/tokens/0x${'ab'.repeat(18)}1e18`);
+  assert.equal(confirmedLongTokenUrl({ ...receipt, asset: `0x${'ab'.repeat(20)}` }), null);
+  for (const status of ['submitted', 'confirming', 'failed', 'uncertain'])
+    assert.equal(confirmedLongTokenUrl({ ...receipt, status }), null);
+  assert.equal(confirmedLongTokenUrl({ ...receipt, asset: 'https://example.com' }), null);
+  assert.equal(confirmedLongTokenUrl(null), null);
+});
 void test('refresh recovery only reads, discovers hashes automatically, and stops on confirmation', async () => {
   const callbacks: Array<() => void> = [], results: string[] = [], operations: string[] = [];
   let step = 0;

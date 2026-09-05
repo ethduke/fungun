@@ -51,7 +51,7 @@ async function fixture(t) {
         case 'name': return draft.name;
         case 'symbol': return draft.ticker;
         case 'tokenURI': return imageUri.replace(imageCid, published.ipfs.metadataCid);
-        case 'totalSupply': return 10n ** 27n;
+        case 'totalSupply': return changes.supply ?? 10n ** 27n;
         case 'getTickerRecord': return [changes.plan.predictedAsset, 100, 86500];
         case 'getAssetData': return [p.quotes[0].token.address, addr(20), addr(21), p.liquidityMigrator.address, p.poolInitializer.address, addr(200), addr(22), 10n ** 27n, 10n ** 27n, p.integrator];
         default: throw new Error('unexpected call');
@@ -103,6 +103,19 @@ test('preparation binds metadata, verifies dependencies at one block and returns
   assert.deepEqual(await f.service.run('launch-prepare', f.input), plan);
   assert.equal(f.requests.length, reads);
   assert.ok(!f.requests.some((m) => /send|sign/i.test(m)));
+});
+
+test('unsent legacy plans are refreshed with a canonical address rather than offered to the wallet', async (t) => {
+  const f = await fixture(t), plan = await f.service.run('launch-prepare', f.input);
+  assert.ok(plan.predictedAsset.toLowerCase().endsWith('1e18'));
+  assert.ok(Number.isInteger(plan.saltAttempt));
+  const legacy = { ...plan, predictedAsset: addr(333) };
+  delete legacy.saltAttempt;
+  f.budget.db.prepare('UPDATE long_launches SET plan=? WHERE id=?').run(JSON.stringify(legacy), plan.id);
+  const refreshed = await f.service.run('launch-prepare', f.input);
+  assert.ok(refreshed.predictedAsset.toLowerCase().endsWith('1e18'));
+  assert.ok(Number.isInteger(refreshed.saltAttempt));
+  assert.notEqual(refreshed.predictedAsset, legacy.predictedAsset);
 });
 
 test('durable recovery survives restart and requotes only the original unused nonce', async (t) => {
@@ -186,6 +199,56 @@ test('terminal launch results remain bound to the journaled transaction hash', a
       f.service.run('launch-status', { id: plan.id, hash: hash(702) }),
       /launch_transaction_changed/,
     );
+  }
+});
+
+test('wallet gas changes and EIP-1559 conversion preserve a verified launch, including old journal entries', async (t) => {
+  for (const fees of [
+    { gas: toHex(2995286), gasPrice: toHex(439374000), type: '0x2', maxFeePerGas: toHex(536800000), maxPriorityFeePerGas: '0x0' },
+    { gas: toHex(3100000), gasPrice: toHex(600000000) },
+    { gas: toHex(2995286), gasPrice: undefined, type: '0x2', maxFeePerGas: toHex(536800000), maxPriorityFeePerGas: '0x0' },
+  ]) {
+    const f = await fixture(t);
+    f.changes.gas = 1996857; f.changes.price = 427804000;
+    const plan = await f.service.run('launch-prepare', f.input);
+    assert.equal(plan.transaction.gas, toHex(2396229));
+    f.changes.plan = plan; f.service.reserve(plan);
+    // Simulate a launch reserved before the attempts journal was introduced.
+    f.budget.db.prepare('DELETE FROM long_launch_attempts WHERE id=?').run(plan.id);
+    const txHash = hash(610), blockHash = hash(500);
+    f.changes.tx = { ...plan.transaction, input: plan.transaction.data, hash: txHash, blockHash, blockNumber: '0x64', ...fees };
+    const topics = encodeEventTopics({ abi: LONG_STATE_ABI, eventName: 'LaunchCreated', args: {
+      poolOrHook: addr(200), asset: plan.predictedAsset, numeraire: f.p.quotes[0].token.address,
+    } });
+    const event = LONG_STATE_ABI.find((e) => e.type === 'event');
+    const { keccak256, toBytes } = await import('viem');
+    const data = encodeAbiParameters(event.inputs.filter((i) => !i.indexed), [f.p.poolInitializer.address, f.input.wallet,
+      keccak256(toBytes(f.input.draft.ticker)), 100, 86500, f.input.draft.ticker]);
+    f.changes.receipt = { transactionHash: txHash, from: plan.transaction.from, to: plan.transaction.to,
+      blockHash, blockNumber: '0x64', gasUsed: toHex(1880957), effectiveGasPrice: toHex(439374000), status: '0x1',
+      logs: [{ address: f.p.launcher.address, topics, data }] };
+    for (const change of [{ from: addr(999) }, { to: addr(999) }, { input: '0x' }, { value: '0x1' }, { nonce: '0x2' }, { chainId: '0x1' }, { hash: hash(999) }]) {
+      const original = f.changes.tx;
+      f.changes.tx = { ...original, ...change };
+      await assert.rejects(f.service.run('launch-status', { id: plan.id, hash: txHash }), /launch_transaction_changed/);
+      f.changes.tx = original;
+      f.advance(31000);
+    }
+    const logs = f.changes.receipt.logs;
+    for (const invalid of [[], [{ ...logs[0], address: addr(999) }], [logs[0], logs[0]]]) {
+      f.changes.receipt.logs = invalid;
+      await assert.rejects(f.service.run('launch-status', { id: plan.id, hash: txHash }), /launch_receipt_unverified/);
+      f.advance(31000);
+    }
+    f.changes.receipt.logs = logs;
+    f.changes.supply = 1n;
+    await assert.rejects(f.service.run('launch-status', { id: plan.id, hash: txHash }), /launch_receipt_unverified/);
+    delete f.changes.supply; f.advance(31000);
+    const result = await f.service.run('launch-status', { id: plan.id, hash: txHash });
+    assert.equal(result.status, 'confirmed');
+    assert.equal(result.asset, plan.predictedAsset);
+    assert.equal(result.paidGasWei, '826443600918000');
+    assert.ok(!f.requests.some((method) => /send|sign/i.test(method)));
   }
 });
 
