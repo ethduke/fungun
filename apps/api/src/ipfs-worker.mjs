@@ -14,6 +14,8 @@ export function createIpfsWorker(store, publisher, { enabled = false, intervalMs
           if (closed) break;
           let object = store.objects(row.id).find((item) => item.kind === kind);
           const content = bundle[kind];
+          if (kind === 'image' && object.state === 'ready' && store.reuseImage(row))
+            object = store.objects(row.id).find((item) => item.kind === kind);
           const debit = () => store.budget.debit([["pinata-requests", 20, 60000], ["pinata-requests", 500, 86400000]]);
           if (object.state === "ready") {
             debit();

@@ -228,6 +228,23 @@ export class IpfsStore {
   begin(id, kind) {
     return this.db.prepare("UPDATE ipfs_objects SET state='sending' WHERE publication_id=? AND kind=? AND state='ready'").run(id, kind).changes === 1;
   }
+  reuseImage(row) {
+    const now = this.clock();
+    const previous = this.db.prepare(`SELECT o.provider_id FROM ipfs_objects o
+      JOIN ipfs_publications p ON p.id=o.publication_id
+      WHERE p.owner=? AND p.state='published' AND p.profile=?
+        AND p.image_cid=? AND p.image_hash=? AND p.image_size=?
+        AND o.kind='image' AND o.state='verified' AND o.provider_id IS NOT NULL
+        AND o.verified_at>? AND o.verified_at<=?
+      ORDER BY o.verified_at DESC LIMIT 1`).get(row.owner, row.profile, row.image_cid,
+        row.image_hash, row.image_size, now - day, now);
+    if (!previous) return false;
+    // Reuse only this owner's verified immutable image. The worker still checks
+    // the provider receipt and public bytes before completing the new metadata.
+    return this.db.prepare(`UPDATE ipfs_objects SET state='pinned',provider_id=?
+      WHERE publication_id=? AND kind='image' AND state='ready'`)
+      .run(previous.provider_id, row.id).changes === 1;
+  }
   pinned(id, kind, receipt) {
     this.db.prepare("UPDATE ipfs_objects SET state='pinned',provider_id=? WHERE publication_id=? AND kind=? AND state='sending'").run(receipt.id, id, kind);
   }

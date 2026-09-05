@@ -197,3 +197,35 @@ test("a publication arriving during another upload is drained without waiting fo
   assert.equal(f.store.status(second).status, "published");
   assert.equal(f.calls.filter(([method]) => method === "POST").length, 4);
 });
+
+test("recent image reuse survives restart and rechecks public bytes before publishing new metadata", async t => {
+  const f = await ipfsFixture(t), first = await f.approval();
+  await f.store.accept(first);
+  const worker = f.worker(); worker.kick(); await worker.idle(); await worker.stop();
+  f.reopen();
+  const details = { ...draft, name: 'Sun', ticker: 'SUN' };
+  const second = await f.store.launchChallenge(f.account.address, f.image, details);
+  await f.store.acceptLaunch({ ...second, wallet: f.account.address, image: f.image, draft: details });
+  const before = f.calls.length, next = f.worker(); next.kick(); await next.idle();
+  const calls = f.calls.slice(before);
+  assert.equal(f.store.get(second.id).state, 'published');
+  assert.deepEqual(calls.filter(([, cid]) => cid === first.ipfs.imageCid).map(([method]) => method), ['PIN', 'GET']);
+  assert.equal(calls.filter(([method]) => method === 'POST').length, 1);
+});
+
+for (const change of ['expired', 'different-wallet', 'different-image']) {
+  test(`image cache does not reuse ${change} entries`, async t => {
+    const f = await ipfsFixture(t), first = await f.approval();
+    await f.store.accept(first); const worker = f.worker(); worker.kick(); await worker.idle();
+    if (change === 'expired') f.advance(86400001);
+    const wallet = change === 'different-wallet' ? privateKeyToAccount(generatePrivateKey()).address : f.account.address;
+    const image = change === 'different-image'
+      ? await sharp({ create: { width: 8, height: 8, channels: 3, background: 'blue' } }).webp().toBuffer() : f.image;
+    const details = { ...draft, name: 'Sun', ticker: 'SUN' };
+    const second = await f.store.launchChallenge(wallet, image, details);
+    await f.store.acceptLaunch({ ...second, wallet, image, draft: details });
+    const before = f.calls.length; worker.kick(); await worker.idle();
+    assert.equal(f.store.get(second.id).state, 'published');
+    assert.equal(f.calls.slice(before).filter(([method]) => method === 'POST').length, 2);
+  });
+}

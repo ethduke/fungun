@@ -12,6 +12,7 @@ import { createAssetProxy } from '../../web/lib/asset-proxy.ts';
 import { ensureLaunchArtwork } from '../../web/lib/launch-artwork.ts';
 import { assetHash, assetWallet, assetErrorText } from '../../web/lib/asset-protocol.ts';
 import { runLaunchFlow } from '../../web/lib/launch-flow.ts';
+import { artworkHistory, rememberArtwork, ARTWORK_CACHE_TTL } from '../../web/lib/artwork-cache.ts';
 
 async function fixture(t) {
   const root = realpathSync(mkdtempSync(join(tmpdir(), 'fungun-click-')));
@@ -171,6 +172,44 @@ test('a wallet can publish beyond the former three-artwork limit',async t=>{
  const f=await fixture(t);
  f.store.budget.debit([[`ipfs-owner:${f.store.owner(f.wallet)}`,20,86400000]],3);
  assert.equal((await f.run()).status,'published');assert.equal(f.writes.length,2);
+});
+
+test('returning to a recent draft reuses its published id with only a status read',async t=>{
+ const f=await fixture(t);const first=await f.run();
+ const second=await f.run({draft:{name:'Sun',ticker:'SUN',description:''}});
+ assert.notEqual(second.id,first.id);
+ const before=f.requests.length;
+ const restored=await f.run();
+ assert.equal(restored.id,first.id);
+ assert.deepEqual(f.requests.slice(before),['status']);
+ assert.equal(f.writes.length,3); // One image, two metadata documents.
+ assert.equal(f.store.db.prepare('SELECT COUNT(*) AS n FROM ipfs_publications').get().n,2);
+});
+
+test('cached artwork remains usable while a different draft is pending without erasing its recovery',async t=>{
+ const f=await fixture(t);const first=await f.run();f.refuseNext();
+ await assert.rejects(f.run({draft:{name:'Sun',ticker:'SUN',description:''}}),{code:'asset_busy'});
+ const key=(await keys(f.wallet)).recovery, pending=f.records.get(key), before=f.requests.length;
+ assert.equal((await f.run()).id,first.id);assert.equal(f.records.get(key),pending);
+ assert.deepEqual(f.requests.slice(before),['status']);assert.equal(f.writes.length,2);
+});
+
+test('published history is bounded, expires after 24 hours, and excludes other wallets or malformed entries',async t=>{
+ const f=await fixture(t);await f.run();
+ const walletHash=await assetHash(new TextEncoder().encode(assetWallet(f.wallet)));
+ const key=`fungun.artwork-history.v1:${walletHash}`;
+ const entries=JSON.parse(f.records.get(key)), first=entries[0];
+ const scoped={...f.storage,getItem:k=>f.storage.getItem(`${k}:${walletHash}`),setItem:(k,v)=>f.storage.setItem(`${k}:${walletHash}`,v)};
+ const origin=first.ticket.appOrigin, now=first.savedAt;
+ assert.equal(artworkHistory(scoped,origin,walletHash,now+ARTWORK_CACHE_TTL-1).length,1);
+ assert.equal(artworkHistory(scoped,origin,walletHash,now+ARTWORK_CACHE_TTL).length,0);
+ assert.equal(artworkHistory(scoped,origin,'f'.repeat(64),now).length,0);
+ for(let i=0;i<25;i++)rememberArtwork(scoped,i.toString(16).padStart(64,'0'),{...first.ticket,id:i.toString(16).padStart(48,'0')},now+i);
+ assert.equal(artworkHistory(scoped,origin,walletHash,now+25).length,20);
+ assert.equal(f.records.get(key).includes('uploadToken'),false);
+ f.records.set(key,JSON.stringify([{...first,ticket:{...first.ticket,uploadToken:'private'}}]));
+ assert.equal(artworkHistory(scoped,origin,walletHash,now).length,0);
+ f.records.set(key,'not json');assert.equal(artworkHistory(scoped,origin,walletHash,now).length,0);
 });
 
 test('switching wallets and refreshing keeps each publication separate and resumes without duplicate uploads',async t=>{

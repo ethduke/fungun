@@ -1,5 +1,6 @@
 import { assetDraft, assetHash, assetWallet, AssetError, type AssetDraft, type PublishedAsset } from './asset-protocol.ts';
 import { prepareAsset, publishLaunchAsset, recoveryFor, readAssetRecovery, checkAssetStatus, clearAssetRecovery, type AssetRecovery, type AssetStorage } from './asset-client.ts';
+import { artworkHistory, rememberArtwork, forgetArtwork } from './artwork-cache.ts';
 
 const bindingKey = 'fungun.launch-artwork.v1';
 const recoveryKey = 'fungun.asset-publication.v1';
@@ -32,10 +33,10 @@ function walletArtworkStorage(storage: AssetStorage, origin: string, walletHash:
 }
 
 export async function ensureLaunchArtwork({ bytes, wallet, draft, origin, storage, cached, isCurrent, onProgress,
-  fetcher = fetch, pause = (ms: number) => new Promise<void>(resolve => setTimeout(resolve, ms)),
+  fetcher = fetch, pause = (ms: number) => new Promise<void>(resolve => setTimeout(resolve, ms)), now = Date.now,
 }: { bytes: Uint8Array; wallet: string; draft: AssetDraft; origin: string; storage: AssetStorage;
   cached?: PublishedAsset | null; isCurrent: () => boolean; onProgress: (message: string) => void;
-  fetcher?: typeof fetch; pause?: (ms: number) => Promise<void>;
+  fetcher?: typeof fetch; pause?: (ms: number) => Promise<void>; now?: () => number;
 }): Promise<PublishedAsset> {
   const account = assetWallet(wallet), details = assetDraft(draft);
   const sourceKey = await assetHash(new TextEncoder().encode(JSON.stringify([account, details, await assetHash(bytes)])));
@@ -43,6 +44,26 @@ export async function ensureLaunchArtwork({ bytes, wallet, draft, origin, storag
   const walletHash = await assetHash(new TextEncoder().encode(account));
   guard();
   storage = walletArtworkStorage(storage, origin, walletHash);
+  const ticketFor = (asset: PublishedAsset): AssetRecovery => ({ id: asset.id, imageHash: asset.imageHash,
+    metadataHash: asset.metadataHash, imageUrl: asset.imageUrl, metadataUrl: asset.metadataUrl,
+    appOrigin: origin, assetOrigin: new URL(asset.imageUrl).origin, walletHash,
+    ...(asset.ipfs ? { version: 2, ipfs: asset.ipfs } : {}) });
+  const completed = (asset: PublishedAsset) => {
+    if (asset.ipfs) rememberArtwork(storage, sourceKey, ticketFor(asset), now());
+    return asset;
+  };
+  const saved = artworkHistory(storage, origin, walletHash, now()).find(entry => entry.sourceKey === sourceKey);
+  if (saved) {
+    onProgress('Using saved artwork…');
+    try {
+      const result = await checkAssetStatus(saved.ticket, account, storage, fetcher);
+      guard();
+      if (result?.status === 'published') return result;
+    } catch (error) {
+      if (!(error instanceof AssetError) || error.code !== 'asset_approval_changed') throw error;
+    }
+    forgetArtwork(storage, sourceKey, origin, walletHash, now());
+  }
   const savedBinding = storage.getItem(bindingKey);
   let binding: { id: string; sourceKey: string } | null = null;
   if (savedBinding) {
@@ -74,7 +95,10 @@ export async function ensureLaunchArtwork({ bytes, wallet, draft, origin, storag
     onProgress('Checking artwork…');
     const result = await wait(recovery);
     if (result.status === 'pending') pendingId = result.id;
-    if (result.status === 'published' && binding?.id === recovery.id && binding.sourceKey === sourceKey) return result;
+    if (result.status === 'published' && binding?.id === recovery.id) {
+      rememberArtwork(storage, binding.sourceKey, ticketFor(result), now());
+      if (binding.sourceKey === sourceKey) return completed(result);
+    }
     // A completed older publication stays public. It must not be attached to
     // changed artwork, or to a legacy recovery without a source-byte binding.
     if (result.status !== 'pending') {
@@ -91,7 +115,7 @@ export async function ensureLaunchArtwork({ bytes, wallet, draft, origin, storag
       version: 2, ipfs: cached.ipfs };
     try {
       const result = await wait(ticket);
-      if (result.status === 'published') return result;
+      if (result.status === 'published') return completed(result);
     } catch (error) {
       if (!(error instanceof AssetError) || error.code !== 'asset_approval_changed') throw error;
     }
@@ -113,7 +137,7 @@ export async function ensureLaunchArtwork({ bytes, wallet, draft, origin, storag
     // acknowledgment through status, never by repeating the publication write.
   }
   guard();
-  if (accepted?.status === 'published') return accepted;
+  if (accepted?.status === 'published') return completed(accepted);
   const result = await wait(ticket);
   if (result.status === 'pending') {
     // A refused request must not become minutes of polling an unstarted upload.
@@ -121,5 +145,5 @@ export async function ensureLaunchArtwork({ bytes, wallet, draft, origin, storag
     throw new AssetError(publicationError?.publicationCause || 'asset_publication_uncertain', publicationError?.retryAfter ?? 0);
   }
   if (result.status !== 'published') throw new AssetError('asset_approval_expired');
-  return result;
+  return completed(result);
 }
