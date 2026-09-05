@@ -71,7 +71,7 @@ test("all allowances debit atomically with separate minute and daily counters", 
 test("request fairness limits and provider caps do not store raw client IPs", () => {
   const budget = new Budget(":memory:");
   try {
-    for (let i = 0; i < 6; i++) budget.request("synthetic-client", true);
+    for (let i = 0; i < 20; i++) budget.request("synthetic-client", true);
     assert.throws(() => budget.request("synthetic-client", true), { status: 429 });
     assert.ok(
       !JSON.stringify(budget.db.prepare("SELECT * FROM counters").all()).includes(

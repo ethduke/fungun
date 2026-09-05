@@ -98,7 +98,7 @@ export class Budget {
     this.debit([
       ["requests", 300, MINUTE],
       [`client:${fingerprint}`, 30, MINUTE],
-      ...(ticker ? [[`ticker:${fingerprint}`, 6, MINUTE]] : []),
+      ...(ticker ? [[`ticker:${fingerprint}`, 20, MINUTE]] : []),
     ]);
   }
 

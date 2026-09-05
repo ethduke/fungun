@@ -3,7 +3,6 @@
 import Image from 'next/image';
 import { useEffect, useState, type ReactNode } from 'react';
 import {
-  Check,
   ChevronDown,
   ImagePlus,
   LockKeyhole,
@@ -25,11 +24,7 @@ import {
   type Destination,
   type ChainId,
 } from '@/lib/launch-model';
-import {
-  tickerLabel,
-  type Catalog,
-  type TickerCheck,
-} from '@/lib/read-service';
+import { type Catalog } from '@/lib/read-service';
 import {
   calculateLaunchCosts,
   approximateLaunchQuote,
@@ -60,8 +55,6 @@ export function LaunchSection({
   destinations,
   onChange,
   catalog,
-  tickerCheck,
-  checking = false,
   now = 0,
   chainId,
   costContextKey,
@@ -77,8 +70,6 @@ export function LaunchSection({
   destinations: Destination[];
   onChange: (destination: Destination) => void;
   catalog?: Catalog | null;
-  tickerCheck?: TickerCheck | null;
-  checking?: boolean;
   now?: number;
   chainId: ChainId;
   costContextKey: string;
@@ -264,12 +255,6 @@ export function LaunchSection({
                 : catalog?.pads[pad.id]?.pairs.find(
                     (pair) => pair.id === pad.pairId,
                   )?.symbol) ?? pairingName(pad.pairId);
-            const reservation =
-              pad.id === 'longbow'
-                ? 'Not supported yet'
-                : checking
-                  ? 'Checking…'
-                  : tickerLabel(tickerCheck?.results[pad.id], now);
             return (
               <div key={pad.id} className="launch-destination">
                 <div className="launch-route">
@@ -304,12 +289,6 @@ export function LaunchSection({
                       Immutable metadata
                     </span>
                   )}
-                  <span>
-                    {reservation === 'Unreserved' && (
-                      <Check size={14} aria-hidden="true" />
-                    )}
-                    Ticker: {reservation.toLowerCase()}
-                  </span>
                 </div>
               </div>
             );

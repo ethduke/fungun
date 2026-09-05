@@ -349,7 +349,7 @@ function ScopedLongLaunch({
             saveLaunchRecovery(prepared.recovery, recoveryScope);
             setRecovery(prepared.recovery);
             setReceipt(null);
-          } else await launch(prepared.checked, prepared.context);
+          } else await launch(prepared.checked, prepared.context, intent);
         },
       });
     } catch (e) {
@@ -367,14 +367,14 @@ function ScopedLongLaunch({
       setBusy('');
     }
   }
-  async function launch(launchPlan: LongPlan, context: string) {
+  async function launch(launchPlan: LongPlan, context: string, intent: string) {
     if (!account.sendLong) throw new LaunchError('wrong_account');
     setBusy('Approve launch in wallet…');
     setError('');
     let saved: LaunchRecovery | undefined;
     const hash = await account.sendLong(
       launchPlan,
-      () => mounted.current && current.current === context,
+      () => mounted.current && current.current === context && currentIntent.current === intent,
       async () => {
         const prior = recoveryScope ? readLaunchRecovery(recoveryScope) : null;
         if (prior && (prior.id !== launchPlan.id || prior.hash))
@@ -424,7 +424,7 @@ function ScopedLongLaunch({
       ? !isLongLaunchPair(pairId)
         ? 'Choose Long / NVDA or TSLA to launch.'
         : !ready
-          ? 'Select only Long and complete your coin details.'
+          ? 'Review your coin details above.'
           : account.chainId !== 4663
             ? 'Your wallet will switch to Robinhood Chain.'
             : ''

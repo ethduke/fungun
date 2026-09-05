@@ -1,11 +1,11 @@
 'use client';
 
-import { useEffect, useLayoutEffect, useRef, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import type { ChainId, PadId } from './launch-model';
 import { isWebviewChain } from './launch-model';
+import { watchTicker, canCheckTicker } from './auto-ticker';
 import { describeError } from './user-error';
 import {
-  checkTicker,
   expiryDelay,
   loadCatalog,
   tickerKey,
@@ -19,10 +19,8 @@ export function useReadService(
   pads: PadId[],
 ) {
   const key = tickerKey(chainId, ticker, pads);
-  const currentKey = useRef(key);
-  useLayoutEffect(() => {
-    currentKey.current = key;
-  }, [key]);
+  const checker = useRef<ReturnType<typeof watchTicker> | null>(null);
+  const padsKey = [...pads].sort().join(',');
   const catalogSequence = useRef(0);
   const [catalog, setCatalog] = useState<Catalog | null>(null);
   const [catalogSettled, setCatalogSettled] = useState('');
@@ -112,26 +110,36 @@ export function useReadService(
     return () => clearTimeout(timer);
   }, [catalog, check, now]);
 
-  async function runCheck() {
-    if (!pads.length || !isWebviewChain(chainId)) return;
-    const requestKey = key;
-    setPendingKey(requestKey);
-    setCheck(null);
-    setCheckError(null);
-    try {
-      const data = await checkTicker(chainId, ticker, pads);
-      if (currentKey.current === requestKey)
-        setCheck({ key: requestKey, data });
-    } catch (error) {
-      if (currentKey.current === requestKey)
-        setCheckError({
-          key: requestKey,
-          message: describeError(error, 'ticker'),
-        });
-    } finally {
-      setPendingKey((pending) => (pending === requestKey ? '' : pending));
-      setNow(performance.now());
-    }
+  useEffect(() => {
+    const selectedPads = padsKey ? (padsKey.split(',') as PadId[]) : [];
+    const watcher = watchTicker({
+      chainId,
+      ticker,
+      pads: selectedPads,
+      onPending: () => {
+        setPendingKey(key);
+        setCheckError(null);
+      },
+      onResult: (data) => {
+        setCheck(previous => data.results.long?.status === 'unverified' && previous?.key === key && previous.data.results.long?.status === 'reserved'
+          ? previous : { key, data });
+        setPendingKey('');
+        setNow(performance.now());
+      },
+      onError: (error) => {
+        setCheck(previous => previous?.key === key && previous.data.results.long?.status === 'reserved' ? previous : null);
+        setCheckError({ key, message: describeError(error, 'ticker') });
+        setPendingKey('');
+      },
+    });
+    checker.current = watcher;
+    return () => {
+      watcher.stop();
+      if (checker.current === watcher) checker.current = null;
+    };
+  }, [chainId, ticker, padsKey, key]);
+  function runCheck() {
+    return checker.current?.flush();
   }
 
   function ensureCatalog() {
@@ -154,7 +162,9 @@ export function useReadService(
     now,
     ensureCatalog,
     check: check?.key === key ? check.data : null,
-    checking: pendingKey === key,
+    checking:
+      canCheckTicker(chainId, ticker, pads) &&
+      (pendingKey === key || (check?.key !== key && checkError?.key !== key)),
     checkError: checkError?.key === key ? checkError.message : null,
     runCheck,
   };

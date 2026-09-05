@@ -3,7 +3,6 @@
 import { useEffect, useRef, useState } from 'react';
 import Image from 'next/image';
 import {
-  ArrowRight,
   Check,
   ChevronDown,
   ImagePlus,
@@ -43,7 +42,7 @@ import {
 import { usePreviewTools } from '@/lib/preview-webmcp';
 import { useDraftCache, useDraftField } from '@/lib/launch-draft';
 import { useReadService } from '@/lib/use-read-service';
-import { tickerNotice } from '@/lib/read-service';
+import { tickerAvailability } from '@/lib/auto-ticker';
 import { launchCostKey } from '@/lib/launch-cost';
 import { useConnectedAccount } from '@/lib/account-context';
 
@@ -71,6 +70,8 @@ export default function Home() {
     ticker,
     readPads,
   );
+  const availability = tickerAvailability(reads.check, chainId, ticker, readPads);
+  const tickerReserved = availability === 'reserved';
   const errors = validateDraft(
     { name, ticker, description, hasImage: !!image },
     destinations,
@@ -411,9 +412,14 @@ export default function Home() {
                         );
                         setTicker(nextTicker);
                       }}
-                      aria-invalid={!!ticker && !!errors.ticker}
+                      data-availability={availability}
+                      onFocus={() => void reads.runCheck()}
+                      onKeyDown={(event) => {
+                        if (event.key === 'Enter') { event.preventDefault(); void reads.runCheck(); }
+                      }}
+                      aria-invalid={!!ticker && (!!errors.ticker || tickerReserved)}
                       aria-describedby={
-                        ticker && errors.ticker ? 'ticker-error' : undefined
+                        ticker && errors.ticker ? 'ticker-error' : ticker ? 'ticker-availability' : undefined
                       }
                     />
                   </div>
@@ -422,37 +428,13 @@ export default function Home() {
                       {errors.ticker}
                     </p>
                   )}
+                  {ticker && !errors.ticker && (
+                    <output id="ticker-availability" className="ticker-availability" data-state={availability} aria-live="polite">
+                      {tickerReserved ? 'RESERVED' : reads.checking ? 'Checking…' : availability === 'unreserved' ? 'UNRESERVED' : 'Availability unavailable'}
+                    </output>
+                  )}
                 </div>
               </div>
-              <div className="ticker-status">
-                <span>
-                  <span className="small-dot neutral" />
-                  {reads.checking
-                    ? 'Checking…'
-                    : reads.check
-                      ? 'Reservation check'
-                      : 'Availability not checked'}
-                </span>
-                <Button
-                  variant="ghost"
-                  size="sm"
-                  disabled={
-                    !ticker ||
-                    !!errors.ticker ||
-                    !readPads.length ||
-                    !isWebviewChain(chainId) ||
-                    reads.checking
-                  }
-                  onClick={() => void reads.runCheck()}
-                >
-                  Check ticker <ArrowRight size={12} />
-                </Button>
-              </div>
-              {(reads.check || reads.checkError) && (
-                <output className="notice" aria-live="polite">
-                  {reads.checkError ?? tickerNotice(reads.check)}
-                </output>
-              )}
               <Collapsible className="extra-details">
                 <CollapsibleTrigger className="details-trigger">
                   Add a description <span>Optional</span>
@@ -552,13 +534,11 @@ export default function Home() {
                 destinations={active}
                 onChange={updateDestination}
                 catalog={reads.catalog}
-                tickerCheck={reads.check}
-                checking={reads.checking}
                 now={reads.now}
               >
                 <LongLaunch
                   enabled={chainId === 4663 && active.some((pad) => pad.id === 'long')}
-                  ready={active.length === 1 && active[0]?.id === 'long' && !imagePending && !Object.keys(errors).length}
+                  ready={!tickerReserved && active.length === 1 && active[0]?.id === 'long' && !imagePending && !Object.keys(errors).length}
                   pairId={active.find((pad) => pad.id === 'long')?.pairId}
                   name={name} ticker={ticker} description={description} image={image}
                   contextKey={launchCostKey({

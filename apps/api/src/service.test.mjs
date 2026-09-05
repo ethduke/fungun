@@ -75,14 +75,14 @@ test("HTTP boundary rejects spoofing, excess input and leaks while keeping reads
   assert.equal(providerLimited.status, 429);
   assert.equal(providerLimited.headers.get("retry-after"), "120");
   assert.equal(providerLimited.headers.get("x-fungun-retry-scope"), "operation");
-  for (let i = 0; i < 4; i++) await post("/v1/ticker", input);
+  for (let i = 0; i < 18; i++) await post("/v1/ticker", input);
   const limited = await post("/v1/ticker", input, {
     "x-forwarded-for": "192.0.2.1",
     "fly-client-ip": "192.0.2.2",
   });
   assert.equal(limited.status, 429);
   assert.ok(Number(limited.headers.get("retry-after")) > 0);
-  assert.equal(calls, 7);
+  assert.equal(calls, 21);
 });
 
 test("fee HTTP endpoints remain non-signing and reject arbitrary calldata", async (t) => {

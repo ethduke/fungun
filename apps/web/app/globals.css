@@ -834,24 +834,17 @@ h2 {
 .ticker-input input {
   padding-left: 27px;
 }
-.ticker-status {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 8px;
+.ticker-availability {
+  display: block;
+  margin-top: 8px;
+  font-size: 14px;
+  font-weight: 600;
   color: #79856d;
-  font-size: 14px;
-  margin-top: 9px;
 }
-.ticker-status > span {
-  display: flex;
-  align-items: center;
-  gap: 7px;
-}
-.ticker-status button {
-  color: #53743f;
-  font-size: 14px;
-}
+.ticker-availability[data-state="reserved"] { color: #b23f2e; }
+.ticker-availability[data-state="unreserved"] { color: #376c38; }
+.ticker-input input[data-availability="reserved"] { border-color: #b23f2e; color: #b23f2e; }
+.ticker-input input[data-availability="unreserved"] { border-color: #376c38; }
 .small-dot.neutral {
   background: #a6ad9a;
 }
