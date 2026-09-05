@@ -10,6 +10,7 @@ import { createIpfsWorker } from './ipfs-worker.mjs';
 import { validateAssetInput } from './asset-service.mjs';
 import { createAssetProxy } from '../../web/lib/asset-proxy.ts';
 import { ensureLaunchArtwork } from '../../web/lib/launch-artwork.ts';
+import { assetHash, assetWallet } from '../../web/lib/asset-protocol.ts';
 
 async function fixture(t) {
   const root = realpathSync(mkdtempSync(join(tmpdir(), 'fungun-click-')));
@@ -37,14 +38,29 @@ async function fixture(t) {
       return Response.json(result);
     }
     assert.equal(kind,'status');
-    const result=store.status(input);
+    let result;
+    try { result=store.status(input); }
+    catch(error) { return Response.json({error:error.code},{status:error.status}); }
     if(delayedChecks-->0)return Response.json({...result,status:'processing',progress:{image:'pinned',metadata:'ready'},issue,retryAt:store.clock()+2000});
     return Response.json(result);
   });
   const fetcher=(path,options)=>proxy(new Request(origin+path,{...options,headers:{...options.headers,origin}}),path.split('/').at(-1));
   const storage={getItem:key=>records.get(key)??null,setItem:(key,value)=>records.set(key,value),removeItem:key=>records.delete(key)};
   const run=(overrides={})=>ensureLaunchArtwork({bytes:image,wallet,draft,origin,storage,fetcher,isCurrent:()=>true,onProgress:()=>{},pause:async()=>worker.idle(),...overrides});
-  return {run,store,wallet,image,draft,writes,requests,records,setLoseResponse:value=>{loseResponse=value;},setDelayedChecks:value=>{delayedChecks=value;},setIssue:value=>{issue=value;}};
+  return {run,store,wallet,image,draft,writes,requests,records,storage,setLoseResponse:value=>{loseResponse=value;},setDelayedChecks:value=>{delayedChecks=value;},setIssue:value=>{issue=value;}};
+}
+
+const recoveryKey = 'fungun.asset-publication.v1';
+const bindingKey = 'fungun.launch-artwork.v1';
+async function keys(wallet) {
+ const suffix=await assetHash(new TextEncoder().encode(assetWallet(wallet)));
+ return {recovery:`${recoveryKey}:${suffix}`,binding:`${bindingKey}:${suffix}`};
+}
+async function makeLegacy(f) {
+ const scoped=await keys(f.wallet);
+ for(const [from,to] of [[scoped.recovery,recoveryKey],[scoped.binding,bindingKey]]) {
+  f.records.set(to,f.records.get(from));f.records.delete(from);
+ }
 }
 
 test('one launch click publishes verified artwork with no wallet signature; subsequent clicks only read status',async t=>{
@@ -71,7 +87,7 @@ test('prolonged verification stays bounded and leaves recovery available without
  await assert.rejects(f.run({pause:async ms=>{delays.push(ms);}}),e=>e.code==='asset_publication_uncertain'&&e.retryAfter===0);
  assert.equal(f.requests.filter(x=>x==='status').length,27);
  assert.equal(delays.reduce((a,b)=>a+b,0),120000);
- assert.ok(f.records.get('fungun.asset-publication.v1'));
+ assert.ok(f.records.get((await keys(f.wallet)).recovery));
  f.setDelayedChecks(0);assert.equal((await f.run()).status,'published');
  assert.equal(f.requests.filter(x=>x==='launch-publish').length,1);assert.equal(f.writes.length,2);
 });
@@ -85,7 +101,7 @@ test('changing the draft during automatic status checks stops the launch',async 
 test('gateway access denial reports the service problem immediately and preserves recovery',async t=>{
  const f=await fixture(t);f.setDelayedChecks(1);f.setIssue('gateway_access_denied');
  await assert.rejects(f.run({pause:async()=>assert.fail('Do not wait on a configuration problem')}),{code:'asset_gateway_unavailable'});
- assert.ok(f.records.get('fungun.asset-publication.v1'));
+ assert.ok(f.records.get((await keys(f.wallet)).recovery));
  assert.equal((await f.run()).status,'published');
  assert.equal(f.requests.filter(x=>x==='launch-publish').length,1);
 });
@@ -121,4 +137,50 @@ test('signature-free publication still honors the shared daily spending limit',a
  f.store.budget.debit([['ipfs-publications',30,86400000]],30);
  await assert.rejects(f.store.acceptLaunch({id:approval.id,wallet:f.wallet,image:f.image,draft:f.draft,uploadToken:approval.uploadToken}),{code:'rate_limited'});
  assert.equal(f.store.get(approval.id).state,'pending');assert.equal(f.writes.length,0);
+});
+
+test('switching wallets and refreshing keeps each publication separate and resumes without duplicate uploads',async t=>{
+ const f=await fixture(t);const first=await f.run();
+ const other=privateKeyToAccount(generatePrivateKey()).address;
+ const second=await f.run({wallet:other,cached:first});
+ assert.equal(second.status,'published');assert.notEqual(second.id,first.id);
+ const before=f.requests.filter(x=>x==='launch-publish').length;
+ // A fresh storage facade represents another page load, with only persisted data.
+ const reloaded={...f.storage};
+ assert.equal((await f.run({storage:reloaded})).id,first.id);
+ assert.equal((await f.run({wallet:other,storage:reloaded})).id,second.id);
+ assert.equal(f.requests.filter(x=>x==='launch-publish').length,before);
+ assert.equal(f.writes.length,4);
+ assert.ok(f.records.get((await keys(f.wallet)).recovery));
+ assert.ok(f.records.get((await keys(other)).recovery));
+ assert.equal(JSON.stringify([...f.records]).includes(other.toLowerCase()),false);
+});
+
+test('legacy artwork from another wallet does not block launch and remains recoverable for its owner',async t=>{
+ const f=await fixture(t);const first=await f.run();await makeLegacy(f);
+ const saved=f.records.get(recoveryKey),binding=f.records.get(bindingKey);
+ const other=privateKeyToAccount(generatePrivateKey()).address;
+ const second=await f.run({wallet:other,cached:first});
+ assert.notEqual(second.id,first.id);assert.equal(second.status,'published');
+ assert.equal(f.records.get(recoveryKey),saved);assert.equal(f.records.get(bindingKey),binding);
+ assert.equal((await f.run()).id,first.id);
+ assert.equal(f.requests.filter(x=>x==='launch-publish').length,2);
+});
+
+test('an uncertain legacy upload survives switching wallets and is only checked when its owner returns',async t=>{
+ const f=await fixture(t);f.setDelayedChecks(30);
+ await assert.rejects(f.run(),{code:'asset_publication_uncertain'});await makeLegacy(f);
+ const firstId=JSON.parse(f.records.get(recoveryKey)).id;
+ const other=privateKeyToAccount(generatePrivateKey()).address;f.setDelayedChecks(0);
+ assert.equal((await f.run({wallet:other})).status,'published');
+ assert.equal((await f.run()).id,firstId);
+ assert.equal(f.requests.filter(x=>x==='launch-publish').length,2);assert.equal(f.writes.length,4);
+});
+
+test('failed legacy migration cannot discard the recovery or issue a new upload',async t=>{
+ const f=await fixture(t);const first=await f.run();await makeLegacy(f);
+ const original=f.records.get(recoveryKey),before=f.requests.length;
+ await assert.rejects(f.run({storage:{...f.storage,setItem:()=>{throw new Error('Storage full');}}}));
+ assert.equal(f.records.get(recoveryKey),original);assert.equal(f.requests.length,before);
+ assert.equal((await f.run()).id,first.id);assert.equal(f.writes.length,2);
 });

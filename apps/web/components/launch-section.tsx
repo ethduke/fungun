@@ -260,7 +260,7 @@ export function LaunchSection({
               data-pending={!costs.total}
               aria-live="polite"
             >
-              {costs.total ? formatEth(costs.total.totalWei) : 'Pending'}
+              {costs.total ? formatEth(costs.total.totalWei) : 'Estimate on launch'}
               {hasUsd && <span>≈ {usdTotal}</span>}
             </output>
           </div>
@@ -286,13 +286,13 @@ export function LaunchSection({
                           <dd>
                             {amount
                               ? formatEth(amount.launchpadWei)
-                              : 'Pending'}
+                              : '—'}
                           </dd>
                         </div>
                         <div>
                           <dt>Estimated gas</dt>
                           <dd>
-                            {amount ? formatEth(amount.networkWei) : 'Pending'}
+                            {amount ? formatEth(amount.networkWei) : '—'}
                           </dd>
                         </div>
                         {!!amount?.otherValueWei && (

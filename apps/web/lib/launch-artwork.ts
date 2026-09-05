@@ -1,16 +1,48 @@
 import { assetDraft, assetHash, assetWallet, AssetError, type AssetDraft, type PublishedAsset } from './asset-protocol.ts';
-import { prepareAsset, publishLaunchAsset, recoveryFor, readAssetRecovery, checkAssetStatus, clearAssetRecovery, type AssetRecovery } from './asset-client.ts';
+import { prepareAsset, publishLaunchAsset, recoveryFor, readAssetRecovery, checkAssetStatus, clearAssetRecovery, type AssetRecovery, type AssetStorage } from './asset-client.ts';
 
 const bindingKey = 'fungun.launch-artwork.v1';
+const recoveryKey = 'fungun.asset-publication.v1';
+
+function walletArtworkStorage(storage: AssetStorage, origin: string, walletHash: string): AssetStorage {
+  const scoped: AssetStorage = {
+    getItem: key => storage.getItem(`${key}:${walletHash}`),
+    setItem: (key, value) => storage.setItem(`${key}:${walletHash}`, value),
+    removeItem: key => storage.removeItem(`${key}:${walletHash}`),
+  };
+  const existing = readAssetRecovery(scoped, origin);
+  if (existing) {
+    if (existing.walletHash !== walletHash) throw new AssetError('asset_recovery_wallet');
+    return scoped;
+  }
+  const legacy = readAssetRecovery(storage, origin);
+  if (legacy?.walletHash === walletHash) {
+    // Copy the owner's old recovery before any new request. Retain the original
+    // for older tabs, and never adopt or erase another wallet's publication.
+    const binding = storage.getItem(bindingKey);
+    if (binding) {
+      scoped.setItem(bindingKey, binding);
+      if (scoped.getItem(bindingKey) !== binding) throw new AssetError('asset_recovery_unavailable');
+    }
+    const saved = JSON.stringify(legacy);
+    scoped.setItem(recoveryKey, saved);
+    if (scoped.getItem(recoveryKey) !== saved) throw new AssetError('asset_recovery_unavailable');
+  }
+  return scoped;
+}
+
 export async function ensureLaunchArtwork({ bytes, wallet, draft, origin, storage, cached, isCurrent, onProgress,
   fetcher = fetch, pause = (ms: number) => new Promise<void>(resolve => setTimeout(resolve, ms)),
-}: { bytes: Uint8Array; wallet: string; draft: AssetDraft; origin: string; storage: Storage;
+}: { bytes: Uint8Array; wallet: string; draft: AssetDraft; origin: string; storage: AssetStorage;
   cached?: PublishedAsset | null; isCurrent: () => boolean; onProgress: (message: string) => void;
   fetcher?: typeof fetch; pause?: (ms: number) => Promise<void>;
 }): Promise<PublishedAsset> {
   const account = assetWallet(wallet), details = assetDraft(draft);
   const sourceKey = await assetHash(new TextEncoder().encode(JSON.stringify([account, details, await assetHash(bytes)])));
   const guard = () => { if (!isCurrent()) throw new AssetError('asset_context_changed'); };
+  const walletHash = await assetHash(new TextEncoder().encode(account));
+  guard();
+  storage = walletArtworkStorage(storage, origin, walletHash);
   const savedBinding = storage.getItem(bindingKey);
   let binding: { id: string; sourceKey: string } | null = null;
   if (savedBinding) {
@@ -48,7 +80,7 @@ export async function ensureLaunchArtwork({ bytes, wallet, draft, origin, storag
   } else if (cached?.ipfs) {
     const ticket: AssetRecovery = { id: cached.id, imageHash: cached.imageHash, metadataHash: cached.metadataHash,
       imageUrl: cached.imageUrl, metadataUrl: cached.metadataUrl, appOrigin: origin,
-      assetOrigin: new URL(cached.imageUrl).origin, walletHash: await assetHash(new TextEncoder().encode(account)),
+      assetOrigin: new URL(cached.imageUrl).origin, walletHash,
       version: 2, ipfs: cached.ipfs };
     try {
       const result = await wait(ticket);
