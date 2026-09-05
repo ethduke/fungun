@@ -120,10 +120,21 @@ export class LongLive {
   async prepare(input) {
     const key = createHmac("sha256", this.budget.key).update(`${input.wallet}:${input.publication.metadataHash}`).digest("hex");
     const context = JSON.stringify(input), prior = this.row(key);
-    if (prior && prior.context !== context) fail("launch_context_locked");
+    if (prior && prior.context !== context) {
+      // Re-publication can issue a new upload ID for identical immutable content.
+      // Keep the original transaction identity; only the upload ticket may differ.
+      const original = JSON.parse(prior.context);
+      const equivalent = { ...input, publication: { ...input.publication, id: original.publication.id } };
+      if (JSON.stringify(equivalent) !== prior.context) fail("launch_context_locked");
+      const publication = await this.metadata(input);
+      if (ipfsUri(publication.ipfs.metadataCid) !== JSON.parse(prior.plan).review.metadataUri) fail("launch_assets_unverified");
+    }
     const retry = prior?.state === "wallet" && !prior.tx_hash ? JSON.parse(prior.plan) : null;
-    if (prior?.state !== undefined && prior.state !== "prepared" && !retry) fail("launch_pending");
-    if (retry && (await this.recovery.find(key, retry.transaction)).status !== "retryable") fail("launch_pending");
+    // A browser that copied another draft (or lost its local record) can recover
+    // this exact intent without resubmitting it or asking for wallet history.
+    const resume = () => ({ recovery: { id: key, binding: JSON.parse(prior.plan).binding, hash: prior.tx_hash ?? null } });
+    if (prior?.state !== undefined && prior.state !== "prepared" && !retry) return resume();
+    if (retry && (await this.recovery.find(key, retry.transaction)).status !== "retryable") return resume();
     if (!retry && prior && prior.expires > this.now()) return JSON.parse(prior.plan);
     this.budget.debit([["launch-prepare", 3, 60000], ["launch-prepare", 30, 86400000]]);
     if (!prior && this.db.prepare("SELECT COUNT(*) AS n FROM long_launches").get().n >= 4096) fail("launch_history_full");

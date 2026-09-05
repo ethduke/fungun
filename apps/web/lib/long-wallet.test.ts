@@ -2,7 +2,9 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { keccak256, toHex, type EIP1193Provider } from 'viem';
 import { buildUnsignedLongLaunch } from './long-encoding/long-launch.mjs';
-import { sendLongWallet, validateLongPlan, LaunchPreflightError, type LaunchInput } from './long-wallet.ts';
+import { sendLongWallet, validateLongPlan, LaunchPreflightError, type LaunchInput, readLaunchRecovery, saveLaunchRecovery, prepareLongWallet } from './long-wallet.ts';
+import { launchRecoveryScope } from './launch-draft-cache.ts';
+import { runLaunchFlow } from './launch-flow.ts';
 import type { PublishedAsset } from './asset-protocol.ts';
 const addr = (n: number | bigint) => toHex(BigInt(n), { size: 20 });
 const hash = (n: number) => toHex(BigInt(n), { size: 32 });
@@ -82,4 +84,51 @@ void test('only errors before eth_sendTransaction are eligible for automatic pre
   assert.equal(sends, 0);
   await assert.rejects(sendLongWallet(provider, plan, () => true, async () => {}), e => e === error && !(e instanceof LaunchPreflightError));
   assert.equal(sends, 1);
+});
+
+
+void test('COPY isolates recovery by content, account and destination while preserving legacy and prior attempts', async t => {
+  const storage = new Map<string, string>();
+  const originalStorage = Object.getOwnPropertyDescriptor(globalThis, 'localStorage');
+  Object.defineProperty(globalThis, 'localStorage', { configurable: true, value: {
+    getItem: (key: string) => storage.get(key) ?? null,
+    setItem: (key: string, value: string) => storage.set(key, value),
+  } });
+  t.after(() => {
+    if (originalStorage) Object.defineProperty(globalThis, 'localStorage', originalStorage);
+    else Reflect.deleteProperty(globalThis, 'localStorage');
+  });
+  const draft = { name: 'Original', ticker: 'ORIGINAL', description: '' }, image = new Blob(['artwork']);
+  const scope = await launchRecoveryScope(addr(1001), 'long-NVDA', draft, image);
+  const previous = { id: 'a'.repeat(64), binding: 'b'.repeat(64), hash: hash(600) };
+  saveLaunchRecovery(previous); // Existing production browser record.
+  saveLaunchRecovery(previous, scope);
+  const copied = await launchRecoveryScope(addr(1001), 'long-NVDA', { ...draft, name: 'Copied', ticker: 'COPIED' }, image);
+  assert.equal(readLaunchRecovery(copied), null);
+  const next = { id: 'c'.repeat(64), binding: 'd'.repeat(64), hash: null };
+  saveLaunchRecovery(next, copied);
+  assert.deepEqual(readLaunchRecovery(copied), next);
+  assert.deepEqual(readLaunchRecovery(scope), previous);
+  assert.deepEqual(readLaunchRecovery(), previous);
+  assert.equal(await launchRecoveryScope(addr(1001).toUpperCase(), 'long-NVDA', draft, new Blob(['artwork'])), scope);
+  for (const other of [await launchRecoveryScope(addr(1002), 'long-NVDA', draft, image),
+    await launchRecoveryScope(addr(1001), 'long-TSLA', draft, image),
+    await launchRecoveryScope(addr(1001), 'long-NVDA', draft, new Blob(['different image']))]) {
+    assert.notEqual(other, scope); assert.equal(readLaunchRecovery(other), null);
+  }
+});
+
+void test('existing submitted intent resumes without wallet dispatch after a lost or legacy browser record', async t => {
+  const f = response(), recovery = { id: f.raw.id, binding: f.raw.binding, hash: hash(600) };
+  t.mock.method(globalThis, 'fetch', async () => Response.json({ recovery, serverTime: Date.now() }));
+  let sends = 0, resumed = false;
+  await runLaunchFlow({ artwork: async () => f.published,
+    quote: artwork => prepareLongWallet(f.input, artwork),
+    wallet: async prepared => {
+      if (prepared.recovery) { assert.deepEqual(prepared.recovery, recovery); resumed = true; }
+      else sends++;
+    }, isCurrent: () => true, onProgress: () => {} });
+  assert.ok(resumed); assert.equal(sends, 0);
+  t.mock.method(globalThis, 'fetch', async () => Response.json({ recovery: { ...recovery, hash: 'invalid' } }));
+  await assert.rejects(prepareLongWallet(f.input, f.published), /recovery_unavailable/);
 });

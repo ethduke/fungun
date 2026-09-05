@@ -121,7 +121,7 @@ test('durable recovery survives restart and requotes only the original unused no
   assert.equal(reopened.db.prepare('SELECT COUNT(*) AS n FROM long_launch_attempts').get().n, 2);
   assert.equal(service.row(plan.id).state, 'wallet');
   f.changes.pendingNonce = '0x2';
-  await assert.rejects(service.run('launch-prepare', f.input), /launch_pending/);
+  assert.deepEqual(await service.run('launch-prepare', f.input), { recovery: { id: retry.id, binding: retry.binding, hash: null } });
   await assert.rejects(service.run('launch-prepare', { ...f.input, draft: {...f.input.draft, name:'Changed'} }), /launch_context_locked/);
   assert.equal(service.row(plan.id).plan, JSON.stringify(retry));
 });
@@ -191,4 +191,51 @@ test('configuration and inputs reject arbitrary targets, signatures and unsuppor
   assert.throws(() => readLongLiveConfig({ LONG_WALLET_LAUNCH: 'true' }));
   assert.throws(() => validateLongInput('launch-reserve', { id: 'a'.repeat(64), binding: 'b'.repeat(64), data: '0x' }));
   assert.throws(() => validateLongInput('launch-status', { id: 'a'.repeat(64), hash: 'bad' }));
+});
+
+
+test('another coin gets its own plan while an older wallet attempt stays recoverable', async (t) => {
+  const f = await fixture(t), original = await f.service.run('launch-prepare', f.input);
+  f.service.reserve(original);
+  const copied = { ...f.input, draft: { name: 'Copied coin', ticker: 'COPIED', description: '' },
+    publication: { ...f.input.publication, id: 'd'.repeat(48) } };
+  const imageCid = await ipfsContentId(Buffer.from('copied artwork'));
+  const uri = `ipfs://${imageCid}`;
+  const metadata = Buffer.from(JSON.stringify({ name: copied.draft.name, symbol: copied.draft.ticker,
+    description: '', image: uri, image_hash: uri }));
+  copied.publication.metadataHash = createHash('sha256').update(metadata).digest('hex');
+  f.service.metadata = async () => ({ ...copied.publication, ipfs: { imageCid, metadataCid: await ipfsContentId(metadata) } });
+  const next = await f.service.run('launch-prepare', copied);
+  assert.notEqual(next.id, original.id);
+  assert.equal(next.transaction.nonce, original.transaction.nonce);
+  assert.equal(f.service.row(original.id).state, 'wallet');
+  assert.equal(JSON.parse(f.service.row(original.id).plan).transaction.data, original.transaction.data);
+  assert.equal(f.service.reserve(next).status, 'wallet');
+  assert.equal(f.budget.db.prepare('SELECT COUNT(*) AS n FROM long_launches').get().n, 2);
+  assert.ok(!f.requests.some(m => /send|sign/i.test(m)));
+});
+
+test('submitted and completed launches resume by exact draft even when browser recovery is missing', async (t) => {
+  const f = await fixture(t), plan = await f.service.run('launch-prepare', f.input);
+  const txHash = hash(600);
+  for (const state of ['submitted', 'confirmed', 'failed']) {
+    f.budget.db.prepare('UPDATE long_launches SET state=?,tx_hash=? WHERE id=?').run(state, txHash, plan.id);
+    const reads = f.requests.length;
+    assert.deepEqual(await f.service.run('launch-prepare', f.input), { recovery: { id: plan.id, binding: plan.binding, hash: txHash } });
+    assert.equal(f.requests.length, reads);
+  }
+});
+
+
+test('a verified new upload ticket for the same immutable artwork resumes the original intent', async t => {
+  const f = await fixture(t), plan = await f.service.run('launch-prepare', f.input);
+  const published = await f.service.metadata(f.input);
+  const input = { ...f.input, publication: { ...f.input.publication, id: 'e'.repeat(48) } };
+  let verified = false;
+  f.service.metadata = async request => { assert.equal(request.publication.id, input.publication.id); verified = true; return published; };
+  assert.deepEqual(await f.service.run('launch-prepare', input), plan);
+  assert.ok(verified);
+  assert.equal(f.budget.db.prepare('SELECT COUNT(*) AS n FROM long_launches').get().n, 1);
+  f.service.metadata = async () => ({ ...published, ipfs: { ...published.ipfs, metadataCid: published.ipfs.imageCid } });
+  await assert.rejects(f.service.run('launch-prepare', input), /launch_assets_unverified/);
 });

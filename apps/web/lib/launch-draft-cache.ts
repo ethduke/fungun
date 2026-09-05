@@ -234,6 +234,14 @@ export async function draftArtworkKey(
   );
 }
 
+/** Content identity survives object-URL changes and isolates accounts and launch destinations. */
+export async function launchRecoveryScope(wallet: string, pairId: string,
+  draft: Pick<LaunchDraft, 'name' | 'ticker' | 'description'>, image: Blob) {
+  return sha256(new TextEncoder().encode(JSON.stringify([
+    4663, wallet.toLowerCase(), pairId, await draftArtworkKey(draft, image),
+  ])));
+}
+
 export async function encodeLaunchDraft(
   draft: LaunchDraft,
 ): Promise<CachedLaunchDraft> {

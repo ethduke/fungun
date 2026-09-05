@@ -39,7 +39,7 @@ export function launchMessage(error: unknown) {
     insufficient_funds: 'Your wallet needs more ETH on Robinhood Chain for gas.',
     launch_gas_limit: 'Gas is above the launch limit. Wait for fees to fall and refresh the estimate.',
     launch_pending: 'Your launch is being checked automatically.',
-    launch_context_locked: 'Restore the original coin details to resume this launch.',
+    launch_context_locked: 'Coin details changed while preparing. Launch again with the current details.',
     quote_expired: 'The gas estimate expired. Refresh it before opening your wallet.',
     wrong_account: 'The connected account changed. Restore the account used for this launch.',
     wrong_chain: 'Switch your wallet to Robinhood Chain before continuing.',
@@ -86,6 +86,7 @@ export function validateLongPlan(raw: unknown, input: LaunchInput, published: Pu
 export async function prepareLongWallet(input: LaunchInput, publication: PublishedAsset) {
   const started = performance.now();
   const raw = await launchRequest('launch-prepare', input);
+  if (raw.recovery !== undefined) return { recovery: validateLaunchRecovery(raw.recovery) };
   const plan = validateLongPlan(raw, input, publication, started);
   return { plan, observedAt: performance.now(), usdAge: raw.serverTime - plan.usd.quotedAt };
 }
@@ -140,17 +141,26 @@ export async function launchRequest(operation: 'launch-prepare' | 'launch-reserv
 
 export type LaunchRecovery = { id: string; binding: string; hash: string | null };
 const recoveryKey = 'fungun:long-launch:1';
-export function readLaunchRecovery(): LaunchRecovery | null {
+export function validateLaunchRecovery(r: unknown): LaunchRecovery {
+  const value = r as LaunchRecovery;
+  if (!value || Object.keys(value).sort().join(',') !== 'binding,hash,id' || !/^[a-f0-9]{64}$/.test(value.id)
+    || !/^[a-f0-9]{64}$/.test(value.binding) || (value.hash !== null && !/^0x[a-f0-9]{64}$/i.test(value.hash)))
+    throw new LaunchError('recovery_unavailable');
+  return value;
+}
+function scopedRecoveryKey(scope: string) {
+  if (!scope) return recoveryKey; // Keep legacy records intact; new drafts never adopt them blindly.
+  if (!/^[a-f0-9]{64}$/.test(scope)) throw new LaunchError('recovery_unavailable');
+  return `fungun:long-launch:2:${scope}`;
+}
+export function readLaunchRecovery(scope = ''): LaunchRecovery | null {
   try {
-    const text = localStorage.getItem(recoveryKey); if (!text) return null;
-    const r = JSON.parse(text);
-    if (!r || Object.keys(r).sort().join(',') !== 'binding,hash,id' || !/^[a-f0-9]{64}$/.test(r.id)
-      || !/^[a-f0-9]{64}$/.test(r.binding) || (r.hash !== null && !/^0x[a-f0-9]{64}$/i.test(r.hash))) throw new Error();
-    return r;
+    const text = localStorage.getItem(scopedRecoveryKey(scope));
+    return text ? validateLaunchRecovery(JSON.parse(text)) : null;
   } catch { throw new LaunchError('recovery_unavailable'); }
 }
-export function saveLaunchRecovery(value: LaunchRecovery) {
-  try { localStorage.setItem(recoveryKey, JSON.stringify(value));
-    if (JSON.stringify(readLaunchRecovery()) !== JSON.stringify(value)) throw new Error(); }
+export function saveLaunchRecovery(value: LaunchRecovery, scope = '') {
+  try { localStorage.setItem(scopedRecoveryKey(scope), JSON.stringify(validateLaunchRecovery(value)));
+    if (JSON.stringify(readLaunchRecovery(scope)) !== JSON.stringify(value)) throw new Error(); }
   catch { throw new LaunchError('recovery_unavailable'); }
 }

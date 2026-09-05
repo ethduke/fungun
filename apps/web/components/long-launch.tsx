@@ -28,21 +28,15 @@ import {
 
 import { ensureLaunchArtwork } from '@/lib/launch-artwork';
 import { assetErrorText, AssetError } from '@/lib/asset-protocol';
-import { draftImageBlob, type DraftImage } from '@/lib/launch-draft-cache';
+import {
+  draftImageBlob,
+  launchRecoveryScope,
+  type DraftImage,
+} from '@/lib/launch-draft-cache';
 
 const wei = (value: string) => BigInt(value);
 export type LongCosts = { quote: LaunchCostQuote; usd: UsdRate } | null;
-export function LongLaunch({
-  enabled,
-  ready,
-  pairId,
-  name,
-  ticker,
-  description,
-  image,
-  contextKey,
-  onCosts,
-}: {
+type LongLaunchProps = {
   enabled: boolean;
   ready: boolean;
   pairId?: string;
@@ -52,7 +46,84 @@ export function LongLaunch({
   image: DraftImage | null;
   contextKey: string;
   onCosts: (costs: LongCosts) => void;
-}) {
+};
+export function LongLaunch(props: LongLaunchProps) {
+  const { address } = useConnectedAccount();
+  const { hydrated } = useDraftCache();
+  const { name, ticker, description, image, pairId } = props;
+  const identity = JSON.stringify([
+    address?.toLowerCase(),
+    name,
+    ticker,
+    description,
+    image?.url,
+    pairId,
+  ]);
+  const [resolved, setResolved] = useState<{
+    identity: string;
+    scope: string;
+    error?: string;
+  } | null>(null);
+  useEffect(() => {
+    if (!hydrated || !address || !image || !pairId) return;
+    let active = true;
+    void draftImageBlob(image)
+      .then((blob) =>
+        launchRecoveryScope(
+          address,
+          pairId,
+          { name, ticker, description },
+          blob,
+        ),
+      )
+      .then((scope) => {
+        if (active) setResolved({ identity, scope });
+      })
+      .catch((error) => {
+        if (active)
+          setResolved({ identity, scope: '', error: launchMessage(error) });
+      });
+    return () => {
+      active = false;
+    };
+  }, [hydrated, address, name, ticker, description, image, pairId, identity]);
+  if (!props.enabled) return null;
+  if (!address || !image || !pairId || !hydrated)
+    return <ScopedLongLaunch key={identity} {...props} recoveryScope="" />;
+  if (resolved?.identity !== identity || resolved.error)
+    return (
+      <div className="long-launch">
+        <Button className="launch-button" disabled>
+          Launch coin
+          <LaunchGun />
+        </Button>
+        {resolved?.identity === identity && resolved.error && (
+          <p role="alert" className="launch-feedback">
+            {resolved.error}
+          </p>
+        )}
+      </div>
+    );
+  return (
+    <ScopedLongLaunch
+      key={resolved.scope}
+      {...props}
+      recoveryScope={resolved.scope}
+    />
+  );
+}
+function ScopedLongLaunch({
+  enabled,
+  ready,
+  pairId,
+  name,
+  ticker,
+  description,
+  image,
+  contextKey,
+  onCosts,
+  recoveryScope,
+}: LongLaunchProps & { recoveryScope: string }) {
   const account = useConnectedAccount();
   const { published, cachePublication, hydrated } = useDraftCache();
   const [plan, setPlan] = useState<LongPlan | null>(null);
@@ -95,7 +166,7 @@ export function LongLaunch({
     queueMicrotask(() => {
       if (!mounted) return;
       try {
-        setRecovery(readLaunchRecovery());
+        setRecovery(recoveryScope ? readLaunchRecovery(recoveryScope) : null);
         setBlocked(false);
       } catch (e) {
         setError(launchMessage(e));
@@ -103,7 +174,7 @@ export function LongLaunch({
     });
     const sync = () => {
       try {
-        setRecovery(readLaunchRecovery());
+        setRecovery(recoveryScope ? readLaunchRecovery(recoveryScope) : null);
       } catch {
         setBlocked(true);
       }
@@ -113,7 +184,7 @@ export function LongLaunch({
       mounted = false;
       window.removeEventListener('storage', sync);
     };
-  }, []);
+  }, [recoveryScope]);
   useEffect(() => {
     if (!plan) return;
     const timer = setTimeout(
@@ -141,13 +212,13 @@ export function LongLaunch({
         );
         if (result.hash && result.hash !== recovery.hash) {
           const saved = { ...recovery, hash: result.hash };
-          saveLaunchRecovery(saved);
+          saveLaunchRecovery(saved, recoveryScope);
           setRecovery(saved);
         }
       },
       (e) => setError(launchMessage(e)),
     );
-  }, [recovery, busy, cooldown]);
+  }, [recovery, busy, cooldown, recoveryScope]);
   const retryable =
     receipt?.id === recovery?.id && receipt?.status === 'retryable';
   const isReady =
@@ -170,6 +241,7 @@ export function LongLaunch({
     if (
       flight.current ||
       !ready ||
+      !recoveryScope ||
       !image ||
       !pairId ||
       blocked ||
@@ -227,11 +299,9 @@ export function LongLaunch({
               metadataHash: artwork.metadataHash,
             },
           };
-          const {
-            plan: checked,
-            observedAt: observed,
-            usdAge,
-          } = await prepareLongWallet(input, artwork);
+          const prepared = await prepareLongWallet(input, artwork);
+          if (prepared.recovery) return { recovery: prepared.recovery };
+          const { plan: checked, observedAt: observed, usdAge } = prepared;
           if (!isCurrent()) throw new LaunchError('launch_context_locked');
           const context = current.current;
           if (recovery && checked.id !== recovery.id)
@@ -273,7 +343,13 @@ export function LongLaunch({
           });
           return { checked, context };
         },
-        wallet: ({ checked, context }) => launch(checked, context),
+        wallet: async (prepared) => {
+          if (prepared.recovery) {
+            saveLaunchRecovery(prepared.recovery, recoveryScope);
+            setRecovery(prepared.recovery);
+            setReceipt(null);
+          } else await launch(prepared.checked, prepared.context);
+        },
       });
     } catch (e) {
       setError(e instanceof AssetError ? assetErrorText(e) : launchMessage(e));
@@ -299,7 +375,7 @@ export function LongLaunch({
       launchPlan,
       () => mounted.current && current.current === context,
       async () => {
-        const prior = readLaunchRecovery();
+        const prior = recoveryScope ? readLaunchRecovery(recoveryScope) : null;
         if (prior && (prior.id !== launchPlan.id || prior.hash))
           throw new LaunchError('launch_pending');
         saved = {
@@ -307,7 +383,7 @@ export function LongLaunch({
           binding: launchPlan.binding,
           hash: null,
         };
-        saveLaunchRecovery(saved);
+        saveLaunchRecovery(saved, recoveryScope);
         setRecovery(saved);
         setReceipt(null);
         await launchRequest('launch-reserve', {
@@ -319,7 +395,7 @@ export function LongLaunch({
     if (!saved) throw new LaunchError('launch_unknown');
     saved = { ...saved, hash };
     setRecovery(saved);
-    saveLaunchRecovery(saved);
+    saveLaunchRecovery(saved, recoveryScope);
     setNotice('');
   }
   if (!enabled && !recovery) return null;
