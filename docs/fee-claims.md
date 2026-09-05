@@ -197,8 +197,8 @@ telemetry. No addresses, signatures or claim records are stored in SQLite or bro
 storage. Server handles and browser transaction state are bounded, volatile memory.
 
 Every RPC method in a batch consumes durable quota. O1 fee discovery reserves three
-units per page. The shared short burst cap is 60 units/minute so one bounded load
-and claim review can complete; daily caps remain 2,000 total, 600 O1 and 1,400 RPC.
+units per page. The shared short burst cap is 180 units/minute so fee reads and admitted launch preparations
+can complete in the same window; daily caps remain 2,000 total, 600 O1 and 1,400 RPC.
 The existing single-Machine Fly storage requirement and request/concurrency limits
 still apply. Limits can return 429 mid-read; partial failures must not become zero.
 

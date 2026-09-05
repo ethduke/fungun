@@ -79,7 +79,7 @@ export class LongLive {
   constructor(config, upstream, budget, { now = Date.now, fetcher = fetch, rpc } = {}) {
     this.config = config; this.live = config.longLaunch; this.upstream = upstream; this.budget = budget;
     this.db = budget.db; this.now = now; this.fetcher = fetcher;
-    this.rpc = rpc ?? new LongRpc(config, upstream, now);
+    this.rpc = rpc ?? new LongRpc(config, upstream, now, { queue: true, parallel: true });
     this.recovery = new LongRecovery(this.rpc);
     this.cache = new ReadCache(now, 32); this.active = false;
     // Additive table on the existing durable volume; never prune an attempted launch.

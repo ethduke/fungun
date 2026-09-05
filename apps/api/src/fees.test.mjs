@@ -878,13 +878,12 @@ test("batch RPC debits every method, rejects duplicate IDs and never exposes pro
 test("weighted budget debits atomically and retains daily caps", () => {
   const budget = new Budget(":memory:", () => 1000);
   try {
-    budget.upstream("rpc", 30);
-    budget.upstream("rpc", 30);
+    for (let i = 0; i < 6; i++) budget.upstream("rpc", 30);
     assert.throws(() => budget.upstream("rpc"), { code: "rate_limited" });
     const used = budget.db
       .prepare("SELECT used FROM counters WHERE scope = ?")
       .get("upstream:86400000:0").used;
-    assert.equal(used, 60);
+    assert.equal(used, 180);
     assert.throws(() => budget.upstream("rpc", 0));
   } finally {
     budget.close();

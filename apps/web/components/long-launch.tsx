@@ -3,6 +3,7 @@
 import { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { Button } from '@/components/ui/button';
 import { BulletProgress, LaunchGun } from '@/components/launch-motion';
+import { runLaunchFlow } from '@/lib/launch-flow';
 import { watchLaunch, type LaunchReceipt } from '@/lib/long-recovery';
 import { launchActivity } from '@/lib/launch-progress';
 import { useConnectedAccount } from '@/lib/account-context';
@@ -66,10 +67,23 @@ export function LongLaunch({
   const [cooldown, setCooldown] = useState(0);
   const flight = useRef(false);
   const current = useRef(contextKey);
+  // The intended network switch is allowed; edited drafts, accounts or destinations cancel the flow.
+  const intentKey = JSON.stringify([
+    name,
+    ticker,
+    description,
+    image?.url,
+    account.address?.toLowerCase(),
+    pairId,
+    ready,
+    enabled,
+  ]);
+  const currentIntent = useRef(intentKey);
   const mounted = useRef(false);
   useLayoutEffect(() => {
     current.current = contextKey;
-  }, [contextKey]);
+    currentIntent.current = intentKey;
+  }, [contextKey, intentKey]);
   useEffect(() => {
     mounted.current = true;
     return () => {
@@ -115,18 +129,27 @@ export function LongLaunch({
   }, [cooldown]);
   useEffect(() => {
     if (!recovery || busy || cooldown) return;
-    return watchLaunch(recovery, (result) => {
-      setReceipt(result);
-      setError('');
-      setNotice(result.status === 'failed' ? 'The transaction failed. Network gas was charged.' : '');
-      if (result.hash && result.hash !== recovery.hash) {
-        const saved = { ...recovery, hash: result.hash };
-        saveLaunchRecovery(saved);
-        setRecovery(saved);
-      }
-    }, (e) => setError(launchMessage(e)));
+    return watchLaunch(
+      recovery,
+      (result) => {
+        setReceipt(result);
+        setError('');
+        setNotice(
+          result.status === 'failed'
+            ? 'The transaction failed. Network gas was charged.'
+            : '',
+        );
+        if (result.hash && result.hash !== recovery.hash) {
+          const saved = { ...recovery, hash: result.hash };
+          saveLaunchRecovery(saved);
+          setRecovery(saved);
+        }
+      },
+      (e) => setError(launchMessage(e)),
+    );
   }, [recovery, busy, cooldown]);
-  const retryable = receipt?.id === recovery?.id && receipt?.status === 'retryable';
+  const retryable =
+    receipt?.id === recovery?.id && receipt?.status === 'retryable';
   const isReady =
     ready &&
     !!account.address &&
@@ -158,98 +181,108 @@ export function LongLaunch({
       setError('Wallet launches currently support Long / NVDA.');
       return;
     }
+    const walletAddress = account.address;
     flight.current = true;
     setBusy('Preparing launch…');
     setError('');
     setNotice('');
-    const context = contextKey;
-    const isCurrent = () => mounted.current && current.current === context;
+    const intent = intentKey;
+    const isCurrent = () => mounted.current && currentIntent.current === intent;
     try {
       if (account.chainId !== 4663) {
         if (!account.ensureChain) throw new LaunchError('wrong_chain');
         setBusy('Switch network in wallet…');
         await account.ensureChain(account.address, 4663, isCurrent);
-        setNotice('Network switched. Click Launch coin to continue.');
-        return;
+        if (!isCurrent()) return;
       }
       const blob = await draftImageBlob(image);
-      const artwork = await ensureLaunchArtwork({
-        bytes: new Uint8Array(await blob.arrayBuffer()),
-        wallet: account.address,
-        draft: { name, ticker, description },
-        origin: location.origin,
-        storage: localStorage,
-        cached: published,
+      const imageBytes = new Uint8Array(await blob.arrayBuffer());
+      await runLaunchFlow({
         isCurrent,
-        onProgress: (message) => {
-          if (mounted.current) setBusy(message);
-        },
-      });
-      if (!isCurrent()) return;
-      await cachePublication(artwork);
-      setBusy('Estimating launch fees…');
-      const input: LaunchInput = {
-        chainId: 4663,
-        wallet: account.address,
-        draft: { name, ticker, description },
-        pairId,
-        publication: {
-          id: artwork.id,
-          imageHash: artwork.imageHash,
-          metadataHash: artwork.metadataHash,
-        },
-      };
-      const {
-        plan: checked,
-        observedAt: observed,
-        usdAge,
-      } = await prepareLongWallet(input, artwork);
-      if (current.current !== context) return;
-      if (recovery && checked.id !== recovery.id)
-        throw new LaunchError('launch_context_locked');
-      setPlan(checked);
-      setPlanContext(context);
-      setExpired(false);
-      onCosts({
-        quote: {
-          contextKey: context,
-          chainId: 4663,
-          quotedAt: observed,
-          expiresAt: checked.deadline,
-          nativeOnly: true,
-          pads: [
-            {
-              id: 'long',
-              steps: [
+        onProgress: setBusy,
+        artwork: () =>
+          ensureLaunchArtwork({
+            bytes: imageBytes,
+            wallet: walletAddress,
+            draft: { name, ticker, description },
+            origin: location.origin,
+            storage: localStorage,
+            cached: published,
+            isCurrent,
+            onProgress: (message) => {
+              if (mounted.current) setBusy(message);
+            },
+          }),
+        quote: async (artwork) => {
+          await cachePublication(artwork);
+          setBusy('Estimating launch fees…');
+          const input: LaunchInput = {
+            chainId: 4663,
+            wallet: walletAddress,
+            draft: { name, ticker, description },
+            pairId,
+            publication: {
+              id: artwork.id,
+              imageHash: artwork.imageHash,
+              metadataHash: artwork.metadataHash,
+            },
+          };
+          const {
+            plan: checked,
+            observedAt: observed,
+            usdAge,
+          } = await prepareLongWallet(input, artwork);
+          if (!isCurrent()) throw new LaunchError('launch_context_locked');
+          const context = current.current;
+          if (recovery && checked.id !== recovery.id)
+            throw new LaunchError('launch_context_locked');
+          setPlan(checked);
+          setPlanContext(context);
+          setExpired(false);
+          onCosts({
+            quote: {
+              contextKey: context,
+              chainId: 4663,
+              quotedAt: observed,
+              expiresAt: checked.deadline,
+              nativeOnly: true,
+              pads: [
                 {
-                  kind: 'launch',
-                  valueWei: 0n,
-                  launchpadFeeWei: 0n,
-                  network: {
-                    chainId: 4663,
-                    gasUnits: wei(checked.estimatedGas),
-                    gasPriceWei: wei(checked.transaction.gasPrice),
-                  },
+                  id: 'long',
+                  steps: [
+                    {
+                      kind: 'launch',
+                      valueWei: 0n,
+                      launchpadFeeWei: 0n,
+                      network: {
+                        chainId: 4663,
+                        gasUnits: wei(checked.estimatedGas),
+                        gasPriceWei: wei(checked.transaction.gasPrice),
+                      },
+                    },
+                  ],
                 },
               ],
             },
-          ],
+            usd: {
+              microUsdPerEth: wei(checked.usd.microUsdPerEth),
+              sourceLabel: checked.usd.sourceLabel,
+              quotedAt: observed,
+              expiresAt: Math.min(checked.deadline, observed + 60000 - usdAge),
+            },
+          });
+          return { checked, context };
         },
-        usd: {
-          microUsdPerEth: wei(checked.usd.microUsdPerEth),
-          sourceLabel: checked.usd.sourceLabel,
-          quotedAt: observed,
-          expiresAt: Math.min(checked.deadline, observed + 60000 - usdAge),
-        },
+        wallet: ({ checked, context }) => launch(checked, context),
       });
-      await launch(checked, context);
     } catch (e) {
       setError(e instanceof AssetError ? assetErrorText(e) : launchMessage(e));
       setCooldown(
         e instanceof AssetError
           ? e.retryAfter * 1000
-          : e instanceof Error && ['busy', 'rate_limited'].includes(e.message)
-            ? 60000
+          : e instanceof LaunchError &&
+              ['busy', 'rate_limited'].includes(e.message)
+            ? e.retryAfter * 1000
             : 0,
       );
     } finally {
@@ -262,39 +295,32 @@ export function LongLaunch({
     setBusy('Approve launch in wallet…');
     setError('');
     let saved: LaunchRecovery | undefined;
-    try {
-      const hash = await account.sendLong(
-        launchPlan,
-        () => mounted.current && current.current === context,
-        async () => {
-          const prior = readLaunchRecovery();
-          if (prior && (prior.id !== launchPlan.id || prior.hash))
-            throw new LaunchError('launch_pending');
-          saved = {
-            id: launchPlan.id,
-            binding: launchPlan.binding,
-            hash: null,
-          };
-          saveLaunchRecovery(saved);
-          setRecovery(saved);
-          setReceipt(null);
-          await launchRequest('launch-reserve', {
-            id: launchPlan.id,
-            binding: launchPlan.binding,
-          });
-        },
-      );
-      if (!saved) throw new LaunchError('launch_unknown');
-      saved = { ...saved, hash };
-      setRecovery(saved);
-      saveLaunchRecovery(saved);
-      setNotice('');
-    } catch (e) {
-      setError(launchMessage(e));
-    } finally {
-      flight.current = false;
-      setBusy('');
-    }
+    const hash = await account.sendLong(
+      launchPlan,
+      () => mounted.current && current.current === context,
+      async () => {
+        const prior = readLaunchRecovery();
+        if (prior && (prior.id !== launchPlan.id || prior.hash))
+          throw new LaunchError('launch_pending');
+        saved = {
+          id: launchPlan.id,
+          binding: launchPlan.binding,
+          hash: null,
+        };
+        saveLaunchRecovery(saved);
+        setRecovery(saved);
+        setReceipt(null);
+        await launchRequest('launch-reserve', {
+          id: launchPlan.id,
+          binding: launchPlan.binding,
+        });
+      },
+    );
+    if (!saved) throw new LaunchError('launch_unknown');
+    saved = { ...saved, hash };
+    setRecovery(saved);
+    saveLaunchRecovery(saved);
+    setNotice('');
   }
   if (!enabled && !recovery) return null;
   const usd: UsdRate | undefined = plan
@@ -340,10 +366,23 @@ export function LongLaunch({
             <Button
               type="button"
               className="launch-button"
-              disabled={!!busy || !!cooldown || !retryable || !ready || !image || pairId !== 'long-NVDA'}
+              disabled={
+                !!busy ||
+                !!cooldown ||
+                !retryable ||
+                !ready ||
+                !image ||
+                pairId !== 'long-NVDA'
+              }
               onClick={startLaunch}
             >
-              <span>{busy ? 'Launching coin…' : retryable ? 'Launch coin' : 'Confirming launch…'}</span>
+              <span>
+                {busy
+                  ? 'Launching coin…'
+                  : retryable
+                    ? 'Launch coin'
+                    : 'Confirming launch…'}
+              </span>
               <LaunchGun />
             </Button>
           )}

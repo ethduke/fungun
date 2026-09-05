@@ -47,7 +47,9 @@ headers and feed observations are checked; they do not replace that feed.
    its canonical metadata/CID, validates contracts and prices at one explicit block,
    checks ticker/address vacancy, simulates with the wallet as sender, and estimates
    pending gas and balance. It returns no signed bytes.
-4. ETH/USD launch and gas estimates appear and the wallet opens automatically. The browser uses the
+4. Preparation stays active through short service cooldowns and delayed artwork checks.
+   Read-only stages honor Retry-After and resume automatically. An authorized network
+   switch continues the same launch. ETH/USD launch and gas estimates appear and the wallet opens automatically. The browser uses the
    same portable encoder to reconstruct every calldata byte. It rechecks account,
    chain, launcher code and pending nonce, durably reserves one attempt, and asks
    the extension to sign and submit exactly once. The user must approve in the wallet.
@@ -176,3 +178,13 @@ Sources: [Robinhood network configuration](https://docs.robinhood.com/chain/conn
 [Sourcify verified contracts](https://sourcify.dev/).
 
 Gateway format: [Pinata retrieving files](https://docs.pinata.cloud/gateways/retrieving-files).
+
+The launch flow retries only preparation and errors proven to occur before wallet
+dispatch. A pre-dispatch expired quote or service cooldown triggers a fresh quote
+within the same user action, at most three preflight attempts. Once
+`eth_sendTransaction` is invoked, rejection or a lost response never automatically
+sends again. Wallet/account/draft changes or unmount cancel waiting work.
+Preparation retries stop after six attempts per stage or a wait beyond the
+three-minute flow deadline. Daily quota exhaustion remains an explicit error.
+The shared upstream burst allowance is 180 reads/minute; the 2,000 total daily,
+1,400 RPC daily, 600 O1 daily and three launch preparations/minute limits remain.

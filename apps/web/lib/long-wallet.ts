@@ -16,7 +16,12 @@ export class LaunchError extends Error {
   retryAfter: number;
   constructor(message: string, retryAfter = 0) { super(message); this.retryAfter = retryAfter; }
 }
+export class LaunchPreflightError extends Error {
+  override cause: unknown;
+  constructor(cause: unknown) { super('launch_preflight'); this.cause = cause; }
+}
 export function launchMessage(error: unknown) {
+  if (error instanceof LaunchPreflightError) return launchMessage(error.cause);
   let cause = error;
   for (let depth = 0; depth < 8 && cause && typeof cause === 'object'; depth++) {
     const entry = cause as { code?: number; cause?: unknown };
@@ -39,7 +44,7 @@ export function launchMessage(error: unknown) {
     wrong_account: 'The connected account changed. Restore the account used for this launch.',
     wrong_chain: 'Switch your wallet to Robinhood Chain before continuing.',
     launch_eoa_required: 'This launch currently supports ordinary wallet accounts only.',
-    rate_limited: 'The read limit was reached. Wait a minute before checking again.',
+    rate_limited: 'The service is busy. Your draft is saved; please try again shortly.',
     busy: 'Another launch check is running. Try again shortly.',
     reverted: 'The launch simulation failed. No transaction was sent. Refresh the ticker and estimate.',
     launch_transaction_changed: 'The wallet changed this transaction. No matching launch was verified.',
@@ -94,8 +99,9 @@ export async function sendLongWallet(provider: EIP1193Provider, plan: LongPlan, 
     if (BigInt(chain) !== 4663n) throw new LaunchError('wrong_chain');
     if (!isCurrent() || performance.now() >= plan.deadline) throw new LaunchError('quote_expired');
   };
-  await check();
   const tx = plan.transaction;
+  try {
+  await check();
   const code = await provider.request({ method: 'eth_getCode', params: [tx.to as `0x${string}`, 'latest'] });
   if (code === '0x' || !same(keccak256(code), plan.profile.launcher.codeHash)) throw new LaunchError('contract_unverified');
   const nonce = await provider.request({ method: 'eth_getTransactionCount', params: [tx.from as `0x${string}`, 'pending'] });
@@ -103,6 +109,7 @@ export async function sendLongWallet(provider: EIP1193Provider, plan: LongPlan, 
   await check();
   await reserve();
   await check();
+  } catch (error) { throw new LaunchPreflightError(error); }
   // The extension owns signing and submission. One request per user action.
   // Recovery can reopen only the same launch intent with its original nonce.
   const hash = await provider.request({ method: 'eth_sendTransaction', params: [tx as never] });

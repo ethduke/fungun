@@ -78,9 +78,31 @@ test("request fairness limits and provider caps do not store raw client IPs", ()
         "synthetic-client",
       ),
     );
-    for (let i = 0; i < 60; i++) budget.upstream("o1");
+    for (let i = 0; i < 180; i++) budget.upstream("o1");
     assert.throws(() => budget.upstream("rpc"), { status: 429 });
   } finally {
     budget.close();
   }
+});
+
+test('a fee refresh and launch preflights fit together while burst and daily caps remain bounded', () => {
+  let now = 10;
+  const budget = new Budget(':memory:', () => now);
+  try {
+    // Fee scan plus launch/claim checks exceeds the former 60-read cap.
+    for (let i = 0; i < 6; i++) budget.upstream('rpc', 30);
+    assert.throws(() => budget.upstream('rpc'), { code: 'rate_limited' });
+    for (let i = 180; i < 1400; i++) {
+      if (i % 100 === 80) now += 60000;
+      budget.upstream('rpc');
+    }
+    now += 60000;
+    assert.throws(() => budget.upstream('rpc'), { code: 'rate_limited' });
+    for (let i = 0; i < 600; i++) {
+      if (i % 100 === 0) now += 60000;
+      budget.upstream('o1');
+    }
+    now += 60000;
+    assert.throws(() => budget.upstream('market'), { code: 'rate_limited' });
+  } finally { budget.close(); }
 });

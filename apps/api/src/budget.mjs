@@ -105,7 +105,9 @@ export class Budget {
   upstream(provider, units = 1) {
     this.debit(
       [
-        ["upstream", 60, MINUTE],
+        // Three admitted launch preparations plus a fee refresh can exceed 60 reads.
+        // Allow that bounded burst without increasing any daily allowance.
+        ["upstream", 180, MINUTE],
         ["upstream", 2000, DAY],
         [`provider:${provider}`, provider === "o1" ? 600 : 1400, DAY],
       ],

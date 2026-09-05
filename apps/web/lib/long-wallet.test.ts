@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { keccak256, toHex, type EIP1193Provider } from 'viem';
 import { buildUnsignedLongLaunch } from './long-encoding/long-launch.mjs';
-import { sendLongWallet, validateLongPlan, type LaunchInput } from './long-wallet.ts';
+import { sendLongWallet, validateLongPlan, LaunchPreflightError, type LaunchInput } from './long-wallet.ts';
 import type { PublishedAsset } from './asset-protocol.ts';
 const addr = (n: number | bigint) => toHex(BigInt(n), { size: 20 });
 const hash = (n: number) => toHex(BigInt(n), { size: 32 });
@@ -63,4 +63,23 @@ void test('only the wallet sends, once, after current identity checks and durabl
   calls.length = 0;
   await assert.rejects(sendLongWallet(provider, plan, () => true, async () => { throw new Error('reservation lost'); }));
   assert.ok(!calls.includes('eth_sendTransaction'));
+});
+
+void test('only errors before eth_sendTransaction are eligible for automatic preflight retry', async () => {
+  const f = response(), plan = validateLongPlan(f.raw, f.input, f.published, performance.now());
+  let sends = 0;
+  const error = new Error('lost wallet response');
+  const provider = { request: async ({ method }: { method: string }) => {
+    if (method === 'eth_accounts') return [f.input.wallet];
+    if (method === 'eth_chainId') return '0x1237';
+    if (method === 'eth_getCode') return '0x01';
+    if (method === 'eth_getTransactionCount') return '0x1';
+    if (method === 'eth_sendTransaction') { sends++; throw error; }
+    throw new Error('unexpected');
+  } } as EIP1193Provider;
+  await assert.rejects(sendLongWallet(provider, plan, () => true, async () => { throw error; }),
+    e => e instanceof LaunchPreflightError && e.cause === error);
+  assert.equal(sends, 0);
+  await assert.rejects(sendLongWallet(provider, plan, () => true, async () => {}), e => e === error && !(e instanceof LaunchPreflightError));
+  assert.equal(sends, 1);
 });
