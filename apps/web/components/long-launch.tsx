@@ -114,7 +114,7 @@ export function LongLaunch({
     return () => clearTimeout(timer);
   }, [cooldown]);
   useEffect(() => {
-    if (!recovery || busy) return;
+    if (!recovery || busy || cooldown) return;
     return watchLaunch(recovery, (result) => {
       setReceipt(result);
       setError('');
@@ -125,7 +125,7 @@ export function LongLaunch({
         setRecovery(saved);
       }
     }, (e) => setError(launchMessage(e)));
-  }, [recovery, busy]);
+  }, [recovery, busy, cooldown]);
   const retryable = receipt?.id === recovery?.id && receipt?.status === 'retryable';
   const isReady =
     ready &&
@@ -340,7 +340,7 @@ export function LongLaunch({
             <Button
               type="button"
               className="launch-button"
-              disabled={!!busy || !retryable || !ready || !image || pairId !== 'long-NVDA'}
+              disabled={!!busy || !!cooldown || !retryable || !ready || !image || pairId !== 'long-NVDA'}
               onClick={startLaunch}
             >
               <span>{busy ? 'Launching coin…' : retryable ? 'Launch coin' : 'Confirming launch…'}</span>

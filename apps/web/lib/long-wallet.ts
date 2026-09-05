@@ -104,7 +104,7 @@ export async function sendLongWallet(provider: EIP1193Provider, plan: LongPlan, 
   await reserve();
   await check();
   // The extension owns signing and submission. One request per user action.
-  // Recovery can reopen only the identical transaction with its original nonce.
+  // Recovery can reopen only the same launch intent with its original nonce.
   const hash = await provider.request({ method: 'eth_sendTransaction', params: [tx as never] });
   if (typeof hash !== 'string' || !/^0x[a-f0-9]{64}$/i.test(hash)) throw new LaunchError('launch_unknown');
   return hash;
