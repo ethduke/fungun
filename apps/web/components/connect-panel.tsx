@@ -29,6 +29,7 @@ import {
   ensureClaimChain as ensureWalletClaimChain,
 } from '@/lib/claim-wallet';
 import type { ClaimQuote } from '@/lib/fee-service';
+import { sendLongWallet, type LongPlan } from '@/lib/long-wallet';
 import { signWalletAsset } from '@/lib/asset-wallet';
 import type { AssetApproval } from '@/lib/asset-protocol';
 import { signImagePayment } from '@/lib/image-wallet';
@@ -57,6 +58,8 @@ async function walletProvider() {
     },
   } as EIP1193Provider;
 }
+const sendLong = async (plan: LongPlan, isCurrent: () => boolean, reserve: () => Promise<void>) =>
+  sendLongWallet(await walletProvider(), plan, isCurrent, reserve);
 const sendClaim = async (quote: ClaimQuote) =>
   sendWalletClaim(await walletProvider(), quote);
 const watchClaim = async (
@@ -99,6 +102,7 @@ function ConnectionControl({
             chainId: connection.chainId,
             ensureChain,
             sendClaim,
+            sendLong,
             watchClaim,
             ensureClaimChain,
             signAsset,

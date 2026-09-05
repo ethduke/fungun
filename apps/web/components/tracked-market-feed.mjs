@@ -34,7 +34,7 @@ export function priceServiceStatus(state) {
   if (state === 'checking') return { text: 'Checking prices…', error: false };
   if (state === 'unavailable')
     return { text: 'Prices unavailable · retrying', error: true };
-  return { text: 'Prices awaiting first quote', error: false };
+  return { text: '', error: false };
 }
 const pricePool = /^0x[\da-f]{64}$/i;
 const priceAddress = /^0x[\da-f]{40}$/i;
@@ -303,7 +303,7 @@ if (
     constructor() {
       super();
       this.attachShadow({ mode: 'open' });
-      this.shadowRoot.innerHTML = `<style>${styles}</style><section aria-label="Tracked market feed"><div class="top"><div class="heading"><h2>Market feed</h2><div class="statuses"><span class="status" role="status" aria-live="polite">Connecting…</span><span class="price-status" role="status" aria-live="polite">Prices awaiting first quote</span></div></div><div class="popular"></div><div class="inflow"><span class="popular-label">&gt;10ETH INFL:</span><nav class="inflow-tokens" aria-label="Tokens over 10 ETH total inflow, oldest first"></nav></div></div><div class="columns"><div class="lane"><h3>ETH <span class="count-eth"></span></h3><div class="list" data-kind="eth" tabindex="0" role="region" aria-label="Tracked ETH pairs"></div></div><div class="lane"><h3>SHARES <span class="count-shares"></span></h3><div class="list" data-kind="shares" tabindex="0" role="region" aria-label="Tracked SHARES pairs"></div></div></div></section>`;
+      this.shadowRoot.innerHTML = `<style>${styles}</style><section aria-label="Tracked market feed"><div class="top"><div class="heading"><h2>Market feed</h2><div class="statuses"><span class="status" role="status" aria-live="polite">Connecting…</span><span class="price-status" role="status" aria-live="polite" hidden></span></div></div><div class="popular"></div><div class="inflow"><span class="popular-label">&gt;10ETH INFL:</span><nav class="inflow-tokens" aria-label="Tokens over 10 ETH total inflow, oldest first"></nav></div></div><div class="columns"><div class="lane"><h3>ETH <span class="count-eth"></span></h3><div class="list" data-kind="eth" tabindex="0" role="region" aria-label="Tracked ETH pairs"></div></div><div class="lane"><h3>SHARES <span class="count-shares"></span></h3><div class="list" data-kind="shares" tabindex="0" role="region" aria-label="Tracked SHARES pairs"></div></div></div></section>`;
       this.rows = [];
       this.inflowQueue = new TrackedInflowQueue();
       this.inflows = [];
@@ -501,6 +501,7 @@ if (
       const priceView = priceServiceStatus(this.priceState);
       priceStatus.dataset.error = String(priceView.error);
       priceStatus.textContent = priceView.text;
+      priceStatus.hidden = !priceView.text;
       status.dataset.error = String(
         Boolean(this.error || this.pauseReason === 'offline'),
       );

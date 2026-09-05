@@ -92,9 +92,9 @@ export function validateAssetInput(kind, input) {
     return input;
   }
   const fields =
-    kind === "prepare"
+    ["prepare", "launch-prepare"].includes(kind)
       ? ["chainId", "wallet", "draft", "imageBase64"]
-      : ["chainId", "wallet", "draft", "imageBase64", "id", "signature"];
+      : ["chainId", "wallet", "draft", "imageBase64", "id", kind === "launch-publish" ? "uploadToken" : "signature"];
   if (
     !input ||
     typeof input !== "object" ||
@@ -122,6 +122,7 @@ export function validateAssetInput(kind, input) {
     draft: normalizeLaunchDetails(input.draft),
     wallet: input.wallet,
     ...(kind === "publish" ? { id: input.id, signature: input.signature } : {}),
+    ...(kind === "launch-publish" ? { id: input.id, uploadToken: input.uploadToken } : {}),
   };
 }
 
@@ -180,7 +181,8 @@ export function createAssetHandler(config, store, processor) {
         request.headers["sec-fetch-site"] === "cross-site"
       )
         throw new ServiceError("origin_denied", 403);
-      const kind =
+      const kind = request.url === "/v1/asset-launch-prepare" ? "launch-prepare"
+        : request.url === "/v1/asset-launch-publish" ? "launch-publish" :
         request.url === "/v1/asset-prepare"
           ? "prepare"
           : request.url === "/v1/asset-publish"
@@ -192,14 +194,14 @@ export function createAssetHandler(config, store, processor) {
         throw new ServiceError("not_found", 404);
       if (kind !== "status" && !config.uploadsEnabled)
         throw new ServiceError("asset_uploads_disabled");
-      if (kind === "prepare") {
+      if (["prepare", "launch-prepare"].includes(kind)) {
         if (preparing) throw new ServiceError("asset_busy", 429, 2);
         preparing = acquired = true;
       }
       const input = validateAssetInput(kind, await body(request));
       if (kind === "status") return send(200, await store.status(input));
-      if (kind === "publish") {
-        const result = await store.publish(input);
+      if (["publish", "launch-publish"].includes(kind)) {
+        const result = await (kind === "launch-publish" ? store.launchPublish(input) : store.publish(input));
         return send(result.status === "processing" ? 202 : 200, result);
       }
       validateImageInput(input.image);
@@ -209,7 +211,7 @@ export function createAssetHandler(config, store, processor) {
       ]);
       const image = await processor.process(input.image);
       if (response.destroyed) return;
-      const challenge = await store.challenge(input.wallet, image.bytes, input.draft);
+      const challenge = await (kind === "launch-prepare" ? store.launchChallenge(input.wallet, image.bytes, input.draft) : store.challenge(input.wallet, image.bytes, input.draft));
       send(200, {
         ...challenge,
         imageBase64: image.bytes.toString("base64"),

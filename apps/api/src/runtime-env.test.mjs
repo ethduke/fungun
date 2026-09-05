@@ -1,6 +1,10 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { apiEnvironment, API_RUNTIME_NAMES } from "./runtime-env.mjs";
+import {
+  apiEnvironment,
+  API_RUNTIME_NAMES,
+  LONG_WALLET_LAUNCH_RUNTIME_NAMES,
+} from "./runtime-env.mjs";
 
 test("API receives only its explicit runtime configuration", () => {
   const local = Object.fromEntries(API_RUNTIME_NAMES.map((name) => [name, "EXAMPLE"]));
@@ -62,4 +66,24 @@ test("RPC batch compatibility is forwarded only as server runtime configuration"
     },
   );
   assert.deepEqual(apiEnvironment({}, { NEXT_PUBLIC_RPC_BATCH_REQUESTS: "false" }), {});
+});
+
+test("all four Long wallet launch settings stay API-only and are forwarded together", () => {
+  assert.deepEqual(LONG_WALLET_LAUNCH_RUNTIME_NAMES, [
+    "LONG_WALLET_LAUNCH",
+    "LONG_LAUNCH_PROFILE_JSON",
+    "LONG_LAUNCH_GUARDS_JSON",
+    "LAUNCH_ASSET_SERVICE_ORIGIN",
+  ]);
+  const local = Object.fromEntries(
+    LONG_WALLET_LAUNCH_RUNTIME_NAMES.map((name) => [name, `${name}-VALUE`]),
+  );
+  for (const name of LONG_WALLET_LAUNCH_RUNTIME_NAMES)
+    local[`NEXT_PUBLIC_${name}`] = "LEAK";
+  assert.deepEqual(
+    apiEnvironment({}, local),
+    Object.fromEntries(
+      LONG_WALLET_LAUNCH_RUNTIME_NAMES.map((name) => [name, `${name}-VALUE`]),
+    ),
+  );
 });

@@ -161,6 +161,18 @@ test("invalid, oversized and redirected gateway content fails closed", async () 
   }
 });
 
+test("gateway access denial is distinguished from a temporary retrieval delay without leaking its body", async () => {
+  const file = await object();
+  for (const status of [401, 403]) {
+    let requests = 0;
+    const publisher = new PinataPublisher({ ...config, fetcher: async () => {
+      requests++; return new Response(jwt, { status });
+    } });
+    await assert.rejects(publisher.verifyObject(file), error => code("ipfs_gateway_access_denied")(error) && error.retryAfter === 60);
+    assert.equal(requests, 1);
+  }
+});
+
 test("account pin inspection is read-only and binds its record to the expected file", async () => {
   const file = await object();
   const calls = [];

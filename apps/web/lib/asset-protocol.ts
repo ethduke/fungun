@@ -10,6 +10,7 @@ export type AssetIpfs = {
   metadataCid: string;
 };
 export type AssetApproval = {
+  uploadToken?: string;
   id: string;
   wallet: string;
   appOrigin: string;
@@ -41,7 +42,7 @@ export type ProcessingAsset = Pick<
   launchReady: false;
   ipfs: AssetIpfs;
   progress: { image: 'staging' | 'ready' | 'sending' | 'pinned' | 'verified'; metadata: 'staging' | 'ready' | 'sending' | 'pinned' | 'verified' };
-  issue?: 'verification_delayed';
+  issue?: 'verification_delayed' | 'gateway_access_denied';
   retryAt?: number;
 };
 export type ExpiredAsset = Pick<
@@ -88,11 +89,11 @@ const messages: Record<string, string> = {
   asset_wallet_pending:
     'Finish the open wallet request, then try again. Nothing was published.',
   asset_context_changed:
-    'The wallet, image or coin details changed. Prepare a new preview.',
+    'Coin details or wallet changed. Click Launch coin again.',
   asset_approval_expired:
-    'This preview expired. Prepare it again before approving.',
+    'Artwork preparation expired. Click Launch coin again.',
   invalid_asset_approval:
-    'The wallet approval could not be verified. Nothing new was published.',
+    'Artwork could not be verified. Please try again.',
   asset_rejected: 'You declined the wallet approval. Nothing was published.',
   asset_busy: 'An image request is already running. Please wait.',
   rate_limited: 'Too many requests. Please wait before trying again.',
@@ -113,9 +114,11 @@ const messages: Record<string, string> = {
   asset_integrity_failed:
     'Stored files could not be verified. Contact support before publishing again.',
   asset_publication_uncertain:
-    'Publication could not be confirmed. Check its status; do not publish again.',
+    'Artwork is taking longer than expected. Your upload is saved; click Launch coin to resume.',
+  asset_gateway_unavailable:
+    'Artwork service is unavailable. Your upload is saved.',
   ipfs_approval_pending:
-    'Finish or let the current image approval expire before preparing another one.',
+    'Previous artwork is pending. Wait a few minutes and try again.',
   ipfs_publication_disabled:
     'IPFS publication is not available yet. Your image has not been uploaded.',
   ipfs_configuration:
@@ -247,12 +250,13 @@ export function assetMessage(
     | 'issuedAt'
     | 'expiresAt'
     | 'ipfs'
+    | 'uploadToken'
   >,
 ) {
   if ('ipfs' in value && value.ipfs) {
     return [
-      'Publish memecoin assets — no transaction or token approval.',
-      'Intent version: 2',
+      value.uploadToken ? 'Launch assets — no wallet signature.' : 'Publish memecoin assets — no transaction or token approval.',
+      value.uploadToken ? 'Intent version: 3' : 'Intent version: 2',
       `Website: ${value.appOrigin}`,
       `Public asset origin: ${value.assetOrigin}`,
       `Wallet: ${value.wallet.toLowerCase()}`,
@@ -296,6 +300,7 @@ export async function validateAssetPreview(
     draft: AssetDraft;
     appOrigin: string;
     startedAt: number;
+    launch?: boolean;
   },
   now = performance.now(),
 ): Promise<AssetApproval> {
@@ -317,7 +322,8 @@ export async function validateAssetPreview(
     'assetOrigin',
   ];
   const fields = raw && typeof raw === 'object' && 'ipfs' in raw ? [...baseFields, 'ipfs'] : baseFields;
-  if (!objectFields(raw, fields))
+  if (!objectFields(raw, expected.launch ? [...fields, 'uploadToken'] : fields)
+    || (expected.launch && (typeof raw.uploadToken !== 'string' || !/^[a-f0-9]{64}$/.test(raw.uploadToken) || !('ipfs' in raw))))
     throw new AssetError('invalid_asset_response');
   const origin = assetOrigin(raw.assetOrigin);
   const draft = assetDraft(raw.draft);
@@ -420,7 +426,7 @@ export function validateProcessingAsset(raw: unknown, expected: AssetApproval | 
     || JSON.stringify(raw.ipfs) !== JSON.stringify(expected.ipfs)
     || !objectFields(raw.progress, ['image','metadata'])
     || !states.includes(String(raw.progress.image)) || !states.includes(String(raw.progress.metadata))
-    || (delayed && (raw.issue !== 'verification_delayed' || !Number.isSafeInteger(raw.retryAt))))
+    || (delayed && (!['verification_delayed', 'gateway_access_denied'].includes(raw.issue as string) || !Number.isSafeInteger(raw.retryAt))))
     throw new AssetError('invalid_asset_response');
   return raw as ProcessingAsset;
 }

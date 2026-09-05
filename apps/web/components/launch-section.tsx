@@ -9,7 +9,6 @@ import {
   LockKeyhole,
   TriangleAlert,
 } from 'lucide-react';
-import { Button } from '@/components/ui/button';
 import { Checkbox } from '@/components/ui/checkbox';
 import { Skeleton } from '@/components/ui/skeleton';
 import {
@@ -17,7 +16,7 @@ import {
   CollapsibleContent,
   CollapsibleTrigger,
 } from '@/components/ui/collapsible';
-import { BulletProgress, LaunchGun } from '@/components/launch-motion';
+import { BulletProgress } from '@/components/launch-motion';
 import {
   chainName,
   draftStatus,
@@ -246,7 +245,6 @@ export function LaunchSection({
           {gasWarning}
         </p>
       )}
-      {children}
       <footer className="launch-footer">
         <div>
           <div className="launch-cost-summary">
@@ -332,10 +330,7 @@ export function LaunchSection({
             </Collapsible>
           )}
         </div>
-        <Button type="button" className="launch-button" disabled>
-          <span>Launch coin</span>
-          <LaunchGun />
-        </Button>
+        {children}
       </footer>
     </section>
   );

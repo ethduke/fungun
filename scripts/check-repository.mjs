@@ -32,6 +32,16 @@ function sensitiveKey(key) {
   return /(?:apikey|privatekey|secret|password|passwd|accesstoken|refreshtoken|authtoken|bearertoken|authorization|mnemonic|seedphrase|signature|rpc(?:https?|wss?)?(?:url|endpoint))/i.test(key.replace(/[^a-z0-9]/gi, ''));
 }
 
+function assignmentPlaceholder(path, key, value) {
+  if (placeholder(value)) return true;
+  if (!/\.test\.(?:mjs|ts)$/.test(path)) return false;
+  const name = key.replace(/[^a-z0-9]/gi, '').toLowerCase();
+  if (name === 'authorization') return /^Bearer (?:EXAMPLE|PLACEHOLDER|REDACTED)$/.test(value);
+  // Exact reserved fixture hosts only, without user info, ports or URL suffixes.
+  return /^(?:base)?rpc(?:https?|wss?)?(?:url|endpoint)$/.test(name)
+    && /^https:\/\/(?:rpc\.|base-rpc\.)?example\.invalid\/?$/.test(value);
+}
+
 function withoutDependencyVersions(path, text) {
   const name = path.split('/').at(-1);
   if (!['package.json', 'package-lock.json', 'npm-shrinkwrap.json'].includes(name)) return text;
@@ -75,7 +85,8 @@ function hasCredentialAssignment(path, source) {
   const text = withoutDependencyVersions(path, source);
   const quoted = /(?:["']([A-Za-z_][\w.-]*)["']|\b([A-Za-z_][\w.-]*))\s*[:=]\s*(?:"([^"\r\n]*)"|'([^'\r\n]*)'|`([^`\r\n]*)`)/g;
   for (const match of text.matchAll(quoted)) {
-    if (sensitiveKey(match[1] ?? match[2]) && !placeholder(match[3] ?? match[4] ?? match[5])) return true;
+    const key = match[1] ?? match[2];
+    if (sensitiveKey(key) && !assignmentPlaceholder(path, key, match[3] ?? match[4] ?? match[5])) return true;
   }
   const numeric = /(?:["']([A-Za-z_][\w.-]*)["']|\b([A-Za-z_][\w.-]*))\s*[:=]\s*(-?\d+(?:\.\d+)?)(?=[,\s;}])/g;
   for (const match of text.matchAll(numeric)) {

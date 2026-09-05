@@ -1,4 +1,4 @@
-import { createHmac, randomBytes } from "node:crypto";
+import { createHmac, randomBytes, timingSafeEqual } from "node:crypto";
 import { closeSync, existsSync, lstatSync, mkdirSync, openSync, readFileSync, realpathSync, statfsSync, unlinkSync } from "node:fs";
 import { join } from "node:path";
 import { isAddress, recoverMessageAddress, zeroAddress } from "viem";
@@ -53,6 +53,8 @@ export class IpfsStore {
         if (this.setting(name) !== value) throw new ServiceError("asset_origin_changed");
       }
       if (this.db.prepare("PRAGMA foreign_key_check").all().length) throw new ServiceError("asset_storage_unavailable");
+      // Additive admission marker; existing signed publications retain their mode.
+      this.db.exec("CREATE TABLE IF NOT EXISTS ipfs_launch_admissions (publication_id TEXT PRIMARY KEY REFERENCES ipfs_publications(id))");
     } catch (error) { this.budget.close(); throw error; }
   }
   setting(name) { return this.db.prepare("SELECT value FROM settings WHERE name=?").get(name)?.value; }
@@ -68,9 +70,12 @@ export class IpfsStore {
   links(row) {
     return { imageUrl: pinataGatewayUrl(this.gateway, row.image_cid), metadataUrl: pinataGatewayUrl(this.gateway, row.metadata_cid) };
   }
-  message(row, wallet) {
+  launchAdmission(id) { return !!this.db.prepare("SELECT 1 FROM ipfs_launch_admissions WHERE publication_id=?").get(id); }
+  uploadToken(row) { return createHmac("sha256", this.budget.key).update(`launch-upload-v3:${row.id}:${row.owner}:${row.image_hash}:${row.metadata_hash}:${row.expires}`).digest("hex"); }
+  launchChallenge(wallet, image, draft) { return this.challenge(wallet, image, draft, true); }
+  message(row, wallet, launch = false) {
     return [
-      "Publish memecoin assets — no transaction or token approval.", "Intent version: 2",
+      launch ? "Launch assets — no wallet signature." : "Publish memecoin assets — no transaction or token approval.", launch ? "Intent version: 3" : "Intent version: 2",
       `Website: ${this.appOrigin}`, `Public asset origin: https://${this.gateway}`,
       `Wallet: ${wallet.toLowerCase()}`, "Chain ID: 4663", "Launchpad: Long", "Storage: public IPFS",
       `Importer: ${row.profile}`, `Metadata schema: ${row.schema_name}`,
@@ -81,13 +86,13 @@ export class IpfsStore {
       `Nonce: ${row.id}`, `Issued at: ${row.created}`, `Expires at: ${row.expires}`,
     ].join("\n");
   }
-  async challenge(wallet, image, draft) {
+  async challenge(wallet, image, draft, launch = false) {
     if (!validWallet(wallet)) throw new ServiceError("invalid_wallet", 400);
     const bundle = await prepareLongIpfsAssets(image, draft), now = this.clock(), owner = this.owner(wallet);
     this.db.prepare("UPDATE ipfs_publications SET state='expired' WHERE state='pending' AND expires<?").run(now);
     const existing = this.db.prepare("SELECT * FROM ipfs_publications WHERE owner=? AND state IN ('pending','reserved')").get(owner);
     if (existing) {
-      if (existing.state === "pending" && this.matches(existing, bundle)) return this.preview(existing, wallet, bundle);
+      if (existing.state === "pending" && this.matches(existing, bundle) && this.launchAdmission(existing.id) === launch) return this.preview(existing, wallet, bundle);
       throw new ServiceError(existing.state === "reserved" ? "asset_publication_uncertain" : "ipfs_approval_pending", 409);
     }
     if (this.db.prepare("SELECT COUNT(*) AS n FROM ipfs_publications").get().n >= 4096)
@@ -97,9 +102,14 @@ export class IpfsStore {
       profile: bundle.profile, schema_name: bundle.schema, image_cid: bundle.image.cid, metadata_cid: bundle.metadata.cid,
       image_hash: bundle.image.sha256, metadata_hash: bundle.metadata.sha256,
       image_size: bundle.image.bytes.length, metadata_size: bundle.metadata.bytes.length, created: now, expires: now + 300000 };
-    this.db.prepare(`INSERT INTO ipfs_publications
+    this.db.exec("BEGIN IMMEDIATE");
+    try {
+      this.db.prepare(`INSERT INTO ipfs_publications
       (id,owner,draft,profile,schema_name,image_cid,metadata_cid,image_hash,metadata_hash,image_size,metadata_size,created,expires,state)
       VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,'pending')`).run(...Object.values(row));
+      if (launch) this.db.prepare("INSERT INTO ipfs_launch_admissions(publication_id) VALUES (?)").run(row.id);
+      this.db.exec("COMMIT");
+    } catch (error) { this.db.exec("ROLLBACK"); throw error; }
     return this.preview(row, wallet, bundle);
   }
   matches(row, bundle) {
@@ -110,24 +120,33 @@ export class IpfsStore {
       && row.image_size === bundle.image.bytes.length && row.metadata_size === bundle.metadata.bytes.length;
   }
   preview(row, wallet, bundle) {
-    return { id: row.id, message: this.message(row, wallet), issuedAt: row.created, expiresAt: row.expires,
+    const launch = this.launchAdmission(row.id);
+    return { ...(launch ? { uploadToken: this.uploadToken(row) } : {}), id: row.id, message: this.message(row, wallet, launch), issuedAt: row.created, expiresAt: row.expires,
       totalBytes: row.image_size + row.metadata_size, imageHash: row.image_hash, metadataHash: row.metadata_hash,
       ...this.links(row), ipfs: this.ipfs(row), draft: bundle.draft };
   }
-  async accept({ id, wallet, signature, image, draft }) {
+  accept(input) { return this.acceptPublication(input, false); }
+  acceptLaunch(input) { return this.acceptPublication(input, true); }
+  async acceptPublication({ id, wallet, signature, uploadToken, image, draft }, launch) {
     if (this.busy) throw new ServiceError("asset_busy", 429, 2);
     this.busy = true;
     try {
-      if (!validId(id) || !validWallet(wallet) || typeof signature !== "string" || !/^0x[a-f0-9]{130}$/i.test(signature))
+      if (!validId(id) || !validWallet(wallet) || (launch ? typeof uploadToken !== "string" || !/^[a-f0-9]{64}$/.test(uploadToken) : typeof signature !== "string" || !/^0x[a-f0-9]{130}$/i.test(signature)))
         throw new ServiceError("invalid_asset_approval", 400);
       const bundle = await prepareLongIpfsAssets(image, draft);
       let row = this.get(id);
       if (!row || row.owner !== this.owner(wallet) || !this.matches(row, bundle))
         throw new ServiceError("asset_approval_changed", 400);
-      let signer;
-      try { signer = await recoverMessageAddress({ message: this.message(row, wallet), signature }); }
-      catch { throw new ServiceError("invalid_asset_approval", 400); }
-      if (signer.toLowerCase() !== wallet.toLowerCase()) throw new ServiceError("invalid_asset_approval", 400);
+      if (this.launchAdmission(id) !== launch) throw new ServiceError("invalid_asset_approval", 400);
+      if (launch) {
+        if (!timingSafeEqual(Buffer.from(uploadToken, "hex"), Buffer.from(this.uploadToken(row), "hex")))
+          throw new ServiceError("invalid_asset_approval", 400);
+      } else {
+        let signer;
+        try { signer = await recoverMessageAddress({ message: this.message(row, wallet), signature }); }
+        catch { throw new ServiceError("invalid_asset_approval", 400); }
+        if (signer.toLowerCase() !== wallet.toLowerCase()) throw new ServiceError("invalid_asset_approval", 400);
+      }
       row = this.get(id);
       if (row.state === "published") return this.result(row);
       if (row.state === "reserved") {
@@ -177,7 +196,7 @@ export class IpfsStore {
     if (row.state === "published") return { ...base, status: "published" };
     const states = Object.fromEntries(this.objects(row.id).map((object) => [object.kind, object.state]));
     return { ...base, status: "processing", progress: { image: states.image, metadata: states.metadata },
-      ...(row.error ? { issue: "verification_delayed", retryAt: row.next_check } : {}) };
+      ...(row.error ? { issue: row.error === "gateway_access_denied" ? "gateway_access_denied" : "verification_delayed", retryAt: row.next_check } : {}) };
   }
   pending() { return this.db.prepare("SELECT * FROM ipfs_publications WHERE state IN ('reserved','published') AND next_check<=? ORDER BY next_check,created LIMIT 30").all(this.clock()); }
   async bundle(row) {
@@ -188,10 +207,15 @@ export class IpfsStore {
       throw new ServiceError("asset_integrity_failed");
     return bundle;
   }
-  defer(id) { this.db.prepare("UPDATE ipfs_publications SET next_check=? WHERE id=? AND state IN ('reserved','published')").run(this.clock() + 60000, id); }
-  failed(id) {
-    this.db.prepare(`UPDATE ipfs_publications SET error='verification_delayed',attempts=attempts+1,
-      next_check=? WHERE id=? AND state='reserved'`).run(this.clock() + 60000, id);
+  defer(id) { this.db.prepare("UPDATE ipfs_publications SET error=NULL,next_check=? WHERE id=? AND state IN ('reserved','published')").run(this.clock() + 60000, id); }
+  failed(id, error) {
+    const row = this.get(id);
+    const backoff = [2000, 5000, 10000, 30000, 60000][Math.min(row?.attempts ?? 0, 4)];
+    const retry = Number.isSafeInteger(error?.retryAfter) && error.retryAfter > 0
+      ? error.retryAfter * 1000 : 0;
+    this.db.prepare(`UPDATE ipfs_publications SET error=?,attempts=attempts+1,
+      next_check=? WHERE id=? AND state='reserved'`).run(error?.code === "ipfs_gateway_access_denied"
+        ? "gateway_access_denied" : "verification_delayed", this.clock() + Math.max(backoff, retry), id);
   }
   staged(id) { this.db.prepare("UPDATE ipfs_objects SET state='ready' WHERE publication_id=? AND state='staging'").run(id); }
   begin(id, kind) {

@@ -1,6 +1,7 @@
-export function createIpfsWorker(store, publisher, { enabled = false, intervalMs = 60000 } = {}) {
+export function createIpfsWorker(store, publisher, { enabled = false, intervalMs = 1000 } = {}) {
   let closed = false;
   let running = null;
+  let requested = false;
   async function drain() {
     for (const row of store.pending()) {
       if (closed) break;
@@ -25,7 +26,7 @@ export function createIpfsWorker(store, publisher, { enabled = false, intervalMs
             store.pinned(row.id, kind, receipt);
           }
           object = store.objects(row.id).find((item) => item.kind === kind);
-          if (object.state === "pinned" || object.state === "verified") {
+          if (object.state === "pinned") {
             debit();
             await publisher.inspectPin(object.provider_id, content);
             debit();
@@ -34,15 +35,19 @@ export function createIpfsWorker(store, publisher, { enabled = false, intervalMs
           }
         }
         if (!closed) store.complete(row.id);
-      } catch {
+      } catch (error) {
         // Retain reservations and any uncertain POST; the next pass only reconciles it.
-        store.failed(row.id);
+        store.failed(row.id, error);
       }
     }
   }
   const kick = () => {
-    if (!enabled || closed || running) return;
-    running = drain().finally(() => { running = null; });
+    if (!enabled || closed) return;
+    requested = true;
+    if (running) return;
+    running = (async () => {
+      do { requested = false; await drain(); } while (requested && !closed);
+    })().finally(() => { running = null; });
   };
   const timer = enabled ? setInterval(kick, intervalMs) : null;
   timer?.unref();

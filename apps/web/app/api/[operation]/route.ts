@@ -4,6 +4,9 @@ const operations = new Set([
   'fees',
   'claim-prepare',
   'tracked-prices',
+  'launch-prepare',
+  'launch-reserve',
+  'launch-status',
 ]);
 
 export async function POST(
@@ -47,6 +50,7 @@ export async function POST(
       { error: 'invalid_request' },
       { status: 403, headers },
     );
+  const bodyLimit = operation.startsWith('launch-') ? 4096 : 2048;
   try {
     const backend = new URL(backendOrigin);
     if (
@@ -56,7 +60,7 @@ export async function POST(
       backend.password
     )
       return unavailable();
-    if (Number(request.headers.get('content-length')) > 2048)
+    if (Number(request.headers.get('content-length')) > bodyLimit)
       return Response.json(
         { error: 'request_too_large' },
         { status: 413, headers },
@@ -79,7 +83,7 @@ export async function POST(
         const { done, value } = await reader.read();
         if (done) break;
         size += value.byteLength;
-        if (size > 2048)
+        if (size > bodyLimit)
           return Response.json(
             { error: 'request_too_large' },
             { status: 413, headers },

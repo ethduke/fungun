@@ -12,7 +12,8 @@ starts the local read service, waits for `/healthz`, starts the web app, and sto
 both if either exits. `npm run dev:web` and `npm run dev:api` are retained for
 isolated debugging. The webview remains at http://127.0.0.1:3000; its development
 proxy forwards `/api/catalog`, `/api/ticker`, `/api/fees`, `/api/claim-prepare` and
-`/api/tracked-prices` to the local service on port 8787. An unavailable local
+`/api/tracked-prices` plus the three `/api/launch-*` operations to the local service
+on port 8787. An unavailable local
 service produces a retryable JSON 503 rather than an opaque proxy 502. The public market feed's
 `GET /api/tracked-feed` route runs in the web server. SQLite runtime files live in ignored
 `apps/api/local/`; never delete them to reset a spent quota.
@@ -38,6 +39,11 @@ Leave the committed
   web port, set `APP_ORIGIN` to that exact loopback HTTP origin, and choose a distinct
   `READ_SERVICE_PORT`. Keep the shared `BUDGET_DB_PATH` when the worktrees use the
   same providers so quotas persist.
+- `LONG_WALLET_LAUNCH`, `LONG_LAUNCH_PROFILE_JSON`, `LONG_LAUNCH_GUARDS_JSON`,
+  `LAUNCH_ASSET_SERVICE_ORIGIN`: API-only ordinary Long wallet-launch settings.
+  The launch path stays disabled unless the switch is exactly `true`, provider reads
+  are enabled and all profile, guard, asset-service and RPC checks pass. See
+  [Long wallet launch](long-wallet-launch.md).
 
 Run `npm run runtime:status` to list missing variable names and disabled features
 without printing their values. It performs no network calls or file writes.
@@ -60,10 +66,10 @@ the authenticated Robinhood catalog check. The running web-to-API path then
 returned 194 Robinhood and 10 Base RWA pairings. These are observed counts, not
 fixed expected counts or launch approval. An earlier Base request was throttled;
 no immediate retry was sent and a later explicit check succeeded.
-Launch transactions remain disabled; this catalog verification did not exercise
-wallet claims or payments. Registry identities and the RPC endpoint stay in the
-ignored local environment, never this document. This proves a reservation read
-works, not global uniqueness or launch readiness.
+Wallet claims, Long wallet launch and payments remained disabled in the observed
+runtime; this catalog verification did not exercise them. Registry identities and
+the RPC endpoint stay in the ignored local environment, never this document. This
+proves a reservation read works, not global uniqueness or launch readiness.
 
 With the local webview and API running, `npm run verify:catalog:local -- 4663`
 checks Robinhood; use `8453` for Base. Each explicit command makes one local HTTP
@@ -88,6 +94,10 @@ The browser sends same-origin JSON POSTs with `x-fungun-intent` equal to the ope
 - `/api/ticker`: `{ "chainId": 4663, "ticker": "MOON", "pads": ["long", "o1"] }`.
   Backend route: `/v1/ticker`. Unsupported chains/pads, extra fields and malformed
   tickers are rejected. O1-only tickers keep their case; Long requires uppercase A–Z.
+- `/api/launch-prepare`, `/api/launch-reserve` and `/api/launch-status`: exact,
+  operation-specific ordinary Long requests described in
+  [Long wallet launch](long-wallet-launch.md). They accept no RPC method, URL,
+  signature, calldata or signing-key override.
 
 The catalog/ticker routes above are bounded anonymous reads, not authenticated financial operations. Origin
 and intent headers deter browser cross-site requests; direct clients can forge them.
@@ -157,7 +167,8 @@ All results are advisory and can change before a transaction.
   Four concurrent upstream requests total, two per provider; eight pending cache keys,
   256 cache entries; no unbounded work queue.
 - API caps: 300 requests/minute globally, 30/minute per socket IP and six ticker
-  checks/minute per socket IP. Sixteen active requests, 64 sockets, 2 KiB bodies,
+  checks/minute per socket IP. Sixteen active requests, 64 sockets, 2 KiB general
+  bodies, 4 KiB launch bodies,
   8 KiB headers; six-second upstream timeouts and capped response bodies.
 - Client identifiers are HMACs with daily rotation, not raw IPs; expired counters are
   removed. No request/body/provider-error logs. Errors return fixed codes and 429
@@ -225,11 +236,11 @@ modify existing DNS before the API and its storage/configuration checks pass.
 Fee reads and wallet-only claim preparation are implemented behind separate runtime
 switches; see [fee coverage, configuration and safety](fee-claims.md). The backend never signs or sends.
 
-Remaining work: live adapter verification with operator-supplied runtime configuration;
-noncustodial launch transaction preparation,
-simulation and explicit wallet approval. Image storage and x402 image jobs now
-run in the separate asset service; see [image generation](image-generation.md).
-Launch transaction preparation remains unavailable.
+Remaining work: live adapter and ordinary Long launch verification with
+operator-supplied runtime configuration and real extension sessions. Image storage
+and x402 image jobs now run in the separate asset service; see
+[image generation](image-generation.md). The implemented Long path remains disabled
+by default until those checks and an explicit production enablement review.
 
 The O1 snapshot checks and catalog weight follow the official
 [configuration schema](https://docs.o1.exchange/launchpad/public-api/reference/meta/get-api-configuration)

@@ -247,7 +247,7 @@ export function calculateLaunchCosts(
 export function costNotice(reason?: UnavailableReason) {
   const messages: Record<UnavailableReason, string> = {
     not_ready:
-      'Costs will appear after the exact launch transactions are prepared. Live quoting is not connected yet.',
+      'Review a supported launch to estimate its fee and gas.',
     expired:
       'This estimate expired. Refresh it before launching; network fees may have changed.',
     changed: 'Your launch or wallet changed. A new estimate is needed.',

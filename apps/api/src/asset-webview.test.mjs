@@ -338,7 +338,7 @@ test("publication rejection preserves safe explanation and backoff without unloc
       assert.equal(error.code, "asset_publication_uncertain");
       assert.equal(error.retryAfter, 60);
       assert.match(assetErrorText(error), /rate-limited/);
-      assert.match(assetErrorText(error), /do not publish again/);
+      assert.match(assetErrorText(error), /Your upload is saved; click Launch coin to resume/);
       assert.ok(!assetErrorText(error).includes("synthetic private detail"));
       return true;
     },

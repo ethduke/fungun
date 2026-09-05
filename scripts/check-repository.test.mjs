@@ -68,6 +68,27 @@ test('permits empty and unmistakable placeholders, environment lookups and regex
   assert.deepEqual(scan('.env.example', ['XAI_API_KEY', '='].join('')), []);
 });
 
+test('permits exact transport placeholders only in tests and matching fields', () => {
+  const cases = [
+    ['rpcUrl', 'https://rpc.example.invalid'],
+    ['baseRpcUrl', 'https://base-rpc.example.invalid'],
+    ['authorization', ['Bearer', 'EXAMPLE'].join(' ')],
+  ];
+  for (const [key, value] of cases) {
+    const body = JSON.stringify({ [key]: value });
+    for (const path of ['rpc.test.mjs', 'proxy.test.ts']) assert.deepEqual(scan(path, body), []);
+    assert.ok(scan('config.json', body).includes('non-placeholder-credential-assignment'));
+    assert.ok(scan('rpc.test.mjs', JSON.stringify({ [['api', 'key'].join('_')]: value })).includes('non-placeholder-credential-assignment'));
+    for (const suffix of ['/credential', '?value=synthetic', '#synthetic', ':443', '.attacker.invalid']) {
+      assert.ok(scan('rpc.test.mjs', JSON.stringify({ [key]: value + suffix })).includes('non-placeholder-credential-assignment'));
+    }
+  }
+  for (const value of ['https://synthetic.example.invalid', 'https://rpc.example.com', ['https://user:', 'synthetic@rpc.example.invalid'].join('')]) {
+    assert.ok(scan('rpc.test.mjs', JSON.stringify({ [['rpc', 'Url'].join('')]: value })).includes('non-placeholder-credential-assignment'));
+  }
+  assert.ok(scan('proxy.test.ts', JSON.stringify({ [['author', 'ization'].join('')]: ['Bearer', 'synthetic-value'].join(' ') })).includes('non-placeholder-credential-assignment'));
+});
+
 test('blank environment values never consume the following line', () => {
   const lines = ['XAI_API_KEY', 'O1_API_KEY', 'RPC_HTTP_URL'].map((key) => `${key}=`);
   for (const newline of ['\n', '\r\n']) assert.deepEqual(scan('.env.example', lines.join(newline)), []);

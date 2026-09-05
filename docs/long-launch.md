@@ -1,5 +1,8 @@
 # Unsigned Long launch boundary
 
+The wallet preparation, simulation and receipt layer is now implemented; see
+[Long wallet launch](long-wallet-launch.md) for live evidence and rollout details.
+
 `apps/api/src/long-launch.mjs` implements an offline ordinary-Long transaction
 builder for Robinhood Chain. It does not read configuration files, contact a
 provider, publish metadata, sign, broadcast or enable the Launch button.

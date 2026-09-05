@@ -12,8 +12,8 @@ intact but is no longer the selected destination for new uploads. See
 | --- | --- | --- | --- |
 | 1. Live data | Partial | Server-only environment allowlists; bounded/cached read service; O1 catalogs; Long ticker checks | Complete contract/pairing verification and O1 ticker checks; fee coverage tracked separately |
 | 2. Image and metadata storage | In progress | Content validation; isolated decoder; historical Fly recovery; deterministic Long IPFS CIDs; guarded Pinata transport; durable per-object journal; no-retry worker; versioned wallet approval and inline progress/recovery | Server-only provider setup; live disposable pin/retrieval and new Long display checks; private-record backups |
-| 3. Launch preparation | Partial | Ordinary Long unsigned builder and cost model, tested offline | Live simulation and trustworthy ETH/USD totals; O1 builder; verified metadata attachment |
-| 4. Wallet execution | Next | Wallet connection exists; artwork approval is not launch execution | Explicit launch approval, per-launchpad progress, receipt checks and durable duplicate-submission protection |
+| 3. Launch preparation | Partial | Ordinary Long verifies a published IPFS receipt, pinned contracts and oracle freshness, then simulates and returns a bounded unsigned transaction with ETH/USD review totals | Disposable live verification with production settings; O1 builder |
+| 4. Wallet execution | Partial | Ordinary Long has explicit wallet approval, durable one-attempt reservation, transaction identity and canonical receipt/state checks; it is disabled by default | Real Rabby/MetaMask tests and production enablement review; O1 execution |
 | 5. Paid Grok | Partial | System prompt builder and editable ticker-populated prompt | One-time payment approval, spend limits, paid generation and output validation |
 | 6. Release | Next | Automated unit/abuse checks, source safety checks and local container checks | Real Rabby/MetaMask tests; final history scan; dedicated Fly deployment; domain/DNS verification |
 
@@ -59,11 +59,18 @@ Publication stays disabled by default. Storage receipts explicitly carry
 `launchReady: false`; a stored image is not proof that a token is safe to launch.
 See [launch-assets.md](launch-assets.md) and [fly-assets.md](fly-assets.md).
 
+Ordinary Long wallet execution is implemented behind four API-only settings and
+remains disabled by default. Preparation reuses the private asset-status service,
+checks a single fresh chain snapshot, simulates with the connected wallet and returns
+unsigned bytes. A durable reservation precedes the one wallet submission; status
+binds the caller's hash to the journaled transaction through terminal results and
+verifies 12 confirmations, the launch event and deployed state. No live transaction
+was sent for this implementation milestone. See [long-wallet-launch.md](long-wallet-launch.md).
+
 ## Next implementation boundary
 
-Connect managed IPFS publication to durable approval and status records, then verify
-approved uploads and new-launch display. Preserve existing Fly records; do not
-activate a quarantined restore or discard old files as part of this change. B2
-asset-backup provisioning is no longer a gate for the new IPFS path. Afterwards
-connect ordinary Long's prepared metadata to live simulation and explicit wallet launch.
+Verify managed IPFS publication and the ordinary Long path with disposable production
+configuration and real Rabby/MetaMask sessions before enabling it. Preserve existing
+Fly records; do not activate a quarantined restore or discard old files as part of
+this change. B2 asset-backup provisioning is no longer a gate for the new IPFS path.
 Do not use the Telegram bot's runtime, secrets or volume for this service.

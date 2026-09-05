@@ -144,7 +144,9 @@ export class PinataPublisher {
         if (controller.signal.aborted) { cancel(response.body); throw new Error("Provider deadline"); }
         return consume(response, controller.signal);
       })()]);
-    } catch {
+    } catch (error) {
+      if (failure === "ipfs_verification_unavailable" && error instanceof ServiceError
+        && error.code === "ipfs_gateway_access_denied") throw error;
       throw new ServiceError(failure, failure === "ipfs_publication_uncertain" ? 409 : 503);
     } finally { clearTimeout(timer); }
   }
@@ -194,6 +196,10 @@ export class PinataPublisher {
       const object = await snapshotObject(input);
       const url = pinataGatewayUrl(this.#gateway, object.cid);
       return this.#request(url, { method: "GET", headers: { Accept: object.mime } }, async (response, signal) => {
+        if (response.status === 401 || response.status === 403) {
+          cancel(response.body);
+          throw new ServiceError("ipfs_gateway_access_denied", 503, 60);
+        }
         const bytes = await readBytes(response, object.bytes.length, object.mime, signal);
         if (!bytes.equals(object.bytes)) throw new Error("Content mismatch");
         return { cid: object.cid, size: bytes.length, contentVerified: true, launchReady: false };

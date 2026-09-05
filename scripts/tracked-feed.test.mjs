@@ -80,7 +80,7 @@ test("COPY uses the token ticker, never its quote symbol or contract address", (
 
 test("price service status distinguishes waiting, active and unavailable reads", () => {
   assert.deepEqual(priceServiceStatus("waiting"), {
-    text: "Prices awaiting first quote",
+    text: "",
     error: false,
   });
   assert.deepEqual(priceServiceStatus("checking"), {

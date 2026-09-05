@@ -14,10 +14,11 @@ const methods = new Set([
   "eth_getBalance",
   "eth_getTransactionCount",
 ]);
+export const isFeeRpcMethod = (method) => methods.has(method);
 const implementationSlot = toHex(BigInt(keccak256(toBytes("eip1967.proxy.implementation"))) - 1n, {
   size: 32,
 });
-function rpcError(error) {
+export function rpcError(error) {
   const message =
     typeof error.message === "string" ? error.message.slice(0, 512).toLowerCase() : "";
   const code = /insufficient funds/.test(message)

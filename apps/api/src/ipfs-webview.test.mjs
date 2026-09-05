@@ -60,8 +60,20 @@ test("webview verifies IPFS CIDs, signs once, tracks progress and resumes withou
   const accepted = await publishAsset(approval, signature, recovery, storage, () => true, client);
   assert.equal(accepted.status, "processing");
   assert.equal(readAssetRecovery(storage, origin).version, 2);
+  const savedKey = [...records.keys()][0];
+  const legacy = JSON.parse(records.get(savedKey));
+  legacy.imageUrl = legacy.imageUrl.replace('/ipfs/', '/files/');
+  legacy.metadataUrl = legacy.metadataUrl.replace('/ipfs/', '/files/');
+  records.set(savedKey, JSON.stringify(legacy));
+  const restored = readAssetRecovery(storage, origin);
+  assert.deepEqual(restored, recovery);
+  for (const field of ['imageUrl', 'metadataUrl']) {
+    records.set(savedKey, JSON.stringify({ ...legacy, [field]: legacy[field] + '?changed=1' }));
+    assert.throws(() => readAssetRecovery(storage, origin));
+  }
+  records.set(savedKey, JSON.stringify(legacy));
   worker.kick(); await worker.idle();
-  const published = await checkAssetStatus(recovery, account.address, storage, client);
+  const published = await checkAssetStatus(restored, account.address, storage, client);
   assert.equal(published.status, "published");
   assert.equal(readAssetRecovery(storage, origin).id, approval.id);
   assert.equal(calls.filter(([method]) => method === "POST").length, 2);

@@ -146,6 +146,7 @@ export function validateDraftPublication(
     !text(result.metadataUrl, 2048)
   )
     return null;
+  let imageUrl = result.imageUrl, metadataUrl = result.metadataUrl;
   try {
     const image = new URL(result.imageUrl);
     const metadata = new URL(result.metadataUrl);
@@ -158,9 +159,14 @@ export function validateDraftPublication(
     if (ipfs) {
       if (!record(ipfs) || ipfs.profile !== 'pinata-v1-256k' || ipfs.schema !== 'long-ipfs-v1'
         || !text(ipfs.imageCid, 59) || !/^b[a-z2-7]{58}$/.test(ipfs.imageCid)
-        || !text(ipfs.metadataCid, 59) || !/^b[a-z2-7]{58}$/.test(ipfs.metadataCid)
-        || image.href !== `${image.origin}/ipfs/${ipfs.imageCid}`
-        || metadata.href !== `${image.origin}/ipfs/${ipfs.metadataCid}`) return null;
+        || !text(ipfs.metadataCid, 59) || !/^b[a-z2-7]{58}$/.test(ipfs.metadataCid)) return null;
+      const canonical = image.href === `${image.origin}/ipfs/${ipfs.imageCid}`
+        && metadata.href === `${image.origin}/ipfs/${ipfs.metadataCid}`;
+      const legacy = image.href === `${image.origin}/files/${ipfs.imageCid}`
+        && metadata.href === `${image.origin}/files/${ipfs.metadataCid}`;
+      if (!canonical && !legacy) return null;
+      imageUrl = `${image.origin}/ipfs/${ipfs.imageCid}`;
+      metadataUrl = `${image.origin}/ipfs/${ipfs.metadataCid}`;
     } else if (image.href !== `${image.origin}/launch-assets/${result.imageHash}.webp`
       || metadata.href !== `${image.origin}/launch-assets/${result.metadataHash}.json`)
       return null;
@@ -173,8 +179,8 @@ export function validateDraftPublication(
       id: result.id,
       imageHash: result.imageHash,
       metadataHash: result.metadataHash,
-      imageUrl: result.imageUrl,
-      metadataUrl: result.metadataUrl,
+      imageUrl,
+      metadataUrl,
       status: 'published',
       launchReady: false,
       ...(record(result.ipfs) ? { ipfs: result.ipfs as PublishedAsset['ipfs'] } : {}),
