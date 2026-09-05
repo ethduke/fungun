@@ -25,7 +25,7 @@ import {
 import type { CatalogPad } from '@/lib/read-service';
 import { FEE_INFO_REVIEWED, launchpadFeeInfo } from '@/lib/launchpad-fees';
 import { LONGBOW_PAIRS } from '@/lib/longbow-markets';
-import { savedO1Pairs } from '@/lib/o1-markets';
+import { selectableO1Pairs } from '@/lib/o1-markets';
 import './launchpad-card.css';
 
 export function LaunchpadCard({
@@ -50,9 +50,7 @@ export function LaunchpadCard({
     ? LONG_PAIRS
     : pad.id === 'longbow'
       ? LONGBOW_PAIRS
-      : live
-        ? catalog.pairs
-        : savedO1Pairs(pad.chainId);
+      : selectableO1Pairs(pad.chainId, catalog);
   const selectedPair = pairs.find((pair) => pair.id === pad.pairId);
   const feeInfo = launchpadFeeInfo(pad);
   return (

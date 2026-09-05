@@ -19,8 +19,9 @@ Start with [llms.txt](/llms.txt) for the site overview.
    market tickers; Longbow uses its 194-entry stock/RWA dropdown registry,
    with the SKYHY label corrected to SKHY. Both use permanent metadata.
    O1 offers ETH and 194 Robinhood RWA pairings, plus optional metadata updates.
-   Current live results replace the saved catalog. The saved list is dated
-   4 September 2026 and does not establish current launch eligibility.
+   Current live results extend the saved catalog. All listed pairs are eligible
+   for draft selection even when the catalog is unavailable or expired. The saved
+   list is dated 4 September 2026; transaction preparation still checks the server configuration.
 5. Read the inline launch section. Draft validation does not confirm ticker
    availability, token eligibility, costs or launch readiness. Check ticker is an
    explicit read: Long reports only its reservation state; O1 stays unverified.

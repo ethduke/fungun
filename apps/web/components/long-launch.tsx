@@ -7,6 +7,7 @@ import { BulletProgress, LaunchGun } from '@/components/launch-motion';
 import { launchActivity } from '@/lib/launch-progress';
 import { useConnectedAccount } from '@/lib/account-context';
 import { useDraftCache } from '@/lib/launch-draft';
+import { LONG_PAIRS } from '@/lib/launch-model';
 import {
   formatEth,
   formatUsd,
@@ -120,6 +121,7 @@ export function LongLaunch({
     const timer = setTimeout(() => setCooldown(0), cooldown);
     return () => clearTimeout(timer);
   }, [cooldown]);
+  const eligiblePair = LONG_PAIRS.some((pair) => pair.id === pairId);
   const isReady =
     ready &&
     !!account.address &&
@@ -127,7 +129,7 @@ export function LongLaunch({
     !!account.sendLong &&
     hydrated &&
     !!image &&
-    pairId === 'long-NVDA' &&
+    eligiblePair &&
     !blocked &&
     !recovery;
   const validPlan =
@@ -147,8 +149,8 @@ export function LongLaunch({
       !hydrated
     )
       return;
-    if (pairId !== 'long-NVDA') {
-      setError('Wallet launches currently support Long / NVDA.');
+    if (!eligiblePair) {
+      setError('Choose a Long pairing to launch.');
       return;
     }
     flight.current = true;
@@ -368,10 +370,10 @@ export function LongLaunch({
     currentReceipt && ['confirmed', 'failed'].includes(currentReceipt.status);
   const transactionHash = currentReceipt?.hash || recovery?.hash;
   const guidance = !enabled
-    ? 'Choose Long / NVDA to launch.'
+    ? 'Choose Long and a pairing to launch.'
     : account.address && !isReady
-      ? pairId !== 'long-NVDA'
-        ? 'Choose Long / NVDA to launch.'
+      ? !eligiblePair
+        ? 'Choose a Long pairing to launch.'
         : !ready
           ? 'Select only Long and complete your coin details.'
           : account.chainId !== 4663
@@ -479,7 +481,7 @@ export function LongLaunch({
               blocked ||
               !hydrated ||
               (Boolean(account.address) &&
-                (!ready || !image || pairId !== 'long-NVDA'))
+                (!ready || !image || !eligiblePair))
             }
             onClick={startLaunch}
           >

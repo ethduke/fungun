@@ -23,7 +23,7 @@ export function launchMessage(error: unknown) {
   const code = error instanceof Error ? error.message : '';
   const messages: Record<string, string> = {
     long_launch_disabled: 'Long launches are not enabled on this server yet.',
-    unsupported_pair: 'This pairing has not been verified for wallet launches yet. Choose NVDA.',
+    unsupported_pair: 'This pairing is not configured on the launch server yet. Choose another pairing.',
     launch_assets_unverified: 'Artwork publication is not verified yet. Check its status before launching.',
     oracle_stale: 'The stock price is paused or out of date. Wait for a fresh market price before launching.',
     contract_unverified: 'A launch contract or price feed changed. Launching is paused for review.',
