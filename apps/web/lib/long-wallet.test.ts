@@ -5,6 +5,7 @@ import { buildUnsignedLongLaunch } from './long-encoding/long-launch.mjs';
 import { sendLongWallet, validateLongPlan, LaunchError, launchMessage, launchRequest, LaunchPreflightError, type LaunchInput, readLaunchRecovery, saveLaunchRecovery, prepareLongWallet, isLongLaunchPair } from './long-wallet.ts';
 import { launchRecoveryScope } from './launch-draft-cache.ts';
 import { runLaunchFlow } from './launch-flow.ts';
+import { longWalletCostStep, formatEthBudget, approximateLaunchQuote } from './launch-cost.ts';
 import type { PublishedAsset } from './asset-protocol.ts';
 const addr = (n: number | bigint) => toHex(BigInt(n), { size: 20 });
 const hash = (n: number) => toHex(BigInt(n), { size: 32 });
@@ -174,4 +175,22 @@ void test('a balance spent after the server quote stops before reservation and w
   await assert.rejects(sendLongWallet(provider,plan,()=>true,async()=>assert.fail('Do not reserve an underfunded launch')),error=>{
     assert.ok(error instanceof LaunchPreflightError);assert.match(launchMessage(error),/You have 0 ETH.*needs 0.0012 ETH/);return true;
   });
+});
+
+void test('displayed gas budget matches the wallet transaction rather than the unbuffered simulation',()=>{
+  const f=response();
+  f.raw.estimatedGas='1996857';f.raw.transaction.gas=toHex(2396229);f.raw.transaction.gasPrice=toHex(385088000);
+  f.raw.maximumGasWei='922759033152000';
+  const plan=validateLongPlan(f.raw,f.input,f.published,performance.now());
+  const step=longWalletCostStep(plan);
+  assert.equal(step.network.chainId,4663);
+  if(step.network.chainId!==4663)assert.fail();
+  const budget=step.network.gasUnits*step.network.gasPriceWei;
+  assert.equal(budget,BigInt(plan.maximumGasWei));
+  assert.equal(formatEthBudget(budget),'0.00092276 ETH');
+  assert.notEqual(budget,BigInt(plan.estimatedGas)*BigInt(plan.transaction.gasPrice));
+  const ceiling=approximateLaunchQuote({chainId:4663,pairId:'long-NVDA',gasUnits:3000000n,gasPriceWei:385088000n,
+    launchpadFeeWei:0n,launchFeeSource:plan.launchFeeSource,basis:'gas-limit',expiresAt:1000},'draft',100);
+  const network=ceiling!.pads[0].steps[0].network;
+  assert.equal(network.gasUnits,3000000n); // A maximum already includes all headroom.
 });

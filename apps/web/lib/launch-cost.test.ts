@@ -353,7 +353,7 @@ await test('background estimates price gas without a draft and remain separate f
   const selection = { contextKey: 'new copied draft', chainId: 4663 as const, pads: ['long'] as const };
   const costs = calculateLaunchCosts(quote, { ...selection, pads: ['long'] }, 101);
   assert.equal(costs.total?.launchpadWei, 0n);
-  assert.equal(costs.total?.networkWei, 1000000000000000n);
+  assert.equal(costs.total?.networkWei, 1200000000000000n);
   assert.equal(costs.total?.transactions, 1);
   assert.equal(approximateLaunchQuote(estimate, 'new copied draft', 295100), null);
   assert.equal(calculateLaunchCosts(quote, { ...selection, pads: ['long', 'o1'] }, 101).total, null);

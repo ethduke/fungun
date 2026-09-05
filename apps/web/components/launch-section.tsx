@@ -33,6 +33,7 @@ import {
   costRefreshDelay,
   costNotice,
   formatEth,
+  formatEthBudget,
   formatUsd,
   highGasNotice,
   type LaunchCostQuote,
@@ -175,7 +176,7 @@ export function LaunchSection({
     ? approximate?.basis === 'gas-limit'
       ? 'Up to '
       : '≈ '
-    : '';
+    : costs.total ? 'Up to ' : '';
   const gasWarning = highGasNotice(
     Object.values(costs.pads).reduce(
       (sum, pad) => sum + (pad?.networkWei ?? 0n),
@@ -198,14 +199,14 @@ export function LaunchSection({
       : useApproximate
         ? approximate?.basis === 'gas-limit'
           ? 'Gas limit at the current gas price. Checked again before wallet approval.'
-          : 'Approximate gas. Checked again before wallet approval.'
+          : 'Approximate gas budget, including a 20% buffer. Checked again before wallet approval.'
         : !costs.total && supportsEstimate
           ? estimateFailed
             ? 'Gas estimate temporarily unavailable. Launch will check again.'
             : 'Calculating approximate gas…'
           : costs.reason
             ? costNotice(costs.reason)
-            : '';
+            : 'Requested gas budget includes a 20% buffer. Wallet fee settings may differ; unused gas is not charged.';
 
   return (
     <section className="launch-section" aria-labelledby="launch-heading">
@@ -330,7 +331,7 @@ export function LaunchSection({
               aria-live="polite"
             >
               {costs.total
-                ? `${prefix}${formatEth(costs.total.totalWei)}`
+                ? `${prefix}${formatEthBudget(costs.total.totalWei)}`
                 : supportsEstimate &&
                     !estimateFailed &&
                     !fallbackCosts.pads.long
@@ -373,10 +374,10 @@ export function LaunchSection({
                           </dd>
                         </div>
                         <div>
-                          <dt>Estimated gas</dt>
+                          <dt>Gas budget</dt>
                           <dd>
                             {amount
-                              ? `${prefix}${formatEth(amount.networkWei)}`
+                              ? `${prefix}${formatEthBudget(amount.networkWei)}`
                               : supportsEstimate &&
                                   pad.id === 'long' &&
                                   !estimateFailed

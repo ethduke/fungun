@@ -11,6 +11,7 @@ import { useDraftCache } from '@/lib/launch-draft';
 import {
   formatEth,
   formatUsd,
+  longWalletCostStep,
   type LaunchCostQuote,
   type UsdRate,
 } from '@/lib/launch-cost';
@@ -321,18 +322,7 @@ function ScopedLongLaunch({
                 {
                   id: 'long',
                   launchFeeSource: checked.launchFeeSource,
-                  steps: [
-                    {
-                      kind: 'launch',
-                      valueWei: wei(checked.transaction.value),
-                      launchpadFeeWei: wei(checked.launchpadFeeWei),
-                      network: {
-                        chainId: 4663,
-                        gasUnits: wei(checked.estimatedGas),
-                        gasPriceWei: wei(checked.transaction.gasPrice),
-                      },
-                    },
-                  ],
+                  steps: [longWalletCostStep(checked)],
                 },
               ],
             },

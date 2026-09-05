@@ -1,5 +1,6 @@
 import type { ChainId, Destination, LaunchpadId } from './launch-model';
 import { parseLaunchFeeSource, type LaunchFeeSource } from './launch-fee-source.ts';
+import type { LongPlan } from './long-wallet.ts';
 
 const WEI_PER_ETH = 10n ** 18n;
 const MAX_AMOUNT = (1n << 256n) - 1n;
@@ -23,6 +24,12 @@ export type CostStep = {
   valueWei: bigint;
   launchpadFeeWei: bigint;
 };
+
+/** Display the gas limit actually requested from the wallet, including its buffer. */
+export function longWalletCostStep(plan: Pick<LongPlan, 'transaction' | 'launchpadFeeWei'>): CostStep {
+  return { kind: 'launch', valueWei: BigInt(plan.transaction.value), launchpadFeeWei: BigInt(plan.launchpadFeeWei),
+    network: { chainId: 4663, gasUnits: BigInt(plan.transaction.gas), gasPriceWei: BigInt(plan.transaction.gasPrice) } };
+}
 
 export type LaunchCostQuote = {
   contextKey: string;
@@ -57,9 +64,11 @@ export function parseApproximateLaunchCost(raw: unknown, started: number, pairId
 }
 export function approximateLaunchQuote(estimate: ApproximateLaunchCost | null, contextKey: string, now: number): LaunchCostQuote | null {
   if (!estimate || estimate.expiresAt <= now) return null;
+  const gasUnits = estimate.basis === 'gas-limit' ? estimate.gasUnits
+    : (estimate.gasUnits * 120n + 99n) / 100n;
   return { contextKey, chainId: 4663, quotedAt: now, expiresAt: now + 30000, nativeOnly: true,
     pads: [{ id: 'long', launchFeeSource: estimate.launchFeeSource, steps: [{ kind: 'launch', valueWei: estimate.launchpadFeeWei, launchpadFeeWei: estimate.launchpadFeeWei,
-      network: { chainId: 4663, gasUnits: estimate.gasUnits, gasPriceWei: estimate.gasPriceWei } }] }] };
+      network: { chainId: 4663, gasUnits, gasPriceWei: estimate.gasPriceWei } }] }] };
 }
 
 export type UsdRate = {
@@ -308,6 +317,12 @@ export function formatEth(wei: bigint | null | undefined) {
     .slice(0, 8)
     .replace(/0+$/, '');
   return `${wei / WEI_PER_ETH}${fraction ? `.${fraction}` : ''} ETH`;
+}
+
+export function formatEthBudget(wei: bigint | null | undefined) {
+  if (!amount(wei)) return '— ETH';
+  const precision = 10n ** 10n;
+  return formatEth(((wei + precision - 1n) / precision) * precision);
 }
 
 export function formatUsd(
