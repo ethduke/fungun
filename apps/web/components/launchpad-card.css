@@ -1,6 +1,72 @@
+.destinations .launchpad-card {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(100px, 136px);
+  gap: 0 12px;
+  min-height: 0;
+  padding: 10px 0;
+}
+
+.launchpad-card .launchpad-top {
+  min-width: 0;
+  min-height: 36px;
+  gap: 8px;
+}
+
+.launchpad-card[data-selected='false'] .launchpad-top {
+  grid-column: 1 / -1;
+}
+
+.launchpad-card .pad-logo {
+  width: 28px;
+  height: 28px;
+  border-radius: 7px;
+}
+
+.launchpad-card .pad-logo.o1 {
+  font-size: 21px;
+}
+
+.launchpad-card .pad-title {
+  font-size: 17px;
+}
+
+.launchpad-card .pair-select {
+  width: 100%;
+  min-width: 0;
+  min-height: 36px;
+  font-size: 15px;
+}
+
+.launchpad-card .pad-fee-share {
+  grid-column: 1 / -1;
+  margin-left: 28px;
+  gap: 5px;
+  font-size: 13px;
+}
+
+.launchpad-card .pad-fee-info {
+  width: 28px;
+  height: 28px;
+}
+
 .pad-logo.longbow {
   color: #344b3f;
   background: #dfe8e2;
+}
+
+@media (max-width: 1000px) and (min-width: 761px), (max-width: 380px) {
+  .destinations .launchpad-card {
+    grid-template-columns: minmax(0, 1fr) 100px;
+    column-gap: 8px;
+  }
+
+  .launchpad-card .launchpad-top {
+    gap: 6px;
+  }
+
+  .launchpad-card .pad-logo {
+    display: none;
+  }
 }
 
 .chain-choice:has([disabled]) {

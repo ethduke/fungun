@@ -465,9 +465,36 @@ h1 > span {
 }
 .composer-grid {
   display: grid;
-  grid-template-columns: 1.08fr 1fr;
+  grid-template-columns: minmax(0, 1.08fr) minmax(0, 1fr);
   gap: 24px;
-  align-items: start;
+  align-items: stretch;
+}
+.launch-column {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  min-width: 0;
+}
+.coin-editor {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+.coin-editor .image-tabs {
+  flex: 1;
+}
+.coin-editor .image-tabs [data-slot='tabs-content']:not([hidden]) {
+  display: flex;
+  flex-direction: column;
+}
+.coin-editor .upload-zone,
+.coin-editor .generation-editor {
+  flex: 1;
+  min-height: 330px;
+}
+.coin-editor .coin-image {
+  width: clamp(170px, 22vw, 280px);
+  height: clamp(170px, 22vw, 280px);
 }
 .composer-panel {
   background: var(--card);
@@ -610,6 +637,24 @@ h2 {
   gap: 24px;
   padding-bottom: 20px;
   border-bottom: 1px solid #e0e4d9;
+}
+.destinations.composer-panel {
+  padding: 20px;
+}
+.destinations .section-heading {
+  margin-bottom: 14px;
+}
+.destinations .section-heading h2 {
+  font-size: 18px;
+}
+.destinations .chain-filter {
+  gap: 8px 18px;
+  padding-bottom: 10px;
+}
+.destinations .chain-choice {
+  gap: 7px;
+  min-height: 36px;
+  font-size: 15px;
 }
 .chain-choice {
   display: flex;
@@ -1172,6 +1217,10 @@ h2 {
   }
   .composer-grid {
     grid-template-columns: 1fr;
+  }
+  .coin-editor .upload-zone,
+  .coin-editor .generation-editor {
+    min-height: 250px;
   }
   .intro {
     margin-bottom: 25px;
