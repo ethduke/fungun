@@ -1,11 +1,12 @@
 'use client';
 
-import { useEffect, useLayoutEffect, useRef, useState } from 'react';
+import { useEffect, useLayoutEffect, useRef, useState, useReducer } from 'react';
 import { Button } from '@/components/ui/button';
 import { BulletProgress, LaunchGun } from '@/components/launch-motion';
 import { runLaunchFlow } from '@/lib/launch-flow';
 import { watchLaunch, type LaunchReceipt } from '@/lib/long-recovery';
 import { launchActivity } from '@/lib/launch-progress';
+import { launchFeedback, emptyLaunchFeedback } from '@/lib/launch-feedback';
 import { useConnectedAccount } from '@/lib/account-context';
 import { useDraftCache } from '@/lib/launch-draft';
 import { LONG_PAIRS } from '@/lib/launch-model';
@@ -29,7 +30,7 @@ import {
 } from '@/lib/long-wallet';
 
 import { ensureLaunchArtwork } from '@/lib/launch-artwork';
-import { assetErrorText, AssetError } from '@/lib/asset-protocol';
+import { AssetError } from '@/lib/asset-protocol';
 import {
   draftImageBlob,
   launchRecoveryScope,
@@ -134,7 +135,14 @@ function ScopedLongLaunch({
   const [blocked, setBlocked] = useState(true);
   const [busy, setBusy] = useState('');
   const [notice, setNotice] = useState('');
-  const [error, setError] = useState('');
+  const [feedback, updateFeedback] = useReducer(launchFeedback, emptyLaunchFeedback);
+  const error = feedback.error || feedback.fundingError;
+  const feedbackAlert = (feedback.fundingError || feedback.error) && (
+    <div role="alert" className="launch-feedback">
+      {feedback.fundingError && <p>{feedback.fundingError}</p>}
+      {feedback.error && <p>{feedback.error}</p>}
+    </div>
+  );
   const [receipt, setReceipt] = useState<LaunchReceipt | null>(null);
   const [expired, setExpired] = useState(false);
   const [cooldown, setCooldown] = useState(0);
@@ -171,7 +179,7 @@ function ScopedLongLaunch({
         setRecovery(recoveryScope ? readLaunchRecovery(recoveryScope) : null);
         setBlocked(false);
       } catch (e) {
-        setError(launchMessage(e));
+        updateFeedback({ type: 'failure', error: e });
       }
     });
     const sync = () => {
@@ -206,7 +214,9 @@ function ScopedLongLaunch({
       recovery,
       (result) => {
         setReceipt(result);
-        setError('');
+        if (['confirmed', 'failed'].includes(result.status))
+          updateFeedback({ type: 'funding-verified' });
+        updateFeedback({ type: 'clear-error' });
         setNotice(
           result.status === 'failed'
             ? 'The transaction failed. Network gas was charged.'
@@ -218,7 +228,7 @@ function ScopedLongLaunch({
           setRecovery(saved);
         }
       },
-      (e) => setError(launchMessage(e)),
+      (e) => updateFeedback({ type: 'failure', error: e }),
     );
   }, [recovery, busy, cooldown, recoveryScope]);
   const retryable =
@@ -253,13 +263,13 @@ function ScopedLongLaunch({
     )
       return;
     if (!eligiblePair) {
-      setError('Choose a Long pairing to launch.');
+      updateFeedback({ type: 'message', message: 'Choose a Long pairing to launch.' });
       return;
     }
     const walletAddress = account.address;
     flight.current = true;
     setBusy('Preparing launch…');
-    setError('');
+    updateFeedback({ type: 'clear-error' });
     setNotice('');
     const intent = intentKey;
     const isCurrent = () => mounted.current && currentIntent.current === intent;
@@ -309,6 +319,7 @@ function ScopedLongLaunch({
           const context = current.current;
           if (recovery && checked.id !== recovery.id)
             throw new LaunchError('launch_context_locked');
+          updateFeedback({ type: 'funding-verified' });
           setPlan(checked);
           setPlanContext(context);
           setExpired(false);
@@ -345,7 +356,7 @@ function ScopedLongLaunch({
         },
       });
     } catch (e) {
-      setError(e instanceof AssetError ? assetErrorText(e) : launchMessage(e));
+      if (isCurrent()) updateFeedback({ type: 'failure', error: e });
       setCooldown(
         e instanceof AssetError
           ? e.retryAfter * 1000
@@ -362,7 +373,7 @@ function ScopedLongLaunch({
   async function launch(launchPlan: LongPlan, context: string, intent: string) {
     if (!account.sendLong) throw new LaunchError('wrong_account');
     setBusy('Approve launch in wallet…');
-    setError('');
+    updateFeedback({ type: 'clear-error' });
     let saved: LaunchRecovery | undefined;
     const hash = await account.sendLong(
       launchPlan,
@@ -455,6 +466,7 @@ function ScopedLongLaunch({
               <LaunchGun />
             </Button>
           )}
+          {feedbackAlert}
           <div className="launch-recovery-links">
             {transactionHash && (
               <a
@@ -535,7 +547,7 @@ function ScopedLongLaunch({
             </span>
             <LaunchGun />
           </Button>
-          {error && <p role="alert" className="launch-feedback">{error}</p>}
+          {feedbackAlert}
           <p className="launch-disclosure">
             Artwork becomes public. You pay the launch fee and gas.
           </p>
@@ -546,11 +558,6 @@ function ScopedLongLaunch({
         <BulletProgress label={activity.label} active={activity.animated} />
       )}
       {notice && <output className="launch-feedback">{notice}</output>}
-      {error && recovery && (
-        <p role="alert" className="launch-feedback">
-          {error}
-        </p>
-      )}
     </div>
   );
 }
