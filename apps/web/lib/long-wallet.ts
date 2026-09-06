@@ -151,21 +151,29 @@ export async function prepareLongWallet(input: LaunchInput, publication: Publish
 }
 
 export async function sendLongWallet(provider: EIP1193Provider, plan: LongPlan, isCurrent: () => boolean, reserve: () => Promise<void>) {
-  const check = async () => {
+  const current = () => {
     if (!isCurrent()) throw new LaunchError('wrong_account');
+    if (performance.now() >= plan.deadline) throw new LaunchError('quote_expired');
+  };
+  const check = async () => {
+    current();
     const accounts = await provider.request({ method: 'eth_accounts' });
     const chain = await provider.request({ method: 'eth_chainId' });
     if (!same(accounts[0], plan.transaction.from)) throw new LaunchError('wrong_account');
     if (BigInt(chain) !== 4663n) throw new LaunchError('wrong_chain');
-    if (!isCurrent() || performance.now() >= plan.deadline) throw new LaunchError('quote_expired');
+    current();
+  };
+  const pendingNonce = async () => {
+    const raw = await provider.request({ method: 'eth_getTransactionCount', params: [plan.transaction.from as `0x${string}`, 'pending'] });
+    if (typeof raw !== 'string' || !hex(raw)) throw new LaunchError('unavailable');
+    return BigInt(raw);
   };
   const tx = plan.transaction;
   try {
   await check();
   const code = await provider.request({ method: 'eth_getCode', params: [tx.to as `0x${string}`, 'latest'] });
   if (code === '0x' || !same(keccak256(code), plan.profile.launcher.codeHash)) throw new LaunchError('contract_unverified');
-  const nonce = await provider.request({ method: 'eth_getTransactionCount', params: [tx.from as `0x${string}`, 'pending'] });
-  if (BigInt(nonce) !== BigInt(tx.nonce)) throw new LaunchError('quote_expired');
+  if (await pendingNonce() !== BigInt(tx.nonce)) throw new LaunchError('quote_expired');
   const balanceRaw = await provider.request({ method: 'eth_getBalance', params: [tx.from as `0x${string}`, 'pending'] });
   await check();
   if (typeof balanceRaw !== 'string' || !/^0x[0-9a-f]{1,64}$/i.test(balanceRaw)) throw new LaunchError('unavailable');
@@ -174,6 +182,12 @@ export async function sendLongWallet(provider: EIP1193Provider, plan: LongPlan, 
     balanceWei:String(balance), requiredWei:String(required), shortfallWei:String(required-balance), basis:'simulation' });
   await reserve();
   await check();
+  // Reservation is a durable network round trip. Another wallet request can
+  // consume the quoted nonce while it is in flight, so make nonce the final
+  // asynchronous preflight check. A mismatch is pending recovery, not a fresh
+  // quote: do not let the launch flow automatically open the wallet again.
+  if (await pendingNonce() !== BigInt(tx.nonce)) throw new LaunchError('launch_pending');
+  current();
   } catch (error) { throw new LaunchPreflightError(error); }
   // The extension owns signing and submission. One request per user action.
   // Recovery can reopen only the same launch intent with its original nonce.

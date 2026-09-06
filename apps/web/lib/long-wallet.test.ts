@@ -68,12 +68,43 @@ void test('only the wallet sends, once, after current identity checks and durabl
   } } as EIP1193Provider;
   assert.equal(await sendLongWallet(provider, plan, () => true, async () => { reserved = true; }), hash(500));
   assert.equal(calls.filter((m) => m === 'eth_sendTransaction').length, 1);
+  assert.equal(calls.filter((m) => m === 'eth_getTransactionCount').length, 2);
+  assert.ok(calls.lastIndexOf('eth_getTransactionCount') > calls.lastIndexOf('eth_chainId'));
+  assert.ok(calls.lastIndexOf('eth_getTransactionCount') < calls.indexOf('eth_sendTransaction'));
   reserved = false; calls.length = 0;
   await assert.rejects(sendLongWallet(provider, plan, () => !reserved, async () => { reserved = true; }));
   assert.ok(!calls.includes('eth_sendTransaction'));
   calls.length = 0;
   await assert.rejects(sendLongWallet(provider, plan, () => true, async () => { throw new Error('reservation lost'); }));
   assert.ok(!calls.includes('eth_sendTransaction'));
+});
+
+void test('a nonce consumed during durable reservation stops before wallet submission and is not automatically retryable', async () => {
+  const f = response(), plan = validateLongPlan(f.raw, f.input, f.published, performance.now());
+  const calls: string[] = [];
+  let nonce = '0x1', reservations = 0, sends = 0;
+  const provider = { request: async ({ method }: { method: string }) => {
+    calls.push(method);
+    if (method === 'eth_accounts') return [f.input.wallet];
+    if (method === 'eth_chainId') return '0x1237';
+    if (method === 'eth_getCode') return '0x01';
+    if (method === 'eth_getTransactionCount') return nonce;
+    if (method === 'eth_getBalance') return toHex(10n ** 18n);
+    if (method === 'eth_sendTransaction') { sends++; return hash(500); }
+    throw new Error('unexpected wallet method');
+  } } as EIP1193Provider;
+  await assert.rejects(sendLongWallet(provider, plan, () => true, async () => {
+    reservations++;
+    nonce = '0x2';
+  }), error => {
+    assert.ok(error instanceof LaunchPreflightError);
+    assert.ok(error.cause instanceof LaunchError);
+    assert.equal(error.cause.message, 'launch_pending');
+    return true;
+  });
+  assert.equal(reservations, 1);
+  assert.equal(calls.filter((method) => method === 'eth_getTransactionCount').length, 2);
+  assert.equal(sends, 0);
 });
 
 void test('only errors before eth_sendTransaction are eligible for automatic preflight retry', async () => {

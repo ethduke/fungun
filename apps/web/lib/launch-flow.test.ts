@@ -103,6 +103,27 @@ void test('rejection, lost send response, and even a rate-limit response after s
     assert.equal(f.clock, 0);
   }
 });
+void test('a nonce change after durable reservation never retries wallet submission', async () => {
+  const f = fixture();
+  let opens = 0;
+  await assert.rejects(
+    runLaunchFlow({
+      ...f.options,
+      artwork: async () => 1,
+      quote: async () => 1,
+      wallet: async () => {
+        opens++;
+        throw new LaunchPreflightError(new LaunchError('launch_pending'));
+      },
+    }),
+    (error) =>
+      error instanceof LaunchPreflightError &&
+      error.cause instanceof LaunchError &&
+      error.cause.message === 'launch_pending',
+  );
+  assert.equal(opens, 1);
+  assert.equal(f.clock, 0);
+});
 void test('changing the draft/account while waiting prevents all further preparation and payment', async () => {
   const f = fixture();
   let quotes = 0,
