@@ -186,15 +186,14 @@ export class LongLive {
       const cached = JSON.parse(prior.plan);
       if (isCanonicalLongAsset(cached.predictedAsset) && Number.isInteger(cached.saltAttempt)) return cached;
     }
-    this.budget.debit([["launch-prepare", 3, 60000], ["launch-prepare", 30, 86400000]]);
     if (!prior && this.db.prepare("SELECT COUNT(*) AS n FROM long_launches").get().n >= 4096) fail("launch_history_full");
+    const p = this.live.profile, q = p.quotes.find((q) => q.id === input.pairId);
+    if (!q) fail("unsupported_pair", 400);
     const publication = await this.metadata(input);
     const imageUri = ipfsUri(publication.ipfs.imageCid);
     const bytes = Buffer.from(JSON.stringify({ name: input.draft.name, symbol: input.draft.ticker,
       description: input.draft.description, image: imageUri, image_hash: imageUri }));
     if (digest(bytes) !== input.publication.metadataHash || await ipfsContentId(bytes) !== publication.ipfs.metadataCid) fail("launch_assets_unverified");
-    const p = this.live.profile, q = p.quotes.find((q) => q.id === input.pairId);
-    if (!q) fail("unsupported_pair", 400);
     const block = await this.rpc.block(4663);
     const g = this.live.guards[q.id];
     await this.rpc.verify(4663, [...roles.map((r) => p[r]), q.token, q.oracle], true, block);
@@ -228,6 +227,11 @@ export class LongLive {
     // Requotes retain the original nonce. Journal every offered envelope so a
     // delayed original submission can still be verified after fees/prices change.
     const intentId = `${key.slice(0,8)}-${key.slice(8,12)}-${key.slice(12,16)}-${key.slice(16,20)}-${key.slice(20,32)}`;
+    // The scarce shared allowance gates CPU mining only after the server-issued
+    // publication ticket, immutable content, configured quote and live launch
+    // dependencies have all been verified. Earlier work retains its own request,
+    // asset-status and upstream bounds.
+    this.budget.launch("prepare");
     const plan = await buildUnsignedLongLaunchAsync({ chainId: 4663, wallet: input.wallet, draft: input.draft, pairId: q.id,
       metadataUri: ipfsUri(publication.ipfs.metadataCid), startingTick: tick, intentId }, p, undefined, checkReadDeadline);
     const [vacancy, accountCode] = await this.rpc.batch(4663, [

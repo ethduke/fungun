@@ -61,6 +61,20 @@ explorer link, without being presented as accepted by Long. An address cannot
 be changed after deployment; repairing this class of existing token requires a
 new deployment or a Long-side listing exception.
 
+The search cost varies with the context and the numeric numeraire address. A
+Darwin arm64/Node 23.11 review run on September 6 sampled 12 successful searches
+against the maximum numeraire: median 566 ms, maximum 1.65 seconds and maximum
+190,629 attempts. An intentionally impractical low numeraire exhausted all three
+million attempts in 18–22 seconds. Production keeps the 20-second read deadline,
+one active launch operation per API process, event-loop yields every 4,096 hashes,
+and the fixed attempt ceiling. A timeout fails before wallet dispatch. Successful
+plans are durably reused, and the in-process salt cache holds at most 64 entries.
+The three-per-minute and 30-per-day launch allowance is shared across launchpads
+and is debited only after the server-issued publication ticket, immutable metadata,
+configured quote, current contracts, ticker and oracle have been validated. Invalid
+anonymous inputs retain the broader request, asset-status and upstream limits but
+cannot spend this scarce CPU admission allowance.
+
 A read-only replay of the corrected ROBOTAXI recipe at block 55,285,630 returned
 the predicted suffix-bearing address and estimated 1,968,454 gas. No transaction
 was signed or broadcast. This verifies the contract recipe and address invariant;
@@ -174,6 +188,15 @@ Exact legacy `/files/{cid}` browser recovery records are normalized to `/ipfs/{c
 without changing publication IDs, hashes, CIDs or wallet bindings. Both URLs must
 match the recorded origin and CIDs; altered paths or queries remain rejected.
 Recovery continues through the existing status endpoint without another signature.
+
+`saltAttempt` is a required plan field for the canonical-address format. A new web
+build rejects plans from an old API, and an old web build cannot reconstruct plans
+from a new API. Deploy the API and web from the same reviewed Git revision in one
+maintenance window: stop new launch preparation, confirm there is no wallet handoff
+in progress, deploy both immediate-strategy single-Machine apps, verify each image
+revision and health endpoint, then re-enable preparation. Do not use a rolling or
+mixed-revision rollout for this format change. Existing journaled recovery must
+remain served by the API throughout the window; do not reset or replace its volume.
 
 New uploads use version-3 server-issued upload capabilities. They bind the exact
 publication ID, wallet field, processed bytes, metadata and five-minute expiry.

@@ -85,6 +85,29 @@ test("request fairness limits and provider caps do not store raw client IPs", ()
   }
 });
 
+test("launch admission is strict, durable and shared across launchpads", () => {
+  let now = 10;
+  const budget = new Budget(":memory:", () => now);
+  try {
+    assert.throws(() => budget.launch("estimate"), { code: "invalid_budget_operation" });
+    assert.throws(() => budget.launch("prepare", "o1"), { code: "invalid_budget_operation" });
+    for (let i = 0; i < 3; i++) budget.launch("prepare");
+    assert.throws(() => budget.launch("prepare"), { code: "rate_limited", status: 429 });
+    for (let i = 0; i < 27; i++) {
+      now += 60_000;
+      budget.launch("prepare");
+    }
+    now += 60_000;
+    assert.throws(() => budget.launch("prepare"), { code: "rate_limited", status: 429 });
+    assert.equal(
+      budget.db.prepare("SELECT used FROM counters WHERE scope LIKE 'launch-prepare:86400000:%'").get().used,
+      30,
+    );
+  } finally {
+    budget.close();
+  }
+});
+
 test('RPC allowance covers active-day estimates and launches while minute, provider and total caps still hold', () => {
   let now = 10;
   const budget = new Budget(':memory:', () => now);

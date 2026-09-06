@@ -67,13 +67,16 @@ export class O1Live extends LongLive {
     if (prior && prior.state !== 'prepared' && !retry) return resume();
     if (retry && (await this.recovery.find(key, retry.transaction)).status !== 'retryable') return resume();
     if (!retry && prior && prior.expires > this.now() && JSON.parse(prior.plan).o1MetadataVersion === 1) return JSON.parse(prior.plan);
-    this.budget.launch('prepare', 'o1');
     if (!prior && this.db.prepare('SELECT COUNT(*) AS n FROM long_launches').get().n >= 4096) fail('launch_history_full');
     const publication = await this.metadata(input), imageUri = ipfsUri(publication.ipfs.imageCid);
     const metadata = Buffer.from(JSON.stringify({ name: input.draft.name, symbol: input.draft.ticker,
       description: input.draft.description, image: imageUri, image_hash: imageUri }));
     if (createHash('sha256').update(metadata).digest('hex') !== input.publication.metadataHash
       || await ipfsContentId(metadata) !== publication.ipfs.metadataCid) fail('launch_assets_unverified');
+    // Native metadata preparation can publish upstream. Admit it only after the
+    // server-issued publication ticket and its immutable content are verified.
+    // This uses the same 3/minute and 30/day pool as Long preparations.
+    this.budget.launch('prepare');
     const pinned = await this.o1Metadata.prepare(key, input, publication, quote.token?.address ?? zeroAddress);
     const block = await this.rpc.block(4663);
     await this.rpc.verify(4663, [...roles.map(role => p[role]), ...(quote.token ? [quote.token] : [])], true, block);

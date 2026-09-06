@@ -105,6 +105,27 @@ test('preparation binds metadata, verifies dependencies at one block and returns
   assert.ok(!f.requests.some((m) => /send|sign/i.test(m)));
 });
 
+test('invalid unauthenticated preparations cannot spend the scarce shared launch allowance', async (t) => {
+  const usage = f => f.budget.db.prepare(
+    "SELECT COALESCE(SUM(used),0) AS n FROM counters WHERE scope LIKE 'launch-prepare:%'",
+  ).get().n;
+  const unverified = await fixture(t);
+  unverified.service.metadata = async () => { throw new ServiceError('launch_assets_unverified'); };
+  await assert.rejects(unverified.service.run('launch-prepare', unverified.input), /launch_assets_unverified/);
+  assert.equal(usage(unverified), 0);
+
+  const unavailable = await fixture(t);
+  unavailable.changes.reserved = true;
+  await assert.rejects(unavailable.service.run('launch-prepare', unavailable.input), /ticker_reserved/);
+  assert.equal(usage(unavailable), 0);
+
+  const admitted = await fixture(t);
+  const plan = await admitted.service.run('launch-prepare', admitted.input);
+  assert.equal(usage(admitted), 2); // One minute bucket and one daily bucket.
+  assert.deepEqual(await admitted.service.run('launch-prepare', admitted.input), plan);
+  assert.equal(usage(admitted), 2);
+});
+
 test('unsent legacy plans are refreshed with a canonical address rather than offered to the wallet', async (t) => {
   const f = await fixture(t), plan = await f.service.run('launch-prepare', f.input);
   assert.ok(plan.predictedAsset.toLowerCase().endsWith('1e18'));

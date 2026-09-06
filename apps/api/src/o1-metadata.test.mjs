@@ -7,6 +7,7 @@ import { toHex as testHex } from 'viem';
 import { O1MetadataPublisher } from './o1-metadata.mjs';
 import { o1Metadata } from '../../web/lib/long-encoding/o1-metadata.mjs';
 import { ipfsContentId, prepareLongIpfsAssets } from './ipfs-content.mjs';
+import { Budget } from './budget.mjs';
 
 const zero = testHex(0n, { size: 20 });
 async function fixture(t) {
@@ -105,6 +106,7 @@ void test('O1 launch preparation puts the verified native URI in calldata and re
   const { O1_LAUNCH_ABI } = await import('../../web/lib/long-encoding/o1-launch.mjs');
   const { toHex, keccak256, decodeFunctionData, encodeFunctionResult, encodeAbiParameters, getCreate2Address } = await import('viem');
   const f = await fixture(t), now = 1800000000000;
+  const budget = new Budget(':memory:', () => now); t.after(() => budget.close());
   const contract = n => ({ address: toHex(n, { size: 20 }), codeHash: keccak256('0x01') });
   const p = { chainId: 4663, launchpad: 'o1', launcher: contract(1), tokenDeployer: contract(2), hook: contract(3),
     feeEscrow: contract(4), announcementRegistry: contract(5), quotes: [{ id: 'native', token: null, decimals: 18 }] };
@@ -135,19 +137,20 @@ void test('O1 launch preparation puts the verified native URI in calldata and re
     }) };
   const live = new O1Live({ o1Launch: { profile: p }, o1Key: 'test-api-key' },
     { json: async () => ({ data: { base: 'ETH', currency: 'USD', amount: '2500' } }) },
-    { db: f.db, key: 'a'.repeat(64), launch: () => {} }, { rpc, now: () => now });
+    budget, { rpc, now: () => now });
   live.metadata = async () => f.publication;
   live.o1Metadata = f.publisher();
   const plan = await live.prepare(f.input);
+  assert.equal(budget.db.prepare("SELECT used FROM counters WHERE scope LIKE 'launch-prepare:86400000:%'").get().used, 1);
   assert.equal(plan.review.metadataUri, f.expected.uri);
   assert.equal(plan.o1MetadataVersion, 1);
   const legacy = { ...plan, o1MetadataVersion: undefined, buildInput: { ...plan.buildInput, metadataUri: `ipfs://${f.assets.metadata.cid}` } };
-  f.db.prepare('UPDATE long_launches SET plan=? WHERE id=?').run(JSON.stringify(legacy), plan.id);
+  budget.db.prepare('UPDATE long_launches SET plan=? WHERE id=?').run(JSON.stringify(legacy), plan.id);
   const renewed = await live.prepare(f.input);
   assert.equal(renewed.buildInput.metadataUri, f.expected.uri);
   assert.equal(renewed.o1MetadataVersion, 1);
   assert.equal(f.calls.length, 1);
-  f.db.prepare("UPDATE long_launches SET state='submitted',tx_hash=? WHERE id=?").run(keccak256('0x03'), plan.id);
+  budget.db.prepare("UPDATE long_launches SET state='submitted',tx_hash=? WHERE id=?").run(keccak256('0x03'), plan.id);
   assert.ok((await live.prepare(f.input)).recovery);
   assert.equal(f.calls.length, 1);
 });

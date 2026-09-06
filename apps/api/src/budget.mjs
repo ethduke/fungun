@@ -104,6 +104,17 @@ export class Budget {
     ]);
   }
 
+  launch(operation, scope) {
+    // Launch admission is deliberately one shared allowance across launchpads.
+    // Callers cannot create a new quota namespace with user-controlled input.
+    if (operation !== "prepare" || scope !== undefined)
+      throw new ServiceError("invalid_budget_operation");
+    this.debit([
+      ["launch-prepare", 3, MINUTE],
+      ["launch-prepare", 30, DAY],
+    ]);
+  }
+
   upstream(provider, units = 1) {
     this.debit(
       [
