@@ -108,6 +108,45 @@ test("Long wallet launch reports all server settings and remains disabled by def
   });
 });
 
+test("O1 wallet launch reports dedicated and shared settings without enabling Long", () => {
+  assert.deepEqual(feature({}, "o1_wallet_launch"), {
+    id: "o1_wallet_launch",
+    missing: [
+      "ROBINHOOD_RPC",
+      "O1_API_KEY",
+      "O1_LAUNCH_PROFILE_JSON",
+      "O1_LAUNCH_TOKENS_JSON",
+      "LONG_LAUNCH_PROFILE_JSON",
+      "LONG_LAUNCH_GUARDS_JSON",
+      "LAUNCH_ASSET_SERVICE_ORIGIN",
+    ],
+    disabled: ["READ_UPSTREAMS", "O1_WALLET_LAUNCH"],
+    status: "missing_configuration",
+  });
+  const configured = {
+    ROBINHOOD_RPC: "https://rpc.example.invalid",
+    O1_API_KEY: "EXAMPLE",
+    O1_WALLET_LAUNCH: "false",
+    O1_LAUNCH_PROFILE_JSON: "O1-PROFILE-SENTINEL",
+    O1_LAUNCH_TOKENS_JSON: "O1-TOKENS-SENTINEL",
+    LONG_LAUNCH_PROFILE_JSON: "LONG-PROFILE-SENTINEL",
+    LONG_LAUNCH_GUARDS_JSON: "LONG-GUARDS-SENTINEL",
+    LAUNCH_ASSET_SERVICE_ORIGIN: "https://assets.example.invalid",
+    READ_UPSTREAMS: "true",
+  };
+  assert.deepEqual(feature(configured, "o1_wallet_launch"), {
+    id: "o1_wallet_launch",
+    missing: [],
+    disabled: ["O1_WALLET_LAUNCH"],
+    status: "disabled",
+  });
+  assert.equal(feature(configured, "long_wallet_launch").status, "disabled");
+  const serialized = JSON.stringify(runtimeStatus(configured));
+  for (const value of Object.values(configured))
+    if (value.includes("SENTINEL") || value.startsWith("https://"))
+      assert.ok(!serialized.includes(value));
+});
+
 test("fee readiness requires chain-specific escrow configuration", () => {
   const escrow = `0x${"1".repeat(40)}`;
   const codeHash = `0x${"2".repeat(64)}`;

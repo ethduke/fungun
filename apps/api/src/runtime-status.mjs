@@ -67,6 +67,19 @@ export function runtimeStatus(env) {
         ],
         ["READ_UPSTREAMS", "LONG_WALLET_LAUNCH"],
       ),
+      feature(
+        "o1_wallet_launch",
+        [
+          rpc,
+          o1,
+          ["O1_LAUNCH_PROFILE_JSON", present(env.O1_LAUNCH_PROFILE_JSON)],
+          ["O1_LAUNCH_TOKENS_JSON", present(env.O1_LAUNCH_TOKENS_JSON)],
+          ["LONG_LAUNCH_PROFILE_JSON", present(env.LONG_LAUNCH_PROFILE_JSON)],
+          ["LONG_LAUNCH_GUARDS_JSON", present(env.LONG_LAUNCH_GUARDS_JSON)],
+          ["LAUNCH_ASSET_SERVICE_ORIGIN", present(env.LAUNCH_ASSET_SERVICE_ORIGIN)],
+        ],
+        ["READ_UPSTREAMS", "O1_WALLET_LAUNCH"],
+      ),
       feature("o1_indexed_fees", [o1], fees),
       ...["long", "longbow"].flatMap((padId) => [
         feature(`${padId}_locked_pool_fees`, [rpc, lockedFees(padId)], fees),

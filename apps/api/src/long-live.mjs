@@ -65,8 +65,7 @@ export function validateLongInput(kind, value) {
   return value;
 }
 
-export function readLongLiveConfig(env) {
-  if (env.LONG_WALLET_LAUNCH !== "true") return null;
+export function readLongLaunchConfig(env) {
   try {
     const profile = readLongLaunchProfile(JSON.parse(env.LONG_LAUNCH_PROFILE_JSON));
     const guards = JSON.parse(env.LONG_LAUNCH_GUARDS_JSON);
@@ -82,6 +81,10 @@ export function readLongLiveConfig(env) {
       || (url.protocol === "http:" && /^[a-z][a-z0-9-]{0,62}\.internal$/.test(url.hostname) && url.port === "8790"))) fail("long_configuration");
     return { profile, guards, assetOrigin };
   } catch { fail("long_configuration", 503); }
+}
+
+export function readLongLiveConfig(env) {
+  return env.LONG_WALLET_LAUNCH === "true" ? readLongLaunchConfig(env) : null;
 }
 
 export class LongLive {

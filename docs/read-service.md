@@ -44,6 +44,13 @@ Leave the committed
   The launch path stays disabled unless the switch is exactly `true`, provider reads
   are enabled and all profile, guard, asset-service and RPC checks pass. See
   [Long wallet launch](long-wallet-launch.md).
+- `O1_WALLET_LAUNCH`, `O1_LAUNCH_PROFILE_JSON`, `O1_LAUNCH_TOKENS_JSON`,
+  `LONG_EXTRA_QUOTES_JSON`: API-only O1 wallet-launch settings. O1 also requires
+  `O1_API_KEY`, the RPC, and the validated Long profile, guard and asset-origin
+  settings above. Its switch is independent: O1 can validate those shared pins
+  while `LONG_WALLET_LAUNCH=false`, and doing so does not enable Long. The token
+  list supplies reviewed Robinhood RWA addresses; extra quote records are optional
+  and only a reviewed USDG entry is selected by O1.
 
 Run `npm run runtime:status` to list missing variable names and disabled features
 without printing their values. It performs no network calls or file writes.
@@ -54,6 +61,10 @@ An empty optional `FEE_CONTRACTS_JSON` is treated as no configured fee contracts
 The `tracked_prices` row requires both `READ_UPSTREAMS=true` and a configured
 `ROBINHOOD_RPC`; its endpoint returns 503 while either requirement is unavailable,
 never a successful empty-price response.
+The `o1_wallet_launch` row reports the dedicated O1 settings and the shared Long
+pins without printing any value. It treats the RWA token list as a readiness
+requirement; an optional `LONG_EXTRA_QUOTES_JSON` entry is not required for native
+or stock-paired launches.
 
 ## Local verification completed
 

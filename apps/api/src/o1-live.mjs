@@ -1,6 +1,6 @@
 import { createHash, createHmac } from 'node:crypto';
 import { decodeEventLog, decodeFunctionResult, toHex, zeroAddress } from 'viem';
-import { LongLive } from './long-live.mjs';
+import { LongLive, readLongLaunchConfig } from './long-live.mjs';
 import { O1MetadataPublisher } from './o1-metadata.mjs';
 import { readLaunchTokens, launchPairId } from './launch-catalog.mjs';
 import { O1_LAUNCH_ABI, buildUnsignedO1Launch, o1Params, readO1LaunchProfile } from '../../web/lib/long-encoding/o1-launch.mjs';
@@ -16,14 +16,18 @@ const gasLimit = 8000000n;
 export function readO1LiveConfig(env, longLaunch) {
   if (env.O1_WALLET_LAUNCH !== 'true') return null;
   try {
-    const template = longLaunch.profile.quotes[0].token;
+    if (typeof env.O1_API_KEY !== 'string' || !env.O1_API_KEY.trim()) throw new Error();
+    // O1 reuses reviewed token and publication pins from the Long configuration,
+    // but its switch must not implicitly enable the Long launch handler.
+    const dependencies = longLaunch ?? readLongLaunchConfig(env);
+    const template = dependencies.profile.quotes[0].token;
     const profile = readO1LaunchProfile({ ...JSON.parse(env.O1_LAUNCH_PROFILE_JSON), quotes: [
       { id: 'native', token: null, decimals: 18 }, ...readLaunchTokens({ ...env, ROBINHOOD_LAUNCH_TOKENS_JSON: env.O1_LAUNCH_TOKENS_JSON }).map(token => ({ id: launchPairId('o1', token),
         decimals: 18, token: { address: token.address, codeHash: template.codeHash } })),
       ...JSON.parse(env.LONG_EXTRA_QUOTES_JSON || '[]').filter(entry => entry.quote.symbol === 'USDG').map(entry => ({
         id: 'crypto-USDG', token: entry.quote.token, decimals: entry.quote.decimals })),
     ] });
-    return { profile, assetOrigin: longLaunch.assetOrigin };
+    return { profile, assetOrigin: dependencies.assetOrigin };
   } catch { throw new ServiceError('o1_configuration', 503); }
 }
 export class O1Live extends LongLive {

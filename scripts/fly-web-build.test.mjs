@@ -7,6 +7,10 @@ test("Fly web builds receive no provider, wallet, public build or process inject
   const inherited = {
     PRIVATE_KEY: "EXAMPLE",
     O1_API_KEY: "EXAMPLE",
+    O1_WALLET_LAUNCH: "true",
+    O1_LAUNCH_PROFILE_JSON: "EXAMPLE",
+    O1_LAUNCH_TOKENS_JSON: "EXAMPLE",
+    LONG_EXTRA_QUOTES_JSON: "EXAMPLE",
     ROBINHOOD_RPC: "EXAMPLE",
     NEXT_PUBLIC_O1_API_KEY: "EXAMPLE",
     VITE_PRIVATE_KEY: "EXAMPLE",

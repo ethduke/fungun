@@ -179,6 +179,23 @@ reports these requirements under `long_wallet_launch` without exposing their val
 No credentials enter client
 build variables; only public deployment information accompanies an unsigned plan.
 
+O1 has a separate API-only switch and profile: `O1_WALLET_LAUNCH`,
+`O1_LAUNCH_PROFILE_JSON`, and `O1_LAUNCH_TOKENS_JSON`. Its native metadata call
+also requires the existing server-only `O1_API_KEY`. The token list is an array of
+reviewed `{symbol,address}` entries and is required for the configured Robinhood
+RWA pairing set. `LONG_EXTRA_QUOTES_JSON` is optional; O1 selects only a reviewed
+USDG record from it. No value from these settings enters the web or decoder runtime.
+
+The O1 parser deliberately reuses the validated Long stock-token runtime hash
+template and `LAUNCH_ASSET_SERVICE_ORIGIN`, so `LONG_LAUNCH_PROFILE_JSON` and
+`LONG_LAUNCH_GUARDS_JSON` must also be valid. `O1_WALLET_LAUNCH=true` validates
+those shared settings directly when Long is off; it leaves the Long handler
+disabled unless `LONG_WALLET_LAUNCH` is independently `true`. Missing or malformed
+shared settings reject startup with a fixed O1 configuration error. With the
+switches off, dormant O1 settings are not parsed. `npm run runtime:status` reports
+presence and switches under `o1_wallet_launch`; live RPC, contract, provider and
+pair verification still occurs only in the bounded request path.
+
 The portable encoder lives in `apps/web/lib/long-encoding`; the API imports it
 through a wrapper that preserves API error handling. The web image includes no
 API service source. API packaging includes only this portable encoding directory.
@@ -230,8 +247,9 @@ Gateway 401/403 responses surface a concise service-unavailable error immediatel
 with recovery retained, rather than asking the user to wait for access to repair itself.
 O1 retains its native pinning path. All listed Long, O1 and Longbow pairs are
 eligible for draft selection. O1 catalog refreshes extend the saved choices and
-do not lock them when missing or expired. Wallet transactions use the Long handler
-and its configured server quotes; O1 and Longbow wallet handlers are not connected.
+do not lock them when missing or expired. Wallet transactions use dedicated Long
+and O1 handlers with their configured server quotes. The Longbow wallet handler
+is not configured by these settings.
 
 Sources: [Robinhood network configuration](https://docs.robinhood.com/chain/connecting/),
 [gas and fees](https://docs.robinhood.com/chain/gas-and-fees/),
