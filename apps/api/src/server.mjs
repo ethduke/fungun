@@ -1,4 +1,4 @@
-import { LongLive } from "./long-live.mjs";
+import { Launches } from "./launches.mjs";
 import { createServer } from "node:http";
 import { mkdirSync } from "node:fs";
 import { dirname } from "node:path";
@@ -25,7 +25,7 @@ try {
     enabled: true,
   });
   const fees = new Fees(config, upstream);
-  const launches = new LongLive(config, upstream, budget);
+  const launches = new Launches(config, upstream, budget);
   const fomo = createFomoService(budget.db);
   const trackedPrices = new TrackedPrices(config, upstream);
   const server = createServer(

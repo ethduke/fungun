@@ -41,16 +41,20 @@ const call = (address, functionName, args = []) => ({ address, abi: LONG_STATE_A
 
 export function validateLongInput(kind, value) {
   if (kind === "launch-estimate") {
-    if (!exact(value, ["chainId", "pairId"]) || value.chainId !== 4663 || !["long-NVDA", "long-TSLA"].includes(value.pairId)) fail("invalid_request", 400);
+    if (!exact(value, ["chainId", "pairId"]) || value.chainId !== 4663
+      || typeof value.pairId !== "string" || !/^(?:long-(?:NVDA|TSLA)|rwa-[a-f0-9]{24}|native|crypto-USDG)$/.test(value.pairId)) fail("invalid_request", 400);
     return value;
   }
   if (kind === "launch-prepare") {
-    if (!exact(value, ["chainId", "wallet", "draft", "pairId", "publication"]) || value.chainId !== 4663
+    if (!exact(value, ["chainId", "wallet", "draft", "pairId", "publication", ...(Object.hasOwn(value ?? {}, "editableMetadata") ? ["editableMetadata"] : [])]) || value.chainId !== 4663
       || typeof value.wallet !== "string" || !isAddress(value.wallet) || same(value.wallet, zeroAddress)
-      || typeof value.pairId !== "string" || !/^(?:long-[A-Z0-9._-]{1,24}|rwa-[a-f0-9]{24})$/.test(value.pairId)
+      || typeof value.pairId !== "string" || !/^(?:(?:long|longbow)-[A-Z0-9._-]{1,24}|rwa-[a-f0-9]{24}|native|crypto-USDG)$/.test(value.pairId)
+      || (value.editableMetadata !== undefined && (typeof value.editableMetadata !== "boolean" || value.pairId.startsWith("long")))
       || !exact(value.publication, ["id", "imageHash", "metadataHash"])
       || !id(value.publication.id, 48) || !id(value.publication.imageHash) || !id(value.publication.metadataHash)) fail("invalid_request", 400);
-    return { ...value, wallet: value.wallet.toLowerCase(), draft: normalizeLaunchDetails(value.draft) };
+    const draft = normalizeLaunchDetails(value.draft);
+    if ((draft.launchpad === "longbow") !== value.pairId.startsWith("longbow-")) fail("invalid_request", 400);
+    return { ...value, wallet: value.wallet.toLowerCase(), draft };
   }
   if (kind === "launch-reserve") {
     if (!exact(value, ["id", "binding"]) || !id(value.id) || !id(value.binding)) fail("invalid_request", 400);
@@ -326,12 +330,12 @@ export class LongLive {
       const plan = plans.find((candidate) => {
         const expected = candidate.transaction;
         return same(tx.from, expected.from) && same(tx.to, expected.to) && same(tx.input, expected.data)
-          && rpcNumber(tx.value) === 0n && rpcNumber(tx.nonce) === rpcNumber(expected.nonce);
+          && rpcNumber(tx.value) === rpcNumber(expected.value) && rpcNumber(tx.nonce) === rpcNumber(expected.nonce);
       });
       if (!plan) fail("launch_transaction_changed");
       const expected = plan.transaction;
       if (!same(tx.hash, hash) || !same(tx.from, expected.from) || !same(tx.to, expected.to)
-        || !same(tx.input, expected.data) || rpcNumber(tx.value) !== 0n || rpcNumber(tx.nonce) !== rpcNumber(expected.nonce)
+        || !same(tx.input, expected.data) || rpcNumber(tx.value) !== rpcNumber(expected.value) || rpcNumber(tx.nonce) !== rpcNumber(expected.nonce)
         || rpcNumber(tx.chainId) !== 4663n) fail("launch_transaction_changed");
       this.db.prepare("UPDATE long_launches SET tx_hash=?,state='submitted' WHERE id=? AND tx_hash IS NULL").run(hash, input.id);
       if (!receipt) return { id: input.id, status: "submitted", hash };
@@ -346,7 +350,13 @@ export class LongLive {
       const paid = rpcNumber(receipt.gasUsed) * rpcNumber(receipt.effectiveGasPrice);
       if (rpcNumber(receipt.status) === 0n) return this.finish(input.id, { status: "failed", hash, paidGasWei: paid.toString() });
       if (rpcNumber(receipt.status) !== 1n || !Array.isArray(receipt.logs)) fail("launch_receipt_unverified");
-      const p = this.live.profile, context = JSON.parse(row.context), q = p.quotes.find((q) => q.id === context.pairId);
+      await this.confirm(plan, JSON.parse(row.context), receipt, block);
+      return this.finish(input.id, { status: "confirmed", hash, paidGasWei: paid.toString(), asset: plan.predictedAsset });
+    });
+  }
+  async confirm(plan, context, receipt, block) {
+    const expected = plan.transaction;
+      const p = plan.profile, q = p.quotes.find((q) => q.id === context.pairId);
       const events = receipt.logs.filter((l) => same(l.address, p.launcher.address)).flatMap((l) => {
         try { return [decodeEventLog({ abi: LONG_STATE_ABI, eventName: "LaunchCreated", data: l.data, topics: l.topics, strict: true }).args]; }
         catch { return []; }
@@ -360,12 +370,13 @@ export class LongLive {
         call(plan.predictedAsset, "name"), call(plan.predictedAsset, "symbol"), call(plan.predictedAsset, "tokenURI"), call(plan.predictedAsset, "totalSupply"),
         call(p.launcher.address, "getTickerRecord", [context.draft.ticker]), call(p.airlock.address, "getAssetData", [plan.predictedAsset]),
       ], block);
+      // Airlock stores sale supply before total supply. They differ on Longbow
+      // because 1% vests to the platform instead of going on the curve.
+      const [numeraire, , , migrator, initializer, pool, , tokensForSale, initialSupply, integrator] = asset;
       if (name !== context.draft.name || symbol !== context.draft.ticker || uri !== plan.review.metadataUri || supply !== 10n ** 27n
         || !same(record[0], plan.predictedAsset) || Number(record[2]) - Number(record[1]) !== 86400
-        || !same(asset[0], q.token.address) || !same(asset[3], p.liquidityMigrator.address) || !same(asset[4], p.poolInitializer.address)
-        || !same(asset[5], plan.predictedPool) || asset[7] !== supply || asset[8] !== supply || !same(asset[9], p.integrator)) fail("launch_receipt_unverified");
-      return this.finish(input.id, { status: "confirmed", hash, paidGasWei: paid.toString(), asset: plan.predictedAsset });
-    });
+        || !same(numeraire, q.token.address) || !same(migrator, p.liquidityMigrator.address) || !same(initializer, p.poolInitializer.address)
+        || !same(pool, plan.predictedPool) || initialSupply !== supply || tokensForSale !== BigInt(plan.review.tokensForSale) || !same(integrator, p.integrator)) fail("launch_receipt_unverified");
   }
   finish(key, result) {
     const value = { id: key, ...result };

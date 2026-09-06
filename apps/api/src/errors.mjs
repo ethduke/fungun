@@ -15,9 +15,16 @@ export class InsufficientFundsError extends ServiceError {
       shortfallWei: (required - balance).toString(), basis };
   }
 }
+export class UnsupportedPairError extends ServiceError {
+  constructor(pairs) {
+    super('unsupported_pair', 400);
+    this.supportedPairs = pairs;
+  }
+}
 export function serviceErrorBody(error) {
   const safe = safeError(error);
-  return { error: safe.code, ...(safe instanceof InsufficientFundsError ? { funding: safe.funding } : {}) };
+  return { error: safe.code, ...(safe instanceof InsufficientFundsError ? { funding: safe.funding } : {}),
+    ...(safe instanceof UnsupportedPairError ? { supportedPairs: safe.supportedPairs } : {}) };
 }
 
 export function safeError(error) {

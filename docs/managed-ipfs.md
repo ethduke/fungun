@@ -16,7 +16,33 @@ this IPFS path. Private operational records still need a backup/recovery procedu
 - O1 / Base and Robinhood: use the official launch-preparation API. It accepts
   image bytes and pins the image plus ERC-7572 metadata itself. Store its returned
   metadata/image URIs. Its initial-launch request does not document accepting a
-  caller's preuploaded metadata URI. Do not duplicate pinning work automatically.
+  caller's preuploaded metadata URI. O1 resolves IPFS through an account-restricted
+  Pinata gateway: a pin in our account alone does not make an avatar visible there.
+
+### O1 gateway compatibility fix (2026-09-06)
+
+O1 preparation now sends the already-approved WebP bytes to the official
+`POST /v1/launches/prepare` endpoint. A separate durable journal commits the exact
+request binding and an idempotency key before the call, saves the returned URIs,
+and reuses them across gas refreshes and process restarts. An uncertain call can
+only retry that same key and payload. It never silently starts another upload.
+
+The O1 document has `name`, `symbol`, `description`, `standard: ERC20`,
+`launchpad: o1 Launchpad`, `launchpadUrl`, and the approved image URI. Both server
+and browser independently derive its CID. The server also checks the metadata
+and image bytes through O1's returned gateway before constructing a launch.
+O1's returned launch transaction is not dispatched; the existing independent
+builder, simulation, fee limits, wallet signing and recovery still apply.
+
+The original shared publication remains the wallet-approved source of image
+bytes, and its schema is unchanged. Keeping that publication and adding O1's
+native pin is an intentional compatibility step for the existing launch flow;
+it preserves other launchpads and old approvals. Only O1 uses this additional
+pinning service. A future native-only upload flow must preserve those bindings.
+
+Existing tokens need a creator-authorized contract-URI update using O1's
+`metadata/document/prepare` endpoint with the same image bytes. Preparing it
+publishes files and returns an unsigned transaction; it does not send a transaction.
 
 The old Fly metadata builder is unchanged. Changing its serialization would change
 hashes and invalidate existing approvals and recovery checks. No private addresses,

@@ -4,15 +4,24 @@ import { LONG_SALT_ATTEMPTS, isCanonicalLongAsset } from './long-encoding/long-s
 import { assetDraft, assetWallet, type AssetDraft, type PublishedAsset } from './asset-protocol.ts';
 import { parseLaunchFunding, fundingMessage, type LaunchFunding } from './launch-funding.ts';
 import { parseLaunchFeeSource, type LaunchFeeSource } from './launch-fee-source.ts';
+import { buildUnsignedO1Launch, readO1LaunchProfile } from './long-encoding/o1-launch.mjs';
+import { o1Metadata } from './long-encoding/o1-metadata.mjs';
+
+export type O1BuildInput = { wallet: string; draft: AssetDraft; pairId: string; metadataUri: string; editableMetadata: boolean;
+  configVersion: string; chainDeadline: number; totalSupply: string; launchpadFeeWei: string; intentId: string; initCodeHash: string };
+export const launchpadForPair = (pairId: string = ''): 'long' | 'longbow' | 'o1' =>
+  pairId.startsWith('longbow-') ? 'longbow' : pairId.startsWith('long-') ? 'long' : 'o1';
+export const isEnabledLaunchPair = (pairId: string | undefined): pairId is string =>
+  typeof pairId === 'string' && /^(?:(?:long|longbow)-[A-Z0-9._-]{1,24}|rwa-[a-f0-9]{24}|native|crypto-USDG)$/.test(pairId);
 
 export type LaunchInput = { chainId: 4663; wallet: string; draft: AssetDraft; pairId: string;
-  publication: { id: string; imageHash: string; metadataHash: string } };
+  publication: { id: string; imageHash: string; metadataHash: string }; editableMetadata?: boolean };
 export type LongPlan = {
   id: string; binding: string; chainId: 4663; quotedAt: number; expiresAt: number; deadline: number;
-  transaction: { chainId: '0x1237'; from: string; to: string; data: `0x${string}`; value: '0x0'; nonce: `0x${string}`; gas: `0x${string}`; gasPrice: `0x${string}` };
-  profile: ReturnType<typeof readLongLaunchProfile> & { launcher: { address: string; codeHash: string } }; startingTick: number; intentId: string;
+  transaction: { chainId: '0x1237'; from: string; to: string; data: `0x${string}`; value: `0x${string}`; nonce: `0x${string}`; gas: `0x${string}`; gasPrice: `0x${string}` };
+  profile: (ReturnType<typeof readLongLaunchProfile> | ReturnType<typeof readO1LaunchProfile>) & { launcher: { address: string; codeHash: string }; launchpad?: string }; startingTick?: number; intentId?: string; buildInput?: O1BuildInput;
   predictedAsset: string; saltAttempt: number; predictedPool: string; review: ReturnType<typeof buildUnsignedLongLaunch>['review'];
-  estimatedGas: string; maximumGasWei: string; launchpadFeeWei: '0';
+  estimatedGas: string; maximumGasWei: string; launchpadFeeWei: string;
   launchFeeSource: LaunchFeeSource;
   usd: { microUsdPerEth: string; sourceLabel: string; quotedAt: number };
 };
@@ -22,9 +31,13 @@ export const isLongLaunchPair = (pairId: string | undefined): pairId is 'long-NV
 export class LaunchError extends Error {
   retryAfter: number;
   funding?: LaunchFunding;
-  constructor(message: string, retryAfter = 0, funding?: unknown) {
+  supportedPairs?: string[];
+  constructor(message: string, retryAfter = 0, funding?: unknown, supportedPairs?: unknown) {
     super(message); this.retryAfter = retryAfter;
     if (message === 'insufficient_funds') this.funding = parseLaunchFunding(funding);
+    if (message === 'unsupported_pair' && Array.isArray(supportedPairs) && supportedPairs.length > 0
+      && supportedPairs.length <= 513 && supportedPairs.every(isEnabledLaunchPair))
+      this.supportedPairs = [...new Set(supportedPairs)];
   }
 }
 export class LaunchPreflightError extends Error {
@@ -34,6 +47,8 @@ export class LaunchPreflightError extends Error {
 export function launchMessage(error: unknown) {
   if (error instanceof LaunchPreflightError) return launchMessage(error.cause);
   if (error instanceof LaunchError && error.funding) return fundingMessage(error.funding);
+  if (error instanceof LaunchError && error.supportedPairs)
+    return 'This pairing is no longer available on the launchpad. Refresh its pairing list.';
   let cause = error;
   for (let depth = 0; depth < 8 && cause && typeof cause === 'object'; depth++) {
     const entry = cause as { code?: number; cause?: unknown };
@@ -52,7 +67,9 @@ export function launchMessage(error: unknown) {
   const messages: Record<string, string> = {
     long_salt_unavailable: 'A Long-compatible token address could not be prepared in time. No transaction was sent. Try preparing again.',
     invalid_long_salt: 'The prepared token address does not meet Long’s requirements. Refresh the launch estimate.',
-    long_launch_disabled: 'Long launches are not enabled on this server yet.',
+    long_launch_disabled: 'The launch service is currently unavailable.',
+    o1_launch_disabled: 'O1 has paused new launches.',
+    o1_metadata_unverified: 'O1 has not confirmed your artwork yet. Your draft is saved; try preparing again shortly.',
     unsupported_pair: 'This pairing is not configured on the launch server yet. Choose another pairing.',
     launch_assets_unverified: 'Artwork publication is not verified yet. Check its status before launching.',
     oracle_stale: 'The stock price is paused or out of date. Wait for a fresh market price before launching.',
@@ -72,8 +89,11 @@ export function launchMessage(error: unknown) {
     launch_receipt_unverified: 'Verifying your launch on the network…',
     recovery_unavailable: 'Browser recovery storage is unavailable. Enable it before launching.',
     launch_unknown: 'Reconnecting to your launch…',
+    upstream_unavailable: 'The launch service could not finish its network checks. Your draft is saved. Try again shortly.',
+    read_service_unavailable: 'The launch service is temporarily unavailable. Your draft is saved. Try again shortly.',
+    timeout: 'Launch preparation timed out. Your draft is saved. Try again shortly.',
   };
-  return messages[code] ?? 'Could not complete the launch request. Reconnecting…';
+  return messages[code] ?? 'Could not complete launch preparation. Your draft is saved. Please try again.';
 }
 const hex = (s: unknown) => typeof s === 'string' && /^0x(?:0|[1-9a-f][a-f0-9]*)$/i.test(s);
 const same = (a: unknown, b: unknown) => typeof a === 'string' && typeof b === 'string' && a.toLowerCase() === b.toLowerCase();
@@ -86,10 +106,22 @@ export function validateLongPlan(raw: unknown, input: LaunchInput, published: Pu
   const deadline = started + p.expiresAt - p.serverTime;
   assert(deadline > now);
   const inputDraft = assetDraft(input.draft);
-  assert(Number.isInteger(p.saltAttempt) && p.saltAttempt >= 0 && p.saltAttempt < LONG_SALT_ATTEMPTS
-    && isCanonicalLongAsset(p.predictedAsset));
-  const rebuilt = buildUnsignedLongLaunch({ chainId: 4663, wallet: assetWallet(input.wallet), draft: inputDraft,
-    pairId: input.pairId, metadataUri: `ipfs://${published.ipfs!.metadataCid}`, startingTick: p.startingTick, intentId: p.intentId }, p.profile, undefined, p.saltAttempt);
+  const o1 = launchpadForPair(input.pairId) === 'o1';
+  let rebuilt;
+  if (o1) {
+    assert(p.profile?.launchpad === 'o1' && p.buildInput && Number.isInteger(p.saltAttempt) && p.saltAttempt >= 0 && p.saltAttempt < 65536);
+    const buildInput: O1BuildInput = { ...p.buildInput!, wallet: assetWallet(input.wallet), draft: inputDraft,
+      pairId: input.pairId, metadataUri: o1Metadata(inputDraft, published.ipfs!.imageCid).uri, editableMetadata: input.editableMetadata ?? false };
+    assert(buildInput.intentId === p.id && buildInput.launchpadFeeWei === p.launchpadFeeWei
+      && buildInput.chainDeadline * 1000 > p.expiresAt && buildInput.chainDeadline * 1000 <= p.serverTime + 1800000);
+    rebuilt = buildUnsignedO1Launch(buildInput, p.profile, p.saltAttempt);
+  } else {
+    assert(Number.isInteger(p.saltAttempt) && p.saltAttempt >= 0 && p.saltAttempt < LONG_SALT_ATTEMPTS
+      && isCanonicalLongAsset(p.predictedAsset));
+    rebuilt = buildUnsignedLongLaunch({ chainId: 4663, wallet: assetWallet(input.wallet), draft: inputDraft,
+      pairId: input.pairId, metadataUri: `ipfs://${published.ipfs!.metadataCid}`, startingTick: p.startingTick, intentId: p.intentId }, p.profile, undefined, p.saltAttempt);
+  }
+  if (!rebuilt) throw new LaunchError('launch_transaction_changed');
   assert(rebuilt.binding === p.binding && same(rebuilt.predictedAsset, p.predictedAsset)
     && JSON.stringify(rebuilt.review) === JSON.stringify(p.review));
   const tx = p.transaction;
@@ -98,12 +130,12 @@ export function validateLongPlan(raw: unknown, input: LaunchInput, published: Pu
   catch { throw new LaunchError('contract_unverified'); }
   assert(same(feeSource.contract, p.profile.launcher.address) && feeSource.amountWei === p.launchpadFeeWei);
   assert(tx && Object.keys(tx).sort().join(',') === 'chainId,data,from,gas,gasPrice,nonce,to,value'
-    && tx.chainId === '0x1237' && tx.value === '0x0' && same(tx.from, input.wallet)
+    && tx.chainId === '0x1237' && hex(tx.value) && BigInt(tx.value) === BigInt(rebuilt.transaction.value) && same(tx.from, input.wallet)
     && same(tx.to, rebuilt.transaction.to) && tx.data === rebuilt.transaction.data
     && [tx.gas, tx.gasPrice, tx.nonce].every(hex));
   const estimate = BigInt(p.estimatedGas), gas = BigInt(tx.gas), price = BigInt(tx.gasPrice);
-  assert(estimate >= 21000n && gas === (estimate * 120n + 99n) / 100n && gas <= 3000000n && price > 0n
-    && price <= 10n ** 12n && gas * price <= 5n * 10n ** 16n && p.maximumGasWei === String(gas * price) && p.launchpadFeeWei === '0');
+  assert(estimate >= 21000n && gas === (estimate * 120n + 99n) / 100n && gas <= (o1 ? 8000000n : 3000000n) && price > 0n
+    && price <= 10n ** 12n && gas * price <= 5n * 10n ** 16n && p.maximumGasWei === String(gas * price) && BigInt(tx.value) === BigInt(p.launchpadFeeWei) && (!o1 ? p.launchpadFeeWei === '0' : gas * price + BigInt(tx.value) <= 5n * 10n ** 16n));
   assert(p.usd?.sourceLabel === 'Coinbase ETH/USD spot' && /^\d{1,12}$/.test(p.usd.microUsdPerEth)
     && BigInt(p.usd.microUsdPerEth) > 0n && Number.isSafeInteger(p.usd.quotedAt)
     && p.usd.quotedAt <= p.serverTime && p.serverTime - p.usd.quotedAt < 60000);
@@ -166,7 +198,7 @@ export async function launchRequest(operation: 'launch-prepare' | 'launch-reserv
   if (!response.ok) {
     const retry = Number(response.headers.get('retry-after'));
     throw new LaunchError(typeof result?.error === 'string' ? result.error : 'unavailable',
-      Number.isFinite(retry) && retry > 0 ? Math.min(retry, 86400) : 0, result?.funding);
+      Number.isFinite(retry) && retry > 0 ? Math.min(retry, 86400) : 0, result?.funding, result?.supportedPairs);
   }
   return result;
 }
