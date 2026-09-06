@@ -178,7 +178,7 @@ void test('O1 launch preparation puts the verified native URI in calldata and re
       return values[e.functionName];
     }),
     batch: async (_chain, entries) => entries.map(e => {
-      if (e.method === 'eth_getBlockByNumber') return { timestamp: toHex(now / 1000) };
+      if (e.method === 'eth_getBlockByNumber') return { timestamp: toHex(now / 1000 + 30) };
       if (e.method === 'eth_getCode') return '0x';
       if (e.method === 'eth_gasPrice') return toHex(1000000);
       if (e.method === 'eth_getBalance') return toHex(10n ** 18n);
@@ -201,6 +201,7 @@ void test('O1 launch preparation puts the verified native URI in calldata and re
   assert.equal(budget.db.prepare("SELECT used FROM counters WHERE scope LIKE 'launch-prepare:86400000:%'").get().used, 1);
   assert.equal(plan.review.metadataUri, f.expected.uri);
   assert.equal(plan.o1MetadataVersion, 1);
+  assert.equal(plan.buildInput.chainDeadline * 1000 - plan.quotedAt, 1830000);
   const receipt = { logs: [{ address: p.launcher.address,
     topics: encodeEventTopics({ abi: O1_LAUNCH_ABI, eventName: 'Launched', args: {
       token: plan.predictedAsset, poolId: pool, originalCreator: f.input.wallet,
@@ -217,11 +218,16 @@ void test('O1 launch preparation puts the verified native URI in calldata and re
   await live.verifyJournalProfile(plan, launchInput, '0x64');
   assert.equal(pins.at(-1)[3], '0x64');
   assert.ok(pins.at(-1)[1].some(entry => entry.address === p.launcher.address));
+  budget.db.prepare('UPDATE long_launches SET plan=? WHERE id=?')
+    .run(JSON.stringify({ ...plan, buildInput: { ...plan.buildInput, totalSupply: String(2n * 10n ** 27n) } }), plan.id);
+  assert.throws(() => live.reserve(plan), { code: 'launch_journal_unverified' });
+  budget.db.prepare('UPDATE long_launches SET plan=? WHERE id=?').run(JSON.stringify(plan), plan.id);
   const rotated = new O1Live({ o1Launch: { profile: { ...p, launcher: contract(9) } }, o1Key: 'test-api-key' },
     {}, budget, { rpc, now: () => now });
   assert.throws(() => rotated.reserve(plan), { code: 'launch_configuration_changed' });
   const legacy = { ...plan, o1MetadataVersion: undefined, buildInput: { ...plan.buildInput, metadataUri: `ipfs://${f.assets.metadata.cid}` } };
-  budget.db.prepare('UPDATE long_launches SET plan=? WHERE id=?').run(JSON.stringify(legacy), plan.id);
+  delete legacy.journalVersion; delete legacy.publication;
+  budget.db.prepare('UPDATE long_launches SET plan=?,journal_version=0 WHERE id=?').run(JSON.stringify(legacy), plan.id);
   const renewed = await live.prepare(launchInput);
   assert.equal(renewed.buildInput.metadataUri, f.expected.uri);
   assert.equal(renewed.o1MetadataVersion, 1);

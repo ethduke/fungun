@@ -66,7 +66,7 @@ Darwin arm64/Node 23.11 review run on September 6 sampled 12 successful searches
 against the maximum numeraire: median 566 ms, maximum 1.65 seconds and maximum
 190,629 attempts. An intentionally impractical low numeraire exhausted all three
 million attempts in 18–22 seconds. Production keeps the 20-second read deadline,
-one active launch operation per API process, event-loop yields every 4,096 hashes,
+one active operation in each launchpad handler, event-loop yields every 4,096 hashes,
 and the fixed attempt ceiling. A timeout fails before wallet dispatch. Successful
 plans are durably reused, and the in-process salt cache holds at most 64 entries.
 The three-per-minute and 30-per-day launch allowance is shared across launchpads
@@ -126,9 +126,17 @@ within 60 seconds. USD is indicative; ETH is the actual payment currency.
 
 The existing budget database holds an additive `long_launches` table. HMAC identity
 binds a wallet and metadata hash; the complete input cannot change under that record.
+New version-1 rows also retain the publication CIDs, exact portable-builder inputs
+and the selected quote's normalized beacon, implementation, aggregator and heartbeat
+guard. Cached reuse and reservation compare that snapshot with current configuration.
+Status reconstructs current-format calldata, binding, address and review fields, then
+checks the saved profile and guard code plus historical beacon/aggregator links at the
+canonical receipt block. Explicit version-0 rows remain receipt/event/state recoverable,
+but an unsent legacy plan is rebuilt before it can be offered to a wallet.
 Preparation is capped at 3/minute and 30/day, with a 4,096-record ceiling. All RPC
-methods debit the existing durable provider/global budgets. There is one active
-launch read, bounded deadlines, cached publication/price reads and receipt checks.
+methods debit the existing durable provider/global budgets. Each launchpad handler
+admits one active launch read, with bounded deadlines and cached publication/price
+reads and receipt checks.
 No arbitrary target, RPC URL, calldata, signature or gas override is accepted.
 
 Reservation is durably saved before the wallet opens. Attempted records never
@@ -206,9 +214,11 @@ without changing publication IDs, hashes, CIDs or wallet bindings. Both URLs mus
 match the recorded origin and CIDs; altered paths or queries remain rejected.
 Recovery continues through the existing status endpoint without another signature.
 
-`saltAttempt` is a required plan field for the canonical-address format. A new web
-build rejects plans from an old API, and an old web build cannot reconstruct plans
-from a new API. Deploy the API and web from the same reviewed Git revision in one
+`saltAttempt` is a required browser plan field for the canonical-address format. New
+API journals also add a version, immutable publication CIDs and the selected guard;
+these server recovery fields distinguish reconstructable rows from the explicit
+legacy fallback. A new web build rejects plans from an old API, and an old web build
+cannot reconstruct plans from a new API. Deploy the API and web from the same reviewed Git revision in one
 maintenance window: stop new launch preparation, confirm there is no wallet handoff
 in progress, deploy both immediate-strategy single-Machine apps, verify each image
 revision and health endpoint, then re-enable preparation. Do not use a rolling or

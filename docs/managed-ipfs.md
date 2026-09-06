@@ -24,8 +24,12 @@ this IPFS path. Private operational records still need a backup/recovery procedu
 O1 preparation now sends the already-approved WebP bytes to the official
 `POST /v1/launches/prepare` endpoint. A separate durable journal commits the exact
 request binding and an idempotency key before the call, saves the returned URIs,
-and reuses them across gas refreshes and process restarts. An uncertain call can
-only retry that same key and payload. It never silently starts another upload.
+and reuses them across gas refreshes and process restarts. A timeout or otherwise
+ambiguous call retries only the same key and payload. An exact provider `409
+stale_plan` response is definitive rather than ambiguous and permits one durable
+compare-and-swap rotation to a new key for the unchanged request; concurrent callers
+reload the winner. No other response rotates a key. Each provider attempt debits 20
+O1 units before the request, including the single permitted stale-plan retry.
 
 The O1 document has `name`, `symbol`, `description`, `standard: ERC20`,
 `launchpad: o1 Launchpad`, `launchpadUrl`, and the approved image URI. Both server

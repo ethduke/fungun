@@ -4,6 +4,7 @@ import { LongLive, readLongLaunchConfig } from './long-live.mjs';
 import { O1MetadataPublisher } from './o1-metadata.mjs';
 import { readLaunchTokens, launchPairId } from './launch-catalog.mjs';
 import { O1_LAUNCH_ABI, buildUnsignedO1Launch, o1Params, readO1LaunchProfile } from '../../web/lib/long-encoding/o1-launch.mjs';
+import { o1Metadata } from '../../web/lib/long-encoding/o1-metadata.mjs';
 import { ipfsContentId, ipfsUri } from './ipfs-content.mjs';
 import { rpcNumber } from './fee-rpc.mjs';
 import { checkReadDeadline } from './upstream.mjs';
@@ -36,6 +37,32 @@ export class O1Live extends LongLive {
     this.o1Metadata = new O1MetadataPublisher(this.db, upstream, this.fetcher, config.o1Key);
   }
   journalProfile(value) { return readO1LaunchProfile(value); }
+  journalId(context) {
+    return createHmac('sha256', this.budget.key).update(`o1:${context.wallet}:${context.publication.metadataHash}:${context.pairId}:${context.editableMetadata ?? false}`).digest('hex');
+  }
+  usesGuardSnapshot() { return false; }
+  currentJournalKeys() {
+    return ['id', 'binding', 'chainId', 'quotedAt', 'expiresAt', 'o1MetadataVersion', 'transaction', 'profile', 'buildInput',
+      'predictedAsset', 'saltAttempt', 'predictedPool', 'tickSpacing', 'review', 'estimatedGas', 'launchpadFeeWei',
+      'launchFeeSource', 'maximumGasWei', 'usd', 'journalVersion', 'publication'];
+  }
+  journalGasLimit() { return gasLimit; }
+  rebuildJournalPlan(plan, context, profile, publication, expectedId) {
+    const keys = ['wallet', 'draft', 'pairId', 'metadataUri', 'editableMetadata', 'configVersion', 'chainDeadline',
+      'totalSupply', 'launchpadFeeWei', 'intentId', 'initCodeHash'];
+    const source = plan.buildInput;
+    if (!source || typeof source !== 'object' || Array.isArray(source) || Object.keys(source).length !== keys.length
+      || keys.some(key => !Object.hasOwn(source, key)) || plan.o1MetadataVersion !== 1
+      || !Number.isInteger(plan.tickSpacing) || plan.tickSpacing < -8388608 || plan.tickSpacing > 8388607) fail('launch_journal_unverified');
+    const buildInput = { ...source, wallet: context.wallet, draft: context.draft, pairId: context.pairId,
+      metadataUri: o1Metadata(context.draft, publication.imageCid).uri,
+      editableMetadata: context.editableMetadata ?? false, intentId: expectedId };
+    if (keys.some(key => JSON.stringify(buildInput[key]) !== JSON.stringify(source[key]))
+      || buildInput.launchpadFeeWei !== plan.launchpadFeeWei
+      || buildInput.chainDeadline * 1000 <= plan.expiresAt
+      || buildInput.chainDeadline * 1000 > plan.quotedAt + 1830000) fail('launch_journal_unverified');
+    return buildUnsignedO1Launch(buildInput, profile, plan.saltAttempt);
+  }
   journalContracts(profile, quote) {
     return [...roles.map(role => profile[role]), ...(quote.token ? [quote.token] : [])];
   }
@@ -64,18 +91,19 @@ export class O1Live extends LongLive {
     if (!quote) throw new UnsupportedPairError(this.live.profile.quotes.map(q => q.id));
     const p = { ...this.live.profile, quotes: [quote] };
     const editableMetadata = input.editableMetadata ?? false;
-    const key = createHmac('sha256', this.budget.key).update(`o1:${input.wallet}:${input.publication.metadataHash}:${input.pairId}:${editableMetadata}`).digest('hex');
+    const key = this.journalId(input);
     const context = JSON.stringify(input), prior = this.row(key);
     if (prior && prior.context !== context) {
       const original = JSON.parse(prior.context);
       if (JSON.stringify({ ...input, publication: { ...input.publication, id: original.publication.id } }) !== prior.context) fail('launch_context_locked');
     }
-    if (prior && ['prepared', 'wallet'].includes(prior.state) && !prior.tx_hash) this.assertActionableProfile(prior);
-    const retry = prior?.state === 'wallet' && !prior.tx_hash ? JSON.parse(prior.plan) : null;
-    const resume = () => ({ recovery: { id: key, binding: JSON.parse(prior.plan).binding, hash: prior.tx_hash ?? null } });
+    const savedContext = prior ? this.journalContext(prior) : null;
+    const savedPlan = prior ? this.journalPlan(prior.plan, savedContext, key, prior.journal_version) : null;
+    const retry = prior?.state === 'wallet' && !prior.tx_hash ? savedPlan : null;
+    const resume = () => ({ recovery: { id: key, binding: savedPlan.binding, hash: prior.tx_hash ?? null } });
     if (prior && prior.state !== 'prepared' && !retry) return resume();
     if (retry && (await this.recovery.find(key, retry.transaction)).status !== 'retryable') return resume();
-    if (!retry && prior && prior.expires > this.now() && JSON.parse(prior.plan).o1MetadataVersion === 1) return JSON.parse(prior.plan);
+    if (!retry && prior && prior.expires > this.now() && this.liveProfileMatches(savedPlan, savedContext)) return savedPlan;
     if (!prior && this.db.prepare('SELECT COUNT(*) AS n FROM long_launches').get().n >= 4096) fail('launch_history_full');
     const publication = await this.metadata(input), imageUri = ipfsUri(publication.ipfs.imageCid);
     const metadata = Buffer.from(JSON.stringify({ name: input.draft.name, symbol: input.draft.ticker,
@@ -144,14 +172,16 @@ export class O1Live extends LongLive {
       transaction: { ...plan.transaction, chainId: '0x1237', nonce: toHex(rpcNumber(rawNonce)), gas: toHex(gas), gasPrice: toHex(price) },
       profile: plan.profile, buildInput, predictedAsset: plan.predictedAsset, saltAttempt: plan.saltAttempt, predictedPool: pool,
       tickSpacing: spacing, review: plan.review, estimatedGas: estimated.toString(), launchpadFeeWei: fee.amountWei,
-      launchFeeSource: fee, maximumGasWei: (gas * price).toString(), usd };
+      launchFeeSource: fee, maximumGasWei: (gas * price).toString(), usd, journalVersion: 1,
+      publication: { imageCid: publication.ipfs.imageCid, metadataCid: publication.ipfs.metadataCid } };
     checkReadDeadline();
     this.db.exec('BEGIN IMMEDIATE');
     try {
-      if (retry) this.remember(key, retry);
-      this.remember(key, prepared);
-      this.db.prepare(`INSERT INTO long_launches(id,context,state,plan,expires) VALUES (?,?,'prepared',?,?)
-        ON CONFLICT(id) DO UPDATE SET plan=excluded.plan,expires=excluded.expires WHERE state IN ('prepared','wallet') AND tx_hash IS NULL`).run(key, context, JSON.stringify(prepared), prepared.expiresAt);
+      if (retry) this.remember(key, retry, prior.journal_version);
+      this.remember(key, prepared, 1);
+      this.db.prepare(`INSERT INTO long_launches(id,context,state,plan,expires,journal_version) VALUES (?,?,'prepared',?,?,1)
+        ON CONFLICT(id) DO UPDATE SET plan=excluded.plan,expires=excluded.expires,journal_version=excluded.journal_version
+        WHERE state IN ('prepared','wallet') AND tx_hash IS NULL`).run(key, context, JSON.stringify(prepared), prepared.expiresAt);
       this.db.exec('COMMIT');
     } catch (error) { this.db.exec('ROLLBACK'); throw error; }
     return prepared;

@@ -15,9 +15,9 @@ test('saved Long, Longbow and O1 results route to read-only status while their l
     ['c'.repeat(64), 'native'],
   ];
   for (const [id, pairId] of rows) {
-    const result = { id, status: 'confirmed', hash: `0x${id}`, paidGasWei: '1' };
-    db.prepare("INSERT INTO long_launches(id,context,state,plan,expires,result) VALUES (?,?, 'confirmed','{}',0,?)")
-      .run(id, JSON.stringify({ pairId }), JSON.stringify(result));
+    const result = { id, status: 'confirmed', hash: `0x${id}`, paidGasWei: '1', asset: `0x${id.slice(0, 40)}` };
+    db.prepare("INSERT INTO long_launches(id,context,state,plan,expires,tx_hash,result) VALUES (?,?, 'confirmed','{}',0,?,?)")
+      .run(id, JSON.stringify({ pairId }), result.hash, JSON.stringify(result));
     assert.deepEqual(await launches.run('launch-status', { id, hash: null }), result);
     await assert.rejects(launches.run('launch-reserve', { id, binding: 'd'.repeat(64) }), {
       code: 'long_launch_disabled',

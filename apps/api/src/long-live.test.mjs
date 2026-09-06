@@ -46,7 +46,7 @@ async function fixture(t) {
         case 'latestRoundData': return [1n, changes.answer ?? 23000000000n, BigInt(now / 1000 - 20), BigInt(now / 1000 - (changes.age ?? 10)), 1n];
         case 'isTickerAvailable': return !changes.reserved;
         case 'implementation': return changes.implementation ?? g.tokenImplementation.address;
-        case 'aggregator': return g.oracleAggregator.address;
+        case 'aggregator': return changes.aggregator ?? g.oracleAggregator.address;
         case 'oraclePaused': return changes.oraclePaused ?? false;
         case 'name': return draft.name;
         case 'symbol': return draft.ticker;
@@ -62,7 +62,7 @@ async function fixture(t) {
       switch(e.method) {
         case 'eth_chainId': return '0x1237';
         case 'eth_blockNumber': return '0x100';
-        case 'eth_getStorageAt': return toHex(BigInt(g.tokenBeacon.address), { size: 32 });
+        case 'eth_getStorageAt': return toHex(BigInt(changes.beacon ?? g.tokenBeacon.address), { size: 32 });
         case 'eth_getBlockByNumber': return { timestamp: toHex(now / 1000), hash: changes.reorg ? hash(900) : hash(500) };
         case 'eth_getCode': return changes.occupied ? '0x01' : '0x';
         case 'eth_call': {
@@ -108,9 +108,27 @@ function confirmableReceipt(f, plan, txHash = hash(600)) {
   return txHash;
 }
 
+test('journal migration marks existing durable launch rows as explicit legacy version zero', t => {
+  const root = mkdtempSync(join(tmpdir(), 'long-journal-migration-')), path = join(root, 'budget.sqlite');
+  const budget = new Budget(path); t.after(() => { budget.close(); rmSync(root, { recursive: true, force: true }); });
+  budget.db.exec(`CREATE TABLE long_launches (id TEXT PRIMARY KEY, context TEXT NOT NULL, state TEXT NOT NULL,
+    plan TEXT NOT NULL, expires INTEGER NOT NULL, tx_hash TEXT, result TEXT)`);
+  budget.db.exec(`CREATE TABLE long_launch_attempts (id TEXT NOT NULL, envelope TEXT NOT NULL, plan TEXT NOT NULL,
+    PRIMARY KEY(id,envelope))`);
+  budget.db.prepare("INSERT INTO long_launches(id,context,state,plan,expires) VALUES (?,'{}','prepared','{}',0)")
+    .run('a'.repeat(64));
+  const service = new LongLive({ readsEnabled: true, longLaunch: null }, {}, budget);
+  assert.equal(service.row('a'.repeat(64)).journal_version, 0);
+  assert.ok(['long_launches', 'long_launch_attempts'].every(table => budget.db.prepare(`PRAGMA table_info(${table})`).all()
+    .some(column => column.name === 'journal_version')));
+});
+
 test('preparation binds metadata, verifies dependencies at one block and returns a bounded unsigned transaction', async (t) => {
   const f = await fixture(t), plan = await f.service.run('launch-prepare', f.input);
   assert.equal(plan.launchpadFeeWei, '0'); assert.equal(plan.transaction.value, '0x0');
+  assert.equal(plan.journalVersion, 1); assert.deepEqual(plan.guard, f.g);
+  assert.ok(plan.publication.imageCid); assert.ok(plan.publication.metadataCid);
+  assert.equal(f.service.row(plan.id).journal_version, 1);
   assert.equal(plan.maximumGasWei, String(1200000n * 1000000000n));
   assert.ok(f.requests.includes('eth_estimateGas'));
   assert.equal(f.seen.length, 2); assert.ok(f.seen.every((v) => v[3] === '0x64'));
@@ -119,6 +137,40 @@ test('preparation binds metadata, verifies dependencies at one block and returns
   assert.deepEqual(await f.service.run('launch-prepare', f.input), plan);
   assert.equal(f.requests.length, reads);
   assert.ok(!f.requests.some((m) => /send|sign/i.test(m)));
+});
+
+test('current journal binds the HMAC row and supports multi-block artwork CIDs', async t => {
+  const f = await fixture(t), image = Buffer.alloc(262145, 7);
+  const imageCid = await ipfsContentId(image), imageUri = `ipfs://${imageCid}`;
+  const metadata = Buffer.from(JSON.stringify({ name: f.input.draft.name, symbol: f.input.draft.ticker,
+    description: f.input.draft.description, image: imageUri, image_hash: imageUri }));
+  const input = { ...f.input, publication: { ...f.input.publication,
+    imageHash: createHash('sha256').update(image).digest('hex'),
+    metadataHash: createHash('sha256').update(metadata).digest('hex') } };
+  const published = { ...input.publication, status: 'published', ipfs: { profile: 'pinata-v1-256k', schema: 'long-ipfs-v1',
+    imageCid, metadataCid: await ipfsContentId(metadata) } };
+  f.service.metadata = async () => published;
+  const plan = await f.service.run('launch-prepare', input);
+  assert.deepEqual(await f.service.run('launch-prepare', input), plan);
+  f.budget.key = 'f'.repeat(64);
+  await assert.rejects(f.service.run('launch-reserve', { id: plan.id, binding: plan.binding }), {
+    code: 'launch_journal_unverified',
+  });
+});
+
+test('current Long journal reconstructs calldata, binding and publication before reserve', async t => {
+  const f = await fixture(t), plan = await f.service.run('launch-prepare', f.input);
+  const changed = [
+    { ...plan, binding: 'f'.repeat(64) },
+    { ...plan, transaction: { ...plan.transaction, data: '0x00' } },
+    { ...plan, publication: { ...plan.publication, metadataCid: plan.publication.imageCid } },
+  ];
+  for (const candidate of changed) {
+    f.budget.db.prepare('UPDATE long_launches SET plan=? WHERE id=?').run(JSON.stringify(candidate), plan.id);
+    await assert.rejects(f.service.run('launch-reserve', { id: plan.id, binding: candidate.binding }), {
+      code: 'launch_journal_unverified',
+    });
+  }
 });
 
 test('invalid unauthenticated preparations cannot spend the scarce shared launch allowance', async (t) => {
@@ -147,8 +199,8 @@ test('unsent legacy plans are refreshed with a canonical address rather than off
   assert.ok(plan.predictedAsset.toLowerCase().endsWith('1e18'));
   assert.ok(Number.isInteger(plan.saltAttempt));
   const legacy = { ...plan, predictedAsset: addr(333) };
-  delete legacy.saltAttempt;
-  f.budget.db.prepare('UPDATE long_launches SET plan=? WHERE id=?').run(JSON.stringify(legacy), plan.id);
+  for (const key of ['saltAttempt', 'journalVersion', 'publication', 'guard']) delete legacy[key];
+  f.budget.db.prepare('UPDATE long_launches SET plan=?,journal_version=0 WHERE id=?').run(JSON.stringify(legacy), plan.id);
   const refreshed = await f.service.run('launch-prepare', f.input);
   assert.ok(refreshed.predictedAsset.toLowerCase().endsWith('1e18'));
   assert.ok(Number.isInteger(refreshed.saltAttempt));
@@ -195,17 +247,38 @@ test('disabled launch creation keeps existing wallet attempts recoverable but ca
   assert.deepEqual(disabled.row(plan.id), before);
 });
 
+test('legacy submitted plans without guard snapshots retain receipt recovery', async t => {
+  const f = await fixture(t), plan = await f.service.run('launch-prepare', f.input);
+  f.service.reserve(plan);
+  const txHash = confirmableReceipt(f, plan), legacy = { ...plan };
+  delete legacy.journalVersion; delete legacy.publication; delete legacy.guard;
+  f.budget.db.prepare('UPDATE long_launches SET plan=?,journal_version=0 WHERE id=?')
+    .run(JSON.stringify(legacy), plan.id);
+  f.budget.db.prepare('DELETE FROM long_launch_attempts WHERE id=?').run(plan.id);
+  const disabled = new LongLive({ ...f.config, longLaunch: null }, f.upstream, f.budget, f.options);
+  assert.deepEqual(await disabled.run('launch-status', { id: plan.id, hash: txHash }), {
+    id: plan.id, status: 'confirmed', hash: txHash, paidGasWei: '256000000000', asset: plan.predictedAsset,
+  });
+});
+
 test('rotated deployment config blocks old actionable plans while status verifies the journaled profile at the receipt block', async t => {
   const f = await fixture(t), plan = await f.service.run('launch-prepare', f.input);
   const rotatedProfile = { ...f.p, launcher: contract(101) };
   const rotated = new LongLive({ ...f.config,
     longLaunch: { ...f.config.longLaunch, profile: rotatedProfile } }, f.upstream, f.budget, f.options);
-  await assert.rejects(rotated.run('launch-prepare', f.input), { code: 'launch_configuration_changed' });
   await assert.rejects(rotated.run('launch-reserve', { id: plan.id, binding: plan.binding }), {
     code: 'launch_configuration_changed',
   });
   assert.equal(rotated.row(plan.id).state, 'prepared');
 
+  const refreshed = await rotated.run('launch-prepare', f.input);
+  assert.equal(refreshed.profile.launcher.address, rotatedProfile.launcher.address);
+  assert.notEqual(refreshed.binding, plan.binding);
+
+  // Restore the original prepared attempt to model a handoff completed before
+  // rotation; receipt status must use its saved profile rather than the live one.
+  f.budget.db.prepare('UPDATE long_launches SET plan=?,expires=?,journal_version=1 WHERE id=?')
+    .run(JSON.stringify(plan), plan.expiresAt, plan.id);
   f.service.reserve(plan);
   const txHash = confirmableReceipt(f, plan);
   f.seen.length = 0;
@@ -214,14 +287,34 @@ test('rotated deployment config blocks old actionable plans while status verifie
     code: 'contract_unverified',
   });
   assert.equal(rotated.row(plan.id).result, null);
-  delete f.changes.code;
+  delete f.changes.code; f.changes.implementation = addr(999);
   f.advance(16000);
+  await assert.rejects(rotated.run('launch-status', { id: plan.id, hash: txHash }), {
+    code: 'launch_receipt_unverified',
+  });
+  delete f.changes.implementation; f.advance(16000);
   const result = await rotated.run('launch-status', { id: plan.id, hash: txHash });
   assert.equal(result.status, 'confirmed');
-  const [, verified, fresh, block] = f.seen.at(-1);
-  assert.equal(fresh, true); assert.equal(block, '0x64');
+  const historical = f.seen.filter(([, , fresh, block]) => fresh === true && block === '0x64');
+  const verified = historical.flatMap(([, contracts]) => contracts);
+  assert.ok(historical.length >= 2);
   assert.ok(verified.some(entry => entry.address === f.p.launcher.address));
+  assert.ok([f.g.tokenBeacon, f.g.tokenImplementation, f.g.oracleAggregator]
+    .every(contract => verified.some(entry => entry.address === contract.address)));
   assert.ok(!verified.some(entry => entry.address === rotatedProfile.launcher.address));
+});
+
+test('guard rotation blocks cached dispatch and preparation journals a fresh snapshot', async t => {
+  const f = await fixture(t), plan = await f.service.run('launch-prepare', f.input);
+  f.config.longLaunch.guards['long-NVDA'] = { ...f.g, heartbeatSeconds: 3600 };
+  await assert.rejects(f.service.run('launch-reserve', { id: plan.id, binding: plan.binding }), {
+    code: 'launch_configuration_changed',
+  });
+  const reads = f.requests.length, refreshed = await f.service.run('launch-prepare', f.input);
+  assert.equal(refreshed.guard.heartbeatSeconds, 3600);
+  assert.ok(f.requests.length > reads);
+  assert.equal(JSON.parse(f.service.row(plan.id).plan).guard.heartbeatSeconds, 3600);
+  assert.deepEqual(await f.service.run('launch-prepare', f.input), refreshed);
 });
 
 test('changed metadata, stale or paused prices, changed implementations, occupied addresses and unsafe gas fail closed', async (t) => {
@@ -257,6 +350,7 @@ test('receipt verification rejects substituted transactions and requires canonic
   f.changes.reorg = false; f.advance(11000);
   const result = await f.service.run('launch-status', { id: plan.id, hash: txHash });
   assert.equal(result.status, 'confirmed'); assert.equal(result.asset, plan.predictedAsset);
+  assert.equal(JSON.parse(f.service.row(plan.id).plan).predictedAsset, plan.predictedAsset);
   assert.equal((await f.service.run('launch-status', { id: plan.id, hash: null })).status, 'confirmed');
 });
 
@@ -265,7 +359,8 @@ test('terminal launch results remain bound to the journaled transaction hash', a
     const f = await fixture(t);
     const plan = await f.service.run('launch-prepare', f.input);
     const txHash = hash(status === 'confirmed' ? 700 : 701);
-    const terminal = { id: plan.id, status, hash: txHash, paidGasWei: '1' };
+    const terminal = { id: plan.id, status, hash: txHash, paidGasWei: '1',
+      ...(status === 'confirmed' ? { asset: plan.predictedAsset } : {}) };
     f.budget.db.prepare(
       "UPDATE long_launches SET state=?,tx_hash=?,result=? WHERE id=?",
     ).run(status, txHash, JSON.stringify(terminal), plan.id);
@@ -281,6 +376,13 @@ test('terminal launch results remain bound to the journaled transaction hash', a
       f.service.run('launch-status', { id: plan.id, hash: hash(702) }),
       /launch_transaction_changed/,
     );
+    if (status === 'confirmed') {
+      f.budget.db.prepare('UPDATE long_launches SET result=? WHERE id=?')
+        .run(JSON.stringify({ ...terminal, asset: addr(999) }), plan.id);
+      await assert.rejects(f.service.run('launch-status', { id: plan.id, hash: null }), {
+        code: 'launch_journal_unverified',
+      });
+    }
   }
 });
 

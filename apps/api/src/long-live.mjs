@@ -2,7 +2,7 @@ import { LongRecovery } from "./long-recovery.mjs";
 import { LongRpc } from "./long-rpc.mjs";
 import { createHash, createHmac } from "node:crypto";
 import { decodeEventLog, decodeFunctionResult, isAddress, keccak256, parseAbi, toBytes, toHex, zeroAddress } from "viem";
-import { buildUnsignedLongLaunchAsync, LONG_CREATE_ABI, readLongLaunchProfile } from "./long-launch.mjs";
+import { buildUnsignedLongLaunch, buildUnsignedLongLaunchAsync, LONG_CREATE_ABI, readLongLaunchProfile } from "./long-launch.mjs";
 import { isCanonicalLongAsset } from '../../web/lib/long-encoding/long-salt.mjs';
 import { normalizeLaunchDetails } from "./launch-metadata.mjs";
 import { ipfsContentId, ipfsUri, IPFS_IMPORT_PROFILE, LONG_IPFS_SCHEMA } from "./ipfs-content.mjs";
@@ -38,6 +38,32 @@ const exact = (v, keys) => v && typeof v === "object" && !Array.isArray(v) && Ob
 const fail = (code, status = 409) => { throw new ServiceError(code, status); };
 const beaconSlot = toHex(BigInt(keccak256(toBytes("eip1967.proxy.beacon"))) - 1n, { size: 32 });
 const call = (address, functionName, args = []) => ({ address, abi: LONG_STATE_ABI, functionName, args });
+const journalVersion = 1;
+const base32 = "abcdefghijklmnopqrstuvwxyz234567";
+
+function readLongLaunchGuard(value) {
+  if (!exact(value, ["tokenBeacon", "tokenImplementation", "oracleAggregator", "heartbeatSeconds"])
+    || !Number.isInteger(value.heartbeatSeconds) || value.heartbeatSeconds < 1 || value.heartbeatSeconds > 86400) fail("launch_journal_unverified", 503);
+  const contracts = {};
+  for (const role of ["tokenBeacon", "tokenImplementation", "oracleAggregator"]) {
+    const contract = value[role];
+    if (!exact(contract, ["address", "codeHash"]) || !isAddress(contract.address) || same(contract.address, zeroAddress)
+      || !/^0x[a-f0-9]{64}$/i.test(contract.codeHash)) fail("launch_journal_unverified", 503);
+    contracts[role] = { address: contract.address.toLowerCase(), codeHash: contract.codeHash.toLowerCase() };
+  }
+  return Object.freeze({ ...contracts, heartbeatSeconds: value.heartbeatSeconds });
+}
+
+function rawCidDigest(value) {
+  if (typeof value !== "string" || !/^b[a-z2-7]{58}$/.test(value)) return null;
+  const bytes = []; let pending = 0, bits = 0;
+  for (const character of value.slice(1)) {
+    pending = (pending << 5) | base32.indexOf(character); bits += 5;
+    if (bits >= 8) { bits -= 8; bytes.push(pending >> bits); pending &= (1 << bits) - 1; }
+  }
+  return pending === 0 && bytes.length === 36 && bytes[0] === 1 && bytes[1] === 0x55
+    && bytes[2] === 0x12 && bytes[3] === 0x20 ? Buffer.from(bytes.slice(4)).toString("hex") : null;
+}
 
 export function validateLongInput(kind, value) {
   if (kind === "launch-estimate") {
@@ -68,18 +94,16 @@ export function validateLongInput(kind, value) {
 export function readLongLaunchConfig(env) {
   try {
     const profile = readLongLaunchProfile(JSON.parse(env.LONG_LAUNCH_PROFILE_JSON));
-    const guards = JSON.parse(env.LONG_LAUNCH_GUARDS_JSON);
+    const configured = JSON.parse(env.LONG_LAUNCH_GUARDS_JSON), guards = {};
     for (const q of profile.quotes) {
-      const g = guards[q.id];
-      if (!exact(g, ["tokenBeacon", "tokenImplementation", "oracleAggregator", "heartbeatSeconds"]) || !Number.isInteger(g.heartbeatSeconds) || g.heartbeatSeconds < 1 || g.heartbeatSeconds > 86400) fail("long_configuration");
-      for (const c of [g.tokenBeacon, g.tokenImplementation, g.oracleAggregator]) if (!exact(c, ["address", "codeHash"]) || !isAddress(c.address)
-        || same(c.address, zeroAddress) || !/^0x[a-f0-9]{64}$/i.test(c.codeHash)) fail("long_configuration");
+      try { guards[q.id] = readLongLaunchGuard(configured[q.id]); }
+      catch { fail("long_configuration"); }
     }
     const assetOrigin = env.LAUNCH_ASSET_SERVICE_ORIGIN;
     const url = new URL(assetOrigin);
     if (url.origin !== assetOrigin || url.username || url.password || !(url.protocol === "https:"
       || (url.protocol === "http:" && /^[a-z][a-z0-9-]{0,62}\.internal$/.test(url.hostname) && url.port === "8790"))) fail("long_configuration");
-    return { profile, guards, assetOrigin };
+    return { profile, guards: Object.freeze(guards), assetOrigin };
   } catch { fail("long_configuration", 503); }
 }
 
@@ -97,12 +121,20 @@ export class LongLive {
     // Additive table on the existing durable volume; never prune an attempted launch.
     this.db.exec(`CREATE TABLE IF NOT EXISTS long_launches (
       id TEXT PRIMARY KEY, context TEXT NOT NULL, state TEXT NOT NULL,
-      plan TEXT NOT NULL, expires INTEGER NOT NULL, tx_hash TEXT, result TEXT
+      plan TEXT NOT NULL, expires INTEGER NOT NULL, tx_hash TEXT, result TEXT,
+      journal_version INTEGER NOT NULL DEFAULT 0
     )`);
     this.db.exec(`CREATE TABLE IF NOT EXISTS long_launch_attempts (
       id TEXT NOT NULL, envelope TEXT NOT NULL, plan TEXT NOT NULL,
+      journal_version INTEGER NOT NULL DEFAULT 0,
       PRIMARY KEY(id,envelope)
     )`);
+    // Existing durable rows predate reconstructable journal plans. Preserve them
+    // as version zero while making the trust boundary explicit for every new row.
+    for (const table of ["long_launches", "long_launch_attempts"]) {
+      if (!this.db.prepare(`PRAGMA table_info(${table})`).all().some((column) => column.name === "journal_version"))
+        this.db.exec(`ALTER TABLE ${table} ADD COLUMN journal_version INTEGER NOT NULL DEFAULT 0`);
+    }
   }
   async run(kind, raw) {
     const input = validateLongInput(kind, raw);
@@ -155,6 +187,16 @@ export class LongLive {
   }
   row(key) { return this.db.prepare("SELECT * FROM long_launches WHERE id=?").get(key); }
   journalProfile(value) { return readLongLaunchProfile(value); }
+  journalId(context) {
+    return createHmac("sha256", this.budget.key).update(`${context.wallet}:${context.publication.metadataHash}${context.pairId === "long-NVDA" ? "" : `:${context.pairId}`}`).digest("hex");
+  }
+  usesGuardSnapshot() { return true; }
+  currentJournalKeys() {
+    return ["id", "binding", "chainId", "quotedAt", "expiresAt", "transaction", "profile", "startingTick", "intentId",
+      "predictedAsset", "saltAttempt", "predictedPool", "review", "estimatedGas", "launchpadFeeWei", "launchFeeSource",
+      "maximumGasWei", "usd", "journalVersion", "publication", "guard"];
+  }
+  journalGasLimit() { return 3000000n; }
   journalContracts(profile, quote) {
     return [...roles.map((role) => profile[role]), quote.token, quote.oracle].filter(Boolean);
   }
@@ -162,7 +204,68 @@ export class LongLive {
     try { return validateLongInput("launch-prepare", JSON.parse(row.context)); }
     catch { fail("launch_journal_unverified", 503); }
   }
-  journalPlan(value, context) {
+  journalPublication(value, context) {
+    if (!exact(value, ["imageCid", "metadataCid"])) fail("launch_journal_unverified", 503);
+    const imageUri = ipfsUri(value.imageCid), bytes = Buffer.from(JSON.stringify({
+      name: context.draft.name, symbol: context.draft.ticker, description: context.draft.description,
+      image: imageUri, image_hash: imageUri,
+    }));
+    if (digest(bytes) !== context.publication.metadataHash
+      || rawCidDigest(value.metadataCid) !== context.publication.metadataHash) fail("launch_journal_unverified", 503);
+    return Object.freeze({ imageCid: value.imageCid, metadataCid: value.metadataCid });
+  }
+  journalGuard(plan) {
+    if (!this.usesGuardSnapshot()) {
+      if (plan.guard !== undefined) fail("launch_journal_unverified", 503);
+      return undefined;
+    }
+    const guard = readLongLaunchGuard(plan.guard);
+    if (JSON.stringify(guard) !== JSON.stringify(plan.guard)) fail("launch_journal_unverified", 503);
+    return guard;
+  }
+  liveGuard(context) {
+    if (!this.usesGuardSnapshot()) return undefined;
+    return readLongLaunchGuard(this.live?.guards?.[context.pairId]);
+  }
+  rebuildJournalPlan(plan, context, profile, publication, expectedId) {
+    const intentId = `${expectedId.slice(0,8)}-${expectedId.slice(8,12)}-${expectedId.slice(12,16)}-${expectedId.slice(16,20)}-${expectedId.slice(20,32)}`;
+    if (plan.intentId !== intentId) fail("launch_journal_unverified", 503);
+    const rebuilt = buildUnsignedLongLaunch({ chainId: 4663, wallet: context.wallet, draft: context.draft,
+      pairId: context.pairId, metadataUri: ipfsUri(publication.metadataCid), startingTick: plan.startingTick, intentId },
+    profile, undefined, plan.saltAttempt);
+    return rebuilt;
+  }
+  validateCurrentJournalPlan(plan, context, profile, expectedId) {
+    if (!exact(plan, this.currentJournalKeys()) || plan.journalVersion !== journalVersion || plan.id !== expectedId
+      || this.journalId(context) !== expectedId
+      || plan.chainId !== 4663 || !Number.isSafeInteger(plan.quotedAt) || plan.quotedAt < 1
+      || !Number.isSafeInteger(plan.expiresAt) || plan.expiresAt - plan.quotedAt !== 30000) fail("launch_journal_unverified", 503);
+    const publication = this.journalPublication(plan.publication, context), guard = this.journalGuard(plan);
+    const rebuilt = this.rebuildJournalPlan(plan, context, profile, publication, expectedId), transaction = plan.transaction;
+    if (plan.binding !== rebuilt.binding || !same(plan.predictedAsset, rebuilt.predictedAsset)
+      || JSON.stringify(plan.review) !== JSON.stringify(rebuilt.review)
+      || !exact(transaction, ["from", "to", "data", "value", "chainId", "nonce", "gas", "gasPrice"])
+      || !same(transaction.from, rebuilt.transaction.from) || !same(transaction.to, rebuilt.transaction.to)
+      || transaction.data !== rebuilt.transaction.data || rpcNumber(transaction.value) !== BigInt(rebuilt.transaction.value)
+      || transaction.chainId !== "0x1237" || !/^\d{1,8}$/.test(plan.estimatedGas)
+      || !/^\d{1,17}$/.test(plan.launchpadFeeWei) || !/^\d{1,20}$/.test(plan.maximumGasWei)
+      || !exact(plan.launchFeeSource, ["amountWei", "kind", "contract", "blockNumber"])
+      || plan.launchFeeSource.kind !== "verified-contract" || plan.launchFeeSource.amountWei !== plan.launchpadFeeWei
+      || !same(plan.launchFeeSource.contract, profile.launcher.address) || !/^\d{1,20}$/.test(plan.launchFeeSource.blockNumber)
+      || !exact(plan.usd, ["microUsdPerEth", "sourceLabel", "quotedAt"])
+      || plan.usd.sourceLabel !== "Coinbase ETH/USD spot" || !/^\d{1,12}$/.test(plan.usd.microUsdPerEth)
+      || BigInt(plan.usd.microUsdPerEth) === 0n || !Number.isSafeInteger(plan.usd.quotedAt)
+      || plan.usd.quotedAt > plan.quotedAt || plan.quotedAt - plan.usd.quotedAt >= 60000) fail("launch_journal_unverified", 503);
+    const estimate = BigInt(plan.estimatedGas), gas = rpcNumber(transaction.gas), price = rpcNumber(transaction.gasPrice);
+    const nonce = rpcNumber(transaction.nonce), value = rpcNumber(transaction.value), maximum = BigInt(plan.maximumGasWei);
+    if (estimate < 21000n || gas !== (estimate * 120n + 99n) / 100n || gas > this.journalGasLimit()
+      || price === 0n || price > 10n ** 12n || nonce > 2n ** 64n - 1n || value !== BigInt(plan.launchpadFeeWei)
+      || maximum !== gas * price || maximum + value > 5n * 10n ** 16n
+      || !isAddress(plan.predictedAsset) || same(plan.predictedAsset, zeroAddress)
+      || typeof plan.predictedPool !== "string" || !/^0x(?:[a-f0-9]{40}|[a-f0-9]{64})$/i.test(plan.predictedPool)) fail("launch_journal_unverified", 503);
+    return { ...plan, profile, publication, ...(guard ? { guard } : {}) };
+  }
+  journalPlan(value, context, expectedId, version = 0) {
     try {
       const plan = typeof value === "string" ? JSON.parse(value) : value;
       const profile = this.journalProfile(plan?.profile);
@@ -178,6 +281,9 @@ export class LongLive {
         || !id(plan.binding) || !isAddress(plan.predictedAsset) || same(plan.predictedAsset, zeroAddress)
         || (typeof plan.predictedPool !== "string" || !/^0x(?:[a-f0-9]{40}|[a-f0-9]{64})$/i.test(plan.predictedPool))
         || plan.review?.pairId !== context.pairId || typeof plan.review?.metadataUri !== "string") fail("launch_journal_unverified", 503);
+      if (![0, journalVersion].includes(version)) fail("launch_journal_unverified", 503);
+      if (version === journalVersion) return this.validateCurrentJournalPlan(plan, context, profile, expectedId);
+      if (plan.journalVersion !== undefined || plan.publication !== undefined || plan.guard !== undefined) fail("launch_journal_unverified", 503);
       return { ...plan, profile };
     } catch { fail("launch_journal_unverified", 503); }
   }
@@ -186,15 +292,15 @@ export class LongLive {
     return quote ? { ...profile, quotes: [quote] } : null;
   }
   liveProfileMatches(plan, context) {
-    if (!this.live) return false;
+    if (!this.live || plan.journalVersion !== journalVersion) return false;
     try {
       const current = this.journalProfile(this.live.profile);
-      return JSON.stringify(this.scopedProfile(plan.profile, context.pairId))
-        === JSON.stringify(this.scopedProfile(current, context.pairId));
+      return JSON.stringify({ profile: this.scopedProfile(plan.profile, context.pairId), guard: this.journalGuard(plan) })
+        === JSON.stringify({ profile: this.scopedProfile(current, context.pairId), guard: this.liveGuard(context) });
     } catch { return false; }
   }
   assertActionableProfile(row) {
-    const context = this.journalContext(row), plan = this.journalPlan(row.plan, context);
+    const context = this.journalContext(row), plan = this.journalPlan(row.plan, context, row.id, row.journal_version);
     if (!this.liveProfileMatches(plan, context)) fail("launch_configuration_changed", 503);
     return { context, plan };
   }
@@ -203,7 +309,17 @@ export class LongLive {
     if (!quote) fail("launch_journal_unverified", 503);
     // Verify the exact deployment profile stored with the plan at the receipt's
     // canonical block. The current environment may now describe another release.
+    const guard = plan.journalVersion === journalVersion ? this.journalGuard(plan) : undefined;
     await this.rpc.verify(4663, this.journalContracts(profile, quote), true, block);
+    if (guard) {
+      await this.rpc.verify(4663, [guard.tokenBeacon, guard.tokenImplementation, guard.oracleAggregator], true, block);
+      const [[implementation, aggregator], [beacon]] = await Promise.all([
+        this.rpc.calls(4663, [call(guard.tokenBeacon.address, "implementation"), call(quote.oracle.address, "aggregator")], block),
+        this.rpc.batch(4663, [{ method: "eth_getStorageAt", params: [quote.token.address, beaconSlot, block] }]),
+      ]);
+      if (!/^0x0{24}[a-f0-9]{40}$/i.test(beacon) || !same(`0x${beacon.slice(-40)}`, guard.tokenBeacon.address)
+        || !same(implementation, guard.tokenImplementation.address) || !same(aggregator, guard.oracleAggregator.address)) fail("launch_receipt_unverified");
+    }
   }
   async metadata(input) {
     return this.cache.get(`publication:${input.wallet}:${JSON.stringify(input.publication)}`, 30000, async () => {
@@ -222,28 +338,32 @@ export class LongLive {
   }
   async prepare(input) {
     // Keep legacy NVDA IDs recoverable; other pairings have distinct transaction intents.
-    const key = createHmac("sha256", this.budget.key).update(`${input.wallet}:${input.publication.metadataHash}${input.pairId === "long-NVDA" ? "" : `:${input.pairId}`}`).digest("hex");
+    const key = this.journalId(input);
     const context = JSON.stringify(input), prior = this.row(key);
+    let savedContext, savedPlan;
     if (prior && prior.context !== context) {
       // Re-publication can issue a new upload ID for identical immutable content.
       // Keep the original transaction identity; only the upload ticket may differ.
       const original = JSON.parse(prior.context);
       const equivalent = { ...input, publication: { ...input.publication, id: original.publication.id } };
       if (JSON.stringify(equivalent) !== prior.context) fail("launch_context_locked");
-      const publication = await this.metadata(input);
-      if (ipfsUri(publication.ipfs.metadataCid) !== JSON.parse(prior.plan).review.metadataUri) fail("launch_assets_unverified");
     }
-    if (prior && ["prepared", "wallet"].includes(prior.state) && !prior.tx_hash) this.assertActionableProfile(prior);
-    const retry = prior?.state === "wallet" && !prior.tx_hash ? JSON.parse(prior.plan) : null;
+    if (prior) {
+      savedContext = this.journalContext(prior);
+      savedPlan = this.journalPlan(prior.plan, savedContext, key, prior.journal_version);
+      if (prior.context !== context) {
+        const publication = await this.metadata(input);
+        if (ipfsUri(publication.ipfs.metadataCid) !== savedPlan.review.metadataUri) fail("launch_assets_unverified");
+      }
+    }
+    const retry = prior?.state === "wallet" && !prior.tx_hash ? savedPlan : null;
     // A browser that copied another draft (or lost its local record) can recover
     // this exact intent without resubmitting it or asking for wallet history.
-    const resume = () => ({ recovery: { id: key, binding: JSON.parse(prior.plan).binding, hash: prior.tx_hash ?? null } });
+    const resume = () => ({ recovery: { id: key, binding: savedPlan.binding, hash: prior.tx_hash ?? null } });
     if (prior?.state !== undefined && prior.state !== "prepared" && !retry) return resume();
     if (retry && (await this.recovery.find(key, retry.transaction)).status !== "retryable") return resume();
-    if (!retry && prior && prior.expires > this.now()) {
-      const cached = JSON.parse(prior.plan);
-      if (isCanonicalLongAsset(cached.predictedAsset) && Number.isInteger(cached.saltAttempt)) return cached;
-    }
+    if (!retry && prior && prior.expires > this.now() && this.liveProfileMatches(savedPlan, savedContext)
+      && isCanonicalLongAsset(savedPlan.predictedAsset) && Number.isInteger(savedPlan.saltAttempt)) return savedPlan;
     if (!prior && this.db.prepare("SELECT COUNT(*) AS n FROM long_launches").get().n >= 4096) fail("launch_history_full");
     const p = this.live.profile, q = p.quotes.find((q) => q.id === input.pairId);
     if (!q) fail("unsupported_pair", 400);
@@ -253,7 +373,7 @@ export class LongLive {
       description: input.draft.description, image: imageUri, image_hash: imageUri }));
     if (digest(bytes) !== input.publication.metadataHash || await ipfsContentId(bytes) !== publication.ipfs.metadataCid) fail("launch_assets_unverified");
     const block = await this.rpc.block(4663);
-    const g = this.live.guards[q.id];
+    const g = readLongLaunchGuard(this.live.guards[q.id]);
     await this.rpc.verify(4663, [...roles.map((r) => p[r]), q.token, q.oracle], true, block);
     await this.rpc.verify(4663, [g.tokenBeacon, g.tokenImplementation, g.oracleAggregator], true, block);
     const [airlock, factory, duration, paused, ...moduleStates] = await this.rpc.calls(4663, [
@@ -337,41 +457,66 @@ export class LongLive {
       transaction: { ...tx, chainId: "0x1237", nonce: toHex(rpcNumber(nonceRaw)), gas: toHex(gas), gasPrice: toHex(price) },
       profile: p, startingTick: tick, intentId, predictedAsset: plan.predictedAsset, saltAttempt: plan.saltAttempt, predictedPool: simulated[1], review: plan.review,
       estimatedGas: estimate.toString(), launchpadFeeWei: this.launchFee(block).amountWei,
-      launchFeeSource: this.launchFee(block), maximumGasWei: (gas * price).toString(), usd };
+      launchFeeSource: this.launchFee(block), maximumGasWei: (gas * price).toString(), usd,
+      journalVersion, publication: { imageCid: publication.ipfs.imageCid, metadataCid: publication.ipfs.metadataCid }, guard: g };
     checkReadDeadline();
     this.db.exec("BEGIN IMMEDIATE");
     try {
-      if (retry) this.remember(key, retry);
-      this.remember(key, result);
-      this.db.prepare(`INSERT INTO long_launches(id,context,state,plan,expires) VALUES (?,?,'prepared',?,?)
-        ON CONFLICT(id) DO UPDATE SET plan=excluded.plan,expires=excluded.expires WHERE state IN ('prepared','wallet') AND tx_hash IS NULL`).run(key, context, JSON.stringify(result), result.expiresAt);
+      if (retry) this.remember(key, retry, prior.journal_version);
+      this.remember(key, result, journalVersion);
+      this.db.prepare(`INSERT INTO long_launches(id,context,state,plan,expires,journal_version) VALUES (?,?,'prepared',?,?,?)
+        ON CONFLICT(id) DO UPDATE SET plan=excluded.plan,expires=excluded.expires,journal_version=excluded.journal_version
+        WHERE state IN ('prepared','wallet') AND tx_hash IS NULL`).run(key, context, JSON.stringify(result), result.expiresAt, journalVersion);
       this.db.exec("COMMIT");
     } catch (error) { this.db.exec("ROLLBACK"); throw error; }
     return result;
   }
-  remember(key, plan) {
+  remember(key, plan, version = 0) {
     const envelope = digest(JSON.stringify(plan.transaction));
     if (this.db.prepare("SELECT 1 FROM long_launch_attempts WHERE id=? AND envelope=?").get(key, envelope)) return;
     if (this.db.prepare("SELECT COUNT(*) AS n FROM long_launch_attempts WHERE id=?").get(key).n >= 16) fail("launch_attempt_limit");
-    this.db.prepare("INSERT INTO long_launch_attempts(id,envelope,plan) VALUES (?,?,?)").run(key, envelope, JSON.stringify(plan));
+    this.db.prepare("INSERT INTO long_launch_attempts(id,envelope,plan,journal_version) VALUES (?,?,?,?)").run(key, envelope, JSON.stringify(plan), version);
   }
   reserve(input) {
     const row = this.row(input.id);
-    if (!row || JSON.parse(row.plan).binding !== input.binding) fail("invalid_request", 400);
-    this.assertActionableProfile(row);
+    if (!row) fail("invalid_request", 400);
+    const { plan } = this.assertActionableProfile(row);
+    if (plan.binding !== input.binding) fail("invalid_request", 400);
     if (row.expires <= this.now()) fail("quote_expired");
     const changed = this.db.prepare("UPDATE long_launches SET state='wallet' WHERE id=? AND state IN ('prepared','wallet') AND tx_hash IS NULL AND expires>?").run(input.id, this.now());
     if (changed.changes !== 1) fail("launch_pending");
     return { id: input.id, status: "wallet" };
   }
+  terminalResult(row, plan) {
+    let result;
+    try { result = JSON.parse(row.result); } catch { fail("launch_journal_unverified", 503); }
+    const confirmed = result?.status === "confirmed";
+    const keys = confirmed ? ["id", "status", "hash", "paidGasWei", "asset"] : ["id", "status", "hash", "paidGasWei"];
+    if (!exact(result, keys) || !["confirmed", "failed"].includes(result.status) || row.state !== result.status
+      || result.id !== row.id || typeof row.tx_hash !== "string" || !/^0x[a-f0-9]{64}$/i.test(row.tx_hash)
+      || typeof result.hash !== "string" || !same(result.hash, row.tx_hash)
+      || typeof result.paidGasWei !== "string" || !/^\d{1,78}$/.test(result.paidGasWei)
+      || BigInt(result.paidGasWei) > 2n ** 256n - 1n
+      || (confirmed && (!isAddress(result.asset) || same(result.asset, zeroAddress)
+        || (plan && !same(result.asset, plan.predictedAsset))))) fail("launch_journal_unverified", 503);
+    return result;
+  }
   async status(input) {
     const row = this.row(input.id);
     if (!row) fail("launch_unknown");
     if (row.tx_hash && input.hash && !same(row.tx_hash, input.hash)) fail("launch_transaction_changed");
-    if (row.result) return JSON.parse(row.result);
+    if (row.result) {
+      if (![0, journalVersion].includes(row.journal_version)) fail("launch_journal_unverified", 503);
+      let plan;
+      if (row.journal_version === journalVersion) {
+        const context = this.journalContext(row);
+        plan = this.journalPlan(row.plan, context, row.id, row.journal_version);
+      }
+      return this.terminalResult(row, plan);
+    }
     if (!["prepared", "wallet", "submitted"].includes(row.state)
       || (row.tx_hash && !/^0x[a-f0-9]{64}$/i.test(row.tx_hash))) fail("launch_journal_unverified", 503);
-    const context = this.journalContext(row), savedPlan = this.journalPlan(row.plan, context);
+    const context = this.journalContext(row), savedPlan = this.journalPlan(row.plan, context, row.id, row.journal_version);
     let hash = row.tx_hash ?? input.hash;
     if (!hash) {
       if (row.state === "prepared") return { id: input.id, status: "retryable" };
@@ -388,8 +533,8 @@ export class LongLive {
       ]);
       if (rpcNumber(chain) !== 4663n) fail("wrong_chain");
       if (!tx) return { id: input.id, status: "uncertain" };
-      const plans = [savedPlan, ...this.db.prepare("SELECT plan FROM long_launch_attempts WHERE id=?").all(input.id)
-        .map((entry) => this.journalPlan(entry.plan, context))];
+      const plans = [savedPlan, ...this.db.prepare("SELECT plan,journal_version FROM long_launch_attempts WHERE id=?").all(input.id)
+        .map((entry) => this.journalPlan(entry.plan, context, row.id, entry.journal_version))];
       // Match the launch intent, not wallet-controlled fee settings. Extensions
       // may buffer gas again or convert a legacy quote to EIP-1559. The receipt,
       // event and deployed state below determine whether the launch succeeded;
@@ -404,7 +549,11 @@ export class LongLive {
       if (!same(tx.hash, hash) || !same(tx.from, expected.from) || !same(tx.to, expected.to)
         || !same(tx.input, expected.data) || rpcNumber(tx.value) !== rpcNumber(expected.value) || rpcNumber(tx.nonce) !== rpcNumber(expected.nonce)
         || rpcNumber(tx.chainId) !== 4663n) fail("launch_transaction_changed");
-      this.db.prepare("UPDATE long_launches SET tx_hash=?,state='submitted' WHERE id=? AND tx_hash IS NULL").run(hash, input.id);
+      // Make the matched envelope the canonical row before waiting for its
+      // receipt. Terminal reads can then validate the saved asset against the
+      // exact reconstructed plan, including when a delayed earlier quote won.
+      this.db.prepare("UPDATE long_launches SET tx_hash=?,state='submitted',plan=?,journal_version=? WHERE id=?")
+        .run(hash, JSON.stringify(plan), plan.journalVersion === journalVersion ? journalVersion : 0, input.id);
       if (!receipt) return { id: input.id, status: "submitted", hash };
       if (!same(receipt.transactionHash, hash) || !same(receipt.from, expected.from) || !same(receipt.to, expected.to)
         || !same(receipt.blockHash, tx.blockHash) || receipt.blockNumber !== tx.blockNumber) fail("launch_receipt_unverified");
