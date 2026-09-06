@@ -57,10 +57,11 @@ export class O1Live extends LongLive {
     const buildInput = { ...source, wallet: context.wallet, draft: context.draft, pairId: context.pairId,
       metadataUri: o1Metadata(context.draft, publication.imageCid).uri,
       editableMetadata: context.editableMetadata ?? false, intentId: expectedId };
+    const blockTime = buildInput.chainDeadline * 1000 - 1800000;
     if (keys.some(key => JSON.stringify(buildInput[key]) !== JSON.stringify(source[key]))
       || buildInput.launchpadFeeWei !== plan.launchpadFeeWei
       || buildInput.chainDeadline * 1000 <= plan.expiresAt
-      || buildInput.chainDeadline * 1000 > plan.quotedAt + 1830000) fail('launch_journal_unverified');
+      || blockTime < plan.quotedAt - 60000 || blockTime > plan.quotedAt + 30000) fail('launch_journal_unverified');
     return buildUnsignedO1Launch(buildInput, profile, plan.saltAttempt);
   }
   journalContracts(profile, quote) {

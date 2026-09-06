@@ -152,7 +152,7 @@ void test('changed artwork never reaches O1, and substituted metadata or image U
 
 void test('O1 launch preparation puts the verified native URI in calldata and refreshes legacy unsent plans', async t => {
   const { O1Live } = await import('./o1-live.mjs');
-  const { O1_LAUNCH_ABI } = await import('../../web/lib/long-encoding/o1-launch.mjs');
+  const { O1_LAUNCH_ABI, buildUnsignedO1Launch } = await import('../../web/lib/long-encoding/o1-launch.mjs');
   const { toHex, keccak256, decodeFunctionData, encodeFunctionResult, encodeAbiParameters, encodeEventTopics, getCreate2Address } = await import('viem');
   const f = await fixture(t), now = 1800000000000;
   const budget = new Budget(':memory:', () => now); t.after(() => budget.close());
@@ -202,6 +202,12 @@ void test('O1 launch preparation puts the verified native URI in calldata and re
   assert.equal(plan.review.metadataUri, f.expected.uri);
   assert.equal(plan.o1MetadataVersion, 1);
   assert.equal(plan.buildInput.chainDeadline * 1000 - plan.quotedAt, 1830000);
+  const oldBuildInput = { ...plan.buildInput, chainDeadline: plan.buildInput.chainDeadline - 91 };
+  const oldUnsigned = buildUnsignedO1Launch(oldBuildInput, plan.profile);
+  assert.throws(() => live.rebuildJournalPlan({ ...plan, buildInput: oldBuildInput,
+    saltAttempt: oldUnsigned.saltAttempt }, launchInput, plan.profile, plan.publication, plan.id), {
+    code: 'launch_journal_unverified',
+  });
   const receipt = { logs: [{ address: p.launcher.address,
     topics: encodeEventTopics({ abi: O1_LAUNCH_ABI, eventName: 'Launched', args: {
       token: plan.predictedAsset, poolId: pool, originalCreator: f.input.wallet,

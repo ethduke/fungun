@@ -218,7 +218,8 @@ Recovery continues through the existing status endpoint without another signatur
 API journals also add a version, immutable publication CIDs and the selected guard;
 these server recovery fields distinguish reconstructable rows from the explicit
 legacy fallback. A new web build rejects plans from an old API, and an old web build
-cannot reconstruct plans from a new API. Deploy the API and web from the same reviewed Git revision in one
+cannot reconstruct plans from a new API. Deploy the API and web from the same
+reviewed Git revision in one
 maintenance window: stop new launch preparation, confirm there is no wallet handoff
 in progress, deploy both immediate-strategy single-Machine apps, verify each image
 revision and health endpoint, then re-enable preparation. Do not use a rolling or
