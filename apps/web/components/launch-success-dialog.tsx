@@ -10,13 +10,14 @@ import {
 
 // The parent is keyed by the wallet + draft + artwork recovery scope, so a
 // pending launch cannot inherit the name or picture from an edited draft.
-export function LaunchSuccessDialog({ name, ticker, imageUrl, tokenUrl, transactionUrl, longCompatible }: {
+export function LaunchSuccessDialog({ name, ticker, imageUrl, tokenUrl, transactionUrl, longCompatible, padName = "Long" }: {
   name: string;
   ticker: string;
   imageUrl: string;
   tokenUrl: string;
   transactionUrl: string;
   longCompatible: boolean;
+  padName?: string;
 }) {
   const [open, setOpen] = useState(true);
   return (
@@ -30,11 +31,11 @@ export function LaunchSuccessDialog({ name, ticker, imageUrl, tokenUrl, transact
         <DialogTitle className="launch-success-title">{name} {longCompatible ? 'is deployed' : 'was deployed'}</DialogTitle>
         <DialogDescription className="launch-success-description">
           {longCompatible
-            ? 'Deployment confirmed on Robinhood Chain. Open Long to view your coin.'
+            ? `Deployment confirmed on Robinhood Chain through ${padName}.`
             : 'This token was deployed, but its address does not meet Long’s requirements. Its address cannot be changed; a new deployment is required.'}
         </DialogDescription>
         <a className="launch-success-link" href={tokenUrl} target="_blank" rel="noopener noreferrer">
-          {longCompatible ? 'View on Long' : 'View token on explorer'} <ArrowUpRight size={20} aria-hidden="true" />
+          {longCompatible ? `View on ${padName}` : 'View token on explorer'} <ArrowUpRight size={20} aria-hidden="true" />
         </a>
         <a className="launch-success-transaction" href={transactionUrl} target="_blank" rel="noopener noreferrer">
           View transaction

@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { watchLaunch, validateLaunchStatus, confirmedLongTokenUrl } from './long-recovery.ts';
+import { watchLaunch, validateLaunchStatus, confirmedLongTokenUrl, confirmedLaunchTokenUrl } from './long-recovery.ts';
 import { LaunchError } from './long-wallet.ts';
 const recovery = { id: 'a'.repeat(64), binding: 'b'.repeat(64), hash: null };
 const hash = `0x${'c'.repeat(64)}`;
@@ -15,6 +15,17 @@ void test('launchpad links use only the confirmed token address, including recov
     assert.equal(confirmedLongTokenUrl({ ...receipt, status }), null);
   assert.equal(confirmedLongTokenUrl({ ...receipt, asset: 'https://example.com' }), null);
   assert.equal(confirmedLongTokenUrl(null), null);
+});
+void test('Longbow confirmations link to Longbow and never imply Long app compatibility', () => {
+  const asset = `0x${'aB'.repeat(18)}1E18`;
+  const receipt = { id: recovery.id, status: 'confirmed', hash, asset, paidGasWei: '1' };
+  assert.equal(confirmedLaunchTokenUrl('longbow', receipt), `https://longbow.gg/c/${asset.toLowerCase()}`);
+  assert.equal(confirmedLaunchTokenUrl('long', receipt), confirmedLongTokenUrl(receipt));
+  assert.equal(confirmedLaunchTokenUrl('o1', receipt), `https://launch.o1.exchange/token/${asset.toLowerCase()}?chain=4663`);
+  for (const status of ['submitted', 'confirming', 'failed', 'uncertain'])
+    assert.equal(confirmedLaunchTokenUrl('longbow', { ...receipt, status }), null);
+  assert.equal(confirmedLaunchTokenUrl('longbow', { ...receipt, asset: 'https://example.com' }), null);
+  assert.equal(confirmedLaunchTokenUrl('longbow', null), null);
 });
 void test('refresh recovery only reads, discovers hashes automatically, and stops on confirmation', async () => {
   const callbacks: Array<() => void> = [], results: string[] = [], operations: string[] = [];

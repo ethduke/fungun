@@ -4,13 +4,13 @@ import { useEffect, useLayoutEffect, useRef, useState, useReducer } from 'react'
 import { Button } from '@/components/ui/button';
 import { BulletProgress, LaunchGun } from '@/components/launch-motion';
 import { runLaunchFlow } from '@/lib/launch-flow';
-import { watchLaunch, confirmedLongTokenUrl, type LaunchReceipt } from '@/lib/long-recovery';
+import { watchLaunch, confirmedLaunchTokenUrl, type LaunchReceipt } from '@/lib/long-recovery';
 import { LaunchSuccessDialog } from '@/components/launch-success-dialog';
 import { launchActivity } from '@/lib/launch-progress';
 import { launchFeedback, emptyLaunchFeedback } from '@/lib/launch-feedback';
 import { useConnectedAccount } from '@/lib/account-context';
 import { useDraftCache } from '@/lib/launch-draft';
-import { LONG_PAIRS } from '@/lib/launch-model';
+import { LONG_PAIRS, launchpadName } from '@/lib/launch-model';
 import {
   formatEth,
   formatUsd,
@@ -129,6 +129,8 @@ function ScopedLongLaunch({
   recoveryScope,
 }: LongLaunchProps & { recoveryScope: string }) {
   const account = useConnectedAccount();
+  const padId = pairId?.startsWith('longbow-') ? 'longbow' : pairId?.startsWith('long-') ? 'long' : 'o1';
+  const padName = launchpadName(padId);
   const { published, cachePublication, hydrated } = useDraftCache();
   const [plan, setPlan] = useState<LongPlan | null>(null);
   const [planContext, setPlanContext] = useState('');
@@ -422,7 +424,7 @@ function ScopedLongLaunch({
   const terminal =
     currentReceipt && ['confirmed', 'failed'].includes(currentReceipt.status);
   const transactionHash = currentReceipt?.hash || recovery?.hash;
-  const tokenUrl = confirmedLongTokenUrl(currentReceipt);
+  const tokenUrl = confirmedLaunchTokenUrl(padId, currentReceipt);
   const guidance = !enabled
     ? 'Choose Long and a pairing to launch.'
     : account.address && !isReady
@@ -452,6 +454,7 @@ function ScopedLongLaunch({
               imageUrl={image.url}
               tokenUrl={tokenUrl ?? `https://robinhoodchain.blockscout.com/address/${currentReceipt.asset}`}
               longCompatible={!!tokenUrl}
+              padName={padName}
               transactionUrl={`https://robinhoodchain.blockscout.com/tx/${currentReceipt.hash}`}
             />
           )}
@@ -496,7 +499,7 @@ function ScopedLongLaunch({
                 target="_blank"
                 rel="noopener noreferrer"
               >
-                View on Long
+                {`View on ${padName}`}
               </a>
             )}
           </div>
