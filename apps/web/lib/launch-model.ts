@@ -86,6 +86,18 @@ export function launchpadName(id: LaunchpadId) {
 export function readablePads(pads: LaunchpadId[]): PadId[] {
   return pads.filter((pad): pad is PadId => pad === 'long' || pad === 'o1');
 }
+
+/**
+ * The current wallet flow can dispatch one launch at a time. Keep the existing
+ * Long selection when it is part of a multi-pad draft, and expose O1 only when
+ * it is the sole selected destination. Longbow has no configured wallet flow.
+ */
+export function walletLaunchDestination(destinations: Destination[]) {
+  const active = destinations.filter((pad) => pad.selected);
+  const long = active.find((pad) => pad.id === 'long');
+  if (long) return long;
+  return active.length === 1 && active[0]?.id === 'o1' ? active[0] : null;
+}
 // User-supplied Long market snapshot, 2026-09-04.
 export const LONG_MARKET_TICKERS = [
   'AAPL',

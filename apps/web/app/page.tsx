@@ -36,6 +36,7 @@ import {
   selectChain,
   supportsChain,
   validateDraft,
+  walletLaunchDestination,
   type ChainId,
   type Destination,
 } from '@/lib/launch-model';
@@ -64,6 +65,7 @@ export default function Home() {
   const fileInput = useRef<HTMLInputElement>(null);
   const imageSequence = useRef(0);
   const active = destinations.filter((pad) => pad.selected);
+  const walletDestination = walletLaunchDestination(destinations);
   const readPads = readablePads(active.map((pad) => pad.id));
   const reads = useReadService(
     chainId,
@@ -537,9 +539,11 @@ export default function Home() {
                 now={reads.now}
               >
                 <LongLaunch
-                  enabled={chainId === 4663 && active.some((pad) => pad.id === 'long')}
-                  ready={!tickerReserved && active.length === 1 && active[0]?.id === 'long' && !imagePending && !Object.keys(errors).length}
-                  pairId={active.find((pad) => pad.id === 'long')?.pairId}
+                  enabled={chainId === 4663 && !!walletDestination}
+                  ready={!tickerReserved && active.length === 1 && !!walletDestination && !imagePending && !Object.keys(errors).length}
+                  padId={walletDestination?.id === 'long' || walletDestination?.id === 'o1' ? walletDestination.id : undefined}
+                  pairId={walletDestination?.pairId}
+                  editableMetadata={walletDestination?.id === 'o1' ? walletDestination.editableMetadata : undefined}
                   name={name} ticker={ticker} description={description} image={image}
                   contextKey={launchCostKey({
                   name,

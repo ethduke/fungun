@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { keccak256, toHex, type EIP1193Provider } from 'viem';
 import { buildUnsignedLongLaunch } from './long-encoding/long-launch.mjs';
-import { sendLongWallet, validateLongPlan, LaunchError, launchMessage, launchRequest, LaunchPreflightError, type LaunchInput, readLaunchRecovery, saveLaunchRecovery, prepareLongWallet, isLongLaunchPair } from './long-wallet.ts';
+import { sendLongWallet, validateLongPlan, LaunchError, launchMessage, launchRequest, LaunchPreflightError, type LaunchInput, readLaunchRecovery, saveLaunchRecovery, prepareLongWallet, isLongLaunchPair, isO1LaunchPair } from './long-wallet.ts';
 import { launchRecoveryScope } from './launch-draft-cache.ts';
 import { runLaunchFlow } from './launch-flow.ts';
 import { longWalletCostStep, formatEthBudget, approximateLaunchQuote } from './launch-cost.ts';
@@ -152,6 +152,11 @@ void test('COPY isolates recovery by content, account and destination while pres
   assert.deepEqual(readLaunchRecovery(scope), previous);
   assert.deepEqual(readLaunchRecovery(), previous);
   assert.equal(await launchRecoveryScope(addr(1001).toUpperCase(), 'long-NVDA', draft, new Blob(['artwork'])), scope);
+  assert.equal(await launchRecoveryScope(addr(1001), 'long-NVDA', draft, image, true), scope);
+  const o1Fixed = await launchRecoveryScope(addr(1001), 'native', draft, image, false);
+  const o1Editable = await launchRecoveryScope(addr(1001), 'native', draft, image, true);
+  assert.notEqual(o1Fixed, o1Editable);
+  assert.equal(await launchRecoveryScope(addr(1001), 'native', draft, image), o1Fixed);
   for (const other of [await launchRecoveryScope(addr(1002), 'long-NVDA', draft, image),
     await launchRecoveryScope(addr(1001), 'long-TSLA', draft, image),
     await launchRecoveryScope(addr(1001), 'long-NVDA', draft, new Blob(['different image']))]) {
@@ -182,6 +187,13 @@ void test('TSLA wallet launch reconstructs the selected pairing; other unsupport
   const checked = validateLongPlan(f.raw, f.input, f.published, performance.now());
   assert.equal(checked.transaction.data, f.plan.transaction.data);
   assert.throws(() => validateLongPlan(f.raw, {...f.input,pairId:'long-NVDA'}, f.published, performance.now()));
+});
+
+void test('O1 wallet eligibility accepts its Robinhood native and verified catalog pair shapes only', () => {
+  assert.equal(isO1LaunchPair('native'), true);
+  assert.equal(isO1LaunchPair(`rwa-${'a'.repeat(24)}`), true);
+  for (const pair of ['long-NVDA', 'longbow-NVDA', 'sample-nvda', `rwa-${'A'.repeat(24)}`, `rwa-${'a'.repeat(23)}`, undefined])
+    assert.equal(isO1LaunchPair(pair), false);
 });
 
 void test('insufficient funds retains exact balance, required budget and shortfall through the HTTP client', async t => {

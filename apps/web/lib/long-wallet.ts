@@ -27,6 +27,8 @@ export type LongPlan = {
 };
 export const isLongLaunchPair = (pairId: string | undefined): pairId is 'long-NVDA' | 'long-TSLA' =>
   pairId === 'long-NVDA' || pairId === 'long-TSLA';
+export const isO1LaunchPair = (pairId: string | undefined): pairId is 'native' | `rwa-${string}` =>
+  pairId === 'native' || (typeof pairId === 'string' && /^rwa-[a-f0-9]{24}$/.test(pairId));
 
 export class LaunchError extends Error {
   retryAfter: number;

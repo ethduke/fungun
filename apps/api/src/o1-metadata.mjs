@@ -55,24 +55,63 @@ export class O1MetadataPublisher {
       if (hash(image) !== input.publication.imageHash || rasterFormat(image) !== 'webp') fail();
       checkReadDeadline();
       if (!row) {
-        if (this.db.prepare('SELECT COUNT(*) AS n FROM o1_metadata_publications').get().n >= 4096) fail();
         // Commit before POST. An uncertain request retries the same provider key
         // and exact payload, including after a restart; never rotate it silently.
-        this.db.prepare('INSERT INTO o1_metadata_publications(id,request_hash,idempotency_key) VALUES (?,?,?)')
+        this.db.prepare(`INSERT INTO o1_metadata_publications(id,request_hash,idempotency_key)
+          SELECT ?,?,? WHERE (SELECT COUNT(*) FROM o1_metadata_publications) < 4096
+          ON CONFLICT(id) DO NOTHING`)
           .run(id, requestHash, randomUUID());
         row = this.db.prepare('SELECT * FROM o1_metadata_publications WHERE id=?').get(id);
+        if (!row || row.request_hash !== requestHash) fail();
+        if (row.result) {
+          try { pinned = JSON.parse(row.result); } catch { fail(); }
+        }
       }
-      const response = await this.upstream.json('o1', 'https://api.launch.o1.exchange/v1/launches/prepare', {
-        method: 'POST', credentials: 'omit', headers: { 'x-api-key': this.apiKey, 'Idempotency-Key': row.idempotency_key,
-          'content-type': 'application/json' }, body: JSON.stringify({ ...identity, token: { ...identity.token, image_base64: image.toString('base64') } }),
-      }, 32768);
-      const data = response?.data;
-      if (data?.chain_id !== 4663 || data.actor?.toLowerCase() !== input.wallet.toLowerCase()
-        || data.metadata_uri !== expected.uri) fail();
-      pinned = { metadataUri: expected.uri, imageUrl: gatewayUrl(data.image_url, publication.ipfs.imageCid) };
-      // Use the native pinning result only. Our independent launch builder still
-      // controls calldata, fee, salt, nonce and recovery.
-      this.db.prepare('UPDATE o1_metadata_publications SET result=? WHERE id=?').run(JSON.stringify(pinned), id);
+      const body = JSON.stringify({ ...identity, token: { ...identity.token, image_base64: image.toString('base64') } });
+      for (let attempt = 0; !pinned && attempt < 2; attempt++) {
+        checkReadDeadline();
+        const usedKey = row.idempotency_key;
+        let response;
+        try {
+          response = await this.upstream.json('o1', 'https://api.launch.o1.exchange/v1/launches/prepare', {
+            method: 'POST', credentials: 'omit', headers: { 'x-api-key': this.apiKey, 'Idempotency-Key': usedKey,
+              'content-type': 'application/json' }, body,
+          }, 32768, 20, { problemCodes: ['stale_plan'] });
+        } catch (error) {
+          if (!(error instanceof ServiceError) || error.code !== 'stale_plan' || attempt !== 0) {
+            if (error instanceof ServiceError && error.code === 'stale_plan') fail();
+            throw error;
+          }
+          checkReadDeadline();
+          // O1 expires completed preparation records. Rotate only the exact
+          // unresolved request which received stale_plan. The conditional update
+          // is atomic, so concurrent recovery calls converge on one durable key.
+          this.db.prepare(`UPDATE o1_metadata_publications SET idempotency_key=?
+            WHERE id=? AND request_hash=? AND idempotency_key=? AND result IS NULL`)
+            .run(randomUUID(), id, requestHash, usedKey);
+          row = this.db.prepare('SELECT * FROM o1_metadata_publications WHERE id=?').get(id);
+          if (!row || row.request_hash !== requestHash) fail();
+          if (row.result) {
+            try { pinned = JSON.parse(row.result); } catch { fail(); }
+          } else if (row.idempotency_key === usedKey) fail();
+          continue;
+        }
+        const data = response?.data;
+        if (data?.chain_id !== 4663 || data.actor?.toLowerCase() !== input.wallet.toLowerCase()
+          || data.metadata_uri !== expected.uri) fail();
+        const next = { metadataUri: expected.uri, imageUrl: gatewayUrl(data.image_url, publication.ipfs.imageCid) };
+        const saved = JSON.stringify(next);
+        // Use the native pinning result only. Our independent launch builder still
+        // controls calldata, fee, salt, nonce and recovery.
+        this.db.prepare(`UPDATE o1_metadata_publications SET result=?
+          WHERE id=? AND request_hash=? AND idempotency_key=? AND result IS NULL`)
+          .run(saved, id, requestHash, usedKey);
+        row = this.db.prepare('SELECT * FROM o1_metadata_publications WHERE id=?').get(id);
+        if (!row || row.request_hash !== requestHash || !row.result) fail();
+        try { pinned = JSON.parse(row.result); } catch { fail(); }
+        if (JSON.stringify(pinned) !== saved) fail();
+      }
+      if (!pinned) fail();
     }
     if (pinned.metadataUri !== expected.uri) fail();
     const metadataUrl = new URL(`/ipfs/${metadataCid}`, gatewayUrl(pinned.imageUrl, publication.ipfs.imageCid)).href;

@@ -82,11 +82,6 @@ export class O1Live extends LongLive {
       description: input.draft.description, image: imageUri, image_hash: imageUri }));
     if (createHash('sha256').update(metadata).digest('hex') !== input.publication.metadataHash
       || await ipfsContentId(metadata) !== publication.ipfs.metadataCid) fail('launch_assets_unverified');
-    // Native metadata preparation can publish upstream. Admit it only after the
-    // server-issued publication ticket and its immutable content are verified.
-    // This uses the same 3/minute and 30/day pool as Long preparations.
-    this.budget.launch('prepare');
-    const pinned = await this.o1Metadata.prepare(key, input, publication, quote.token?.address ?? zeroAddress);
     const block = await this.rpc.block(4663);
     await this.rpc.verify(4663, [...roles.map(role => p[role]), ...(quote.token ? [quote.token] : [])], true, block);
     const [version, supply, enabled, registered, suffix, deployer, hook, registry, deployerFactory, escrow, spacing] = await this.rpc.calls(4663, [
@@ -103,6 +98,11 @@ export class O1Live extends LongLive {
     const timestamp = Number(rpcNumber(header.timestamp));
     if (Math.abs(this.now() / 1000 - timestamp) > 30) fail('contract_unverified');
     const fee = await this.launchFee(block);
+    // Admit scarce preparation only after the current contract configuration
+    // and fee have been verified, but before the provider write and salt work.
+    // This uses the same 3/minute and 30/day pool as Long preparations.
+    this.budget.launch('prepare');
+    const pinned = await this.o1Metadata.prepare(key, input, publication, quote.token?.address ?? zeroAddress);
     const buildInput = { wallet: input.wallet, draft: input.draft, pairId: input.pairId,
       metadataUri: pinned.metadataUri, editableMetadata, configVersion: version.toString(),
       chainDeadline: timestamp + 1800, totalSupply: supply.toString(), launchpadFeeWei: fee.amountWei, intentId: key };
@@ -174,7 +174,8 @@ export class O1Live extends LongLive {
     if (name !== context.draft.name || symbol !== context.draft.ticker || uri !== plan.review.metadataUri
       || supply.toString() !== plan.review.totalSupply || !same(factory, p.launcher.address)
       || !same(authority, plan.review.metadataMutable ? p.launcher.address : zeroAddress)
-      || !same(rights.originalCreator, context.wallet) || !same(rights.creatorFeeRecipient, context.wallet)
+      || !same(rights.originalCreator, context.wallet) || !same(rights.currentCreator, context.wallet)
+      || !same(rights.pendingCreator, zeroAddress) || !same(rights.creatorFeeRecipient, context.wallet)
       || !same(rights.poolId, plan.predictedPool) || rights.metadataEditable !== plan.review.metadataMutable) fail('launch_receipt_unverified');
   }
 }

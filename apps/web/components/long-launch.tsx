@@ -10,7 +10,7 @@ import { launchActivity } from '@/lib/launch-progress';
 import { launchFeedback, emptyLaunchFeedback } from '@/lib/launch-feedback';
 import { useConnectedAccount } from '@/lib/account-context';
 import { useDraftCache } from '@/lib/launch-draft';
-import { LONG_PAIRS, launchpadName } from '@/lib/launch-model';
+import { LONG_PAIRS, launchpadName, type PadId } from '@/lib/launch-model';
 import {
   formatEth,
   formatUsd,
@@ -22,6 +22,7 @@ import {
   launchMessage,
   launchRequest,
   LaunchError,
+  isO1LaunchPair,
   readLaunchRecovery,
   saveLaunchRecovery,
   prepareLongWallet,
@@ -44,6 +45,8 @@ type LongLaunchProps = {
   enabled: boolean;
   ready: boolean;
   pairId?: string;
+  padId?: PadId;
+  editableMetadata?: boolean;
   name: string;
   ticker: string;
   description: string;
@@ -54,7 +57,7 @@ type LongLaunchProps = {
 export function LongLaunch(props: LongLaunchProps) {
   const { address } = useConnectedAccount();
   const { hydrated } = useDraftCache();
-  const { name, ticker, description, image, pairId } = props;
+  const { name, ticker, description, image, pairId, padId, editableMetadata } = props;
   const identity = JSON.stringify([
     address?.toLowerCase(),
     name,
@@ -62,6 +65,8 @@ export function LongLaunch(props: LongLaunchProps) {
     description,
     image?.url,
     pairId,
+    padId,
+    padId === 'o1' ? editableMetadata === true : null,
   ]);
   const [resolved, setResolved] = useState<{
     identity: string;
@@ -78,6 +83,7 @@ export function LongLaunch(props: LongLaunchProps) {
           pairId,
           { name, ticker, description },
           blob,
+          padId === 'o1' ? editableMetadata === true : undefined,
         ),
       )
       .then((scope) => {
@@ -90,7 +96,7 @@ export function LongLaunch(props: LongLaunchProps) {
     return () => {
       active = false;
     };
-  }, [hydrated, address, name, ticker, description, image, pairId, identity]);
+  }, [hydrated, address, name, ticker, description, image, pairId, padId, editableMetadata, identity]);
   if (!props.enabled) return null;
   if (!address || !image || !pairId || !hydrated)
     return <ScopedLongLaunch key={identity} {...props} recoveryScope="" />;
@@ -120,6 +126,8 @@ function ScopedLongLaunch({
   enabled,
   ready,
   pairId,
+  padId,
+  editableMetadata,
   name,
   ticker,
   description,
@@ -129,8 +137,7 @@ function ScopedLongLaunch({
   recoveryScope,
 }: LongLaunchProps & { recoveryScope: string }) {
   const account = useConnectedAccount();
-  const padId = pairId?.startsWith('longbow-') ? 'longbow' : pairId?.startsWith('long-') ? 'long' : 'o1';
-  const padName = launchpadName(padId);
+  const padName = padId ? launchpadName(padId) : 'launchpad';
   const { published, cachePublication, hydrated } = useDraftCache();
   const [plan, setPlan] = useState<LongPlan | null>(null);
   const [planContext, setPlanContext] = useState('');
@@ -159,6 +166,8 @@ function ScopedLongLaunch({
     image?.url,
     account.address?.toLowerCase(),
     pairId,
+    padId,
+    padId === 'o1' ? editableMetadata === true : null,
     ready,
     enabled,
   ]);
@@ -236,7 +245,9 @@ function ScopedLongLaunch({
   }, [recovery, busy, cooldown, recoveryScope]);
   const retryable =
     receipt?.id === recovery?.id && receipt?.status === 'retryable';
-  const eligiblePair = LONG_PAIRS.some((pair) => pair.id === pairId);
+  const eligiblePair = padId === 'long'
+    ? LONG_PAIRS.some((pair) => pair.id === pairId)
+    : padId === 'o1' && isO1LaunchPair(pairId);
   const isReady =
     ready &&
     !!account.address &&
@@ -314,6 +325,7 @@ function ScopedLongLaunch({
               imageHash: artwork.imageHash,
               metadataHash: artwork.metadataHash,
             },
+            ...(padId === 'o1' ? { editableMetadata: editableMetadata === true } : {}),
           };
           const prepared = await prepareLongWallet(input, artwork);
           if (prepared.recovery) return { recovery: prepared.recovery };
@@ -335,7 +347,7 @@ function ScopedLongLaunch({
               nativeOnly: true,
               pads: [
                 {
-                  id: 'long',
+                  id: padId!,
                   launchFeeSource: checked.launchFeeSource,
                   steps: [longWalletCostStep(checked)],
                 },
@@ -424,12 +436,15 @@ function ScopedLongLaunch({
   const terminal =
     currentReceipt && ['confirmed', 'failed'].includes(currentReceipt.status);
   const transactionHash = currentReceipt?.hash || recovery?.hash;
-  const tokenUrl = confirmedLaunchTokenUrl(padId, currentReceipt);
+  const tokenUrl = padId ? confirmedLaunchTokenUrl(padId, currentReceipt) : null;
+  const pairingGuidance = padId === 'o1'
+    ? 'Choose an O1 pairing to launch.'
+    : 'Choose a Long pairing to launch.';
   const guidance = !enabled
-    ? 'Choose Long and a pairing to launch.'
+    ? pairingGuidance
     : account.address && !isReady
       ? !eligiblePair
-        ? 'Choose a Long pairing to launch.'
+        ? pairingGuidance
         : !ready
           ? 'Review your coin details above.'
           : account.chainId !== 4663
@@ -442,7 +457,7 @@ function ScopedLongLaunch({
         <div className="launch-recovery">
           {activity.phase === 'confirmed' && (
             <output className="launch-confirmed" data-compatible={!!tokenUrl} key={recovery.id}>
-              <strong>{tokenUrl ? 'Coin deployed' : 'Token deployed · Long incompatible'}</strong>
+              <strong>{tokenUrl ? 'Coin deployed' : padId === 'long' ? 'Token deployed · Long incompatible' : `Token deployed · ${padName} link unavailable`}</strong>
               <LaunchGun confirmed />
             </output>
           )}
@@ -515,8 +530,10 @@ function ScopedLongLaunch({
             <details>
               <summary>Launch details</summary>
               <p>
-                {name} · ${ticker} · 1 billion tokens · no creator allocation ·
-                fixed metadata
+                {name} · ${ticker} · supply: {validPlan.review.totalSupply} base
+                units · for sale: {validPlan.review.tokensForSale} base units ·
+                creator allocation: {validPlan.review.creatorAllocation} base units ·{' '}
+                {validPlan.review.metadataMutable ? 'metadata updates allowed' : 'fixed metadata'}
               </p>
               <p>
                 Maximum gas budget: {formatEth(wei(validPlan.maximumGasWei))} (
@@ -525,7 +542,8 @@ function ScopedLongLaunch({
               </p>
               <p>
                 Wallet: {validPlan.transaction.from.slice(0, 6)}…
-                {validPlan.transaction.from.slice(-4)} · value: 0 ETH · chain:
+                {validPlan.transaction.from.slice(-4)} · value:{' '}
+                {formatEth(wei(validPlan.transaction.value))} · chain:
                 4663
               </p>
               <a
@@ -533,7 +551,7 @@ function ScopedLongLaunch({
                 target="_blank"
                 rel="noopener noreferrer"
               >
-                Verified launch contract
+                Verified {padName} launch contract
               </a>
               <p>
                 Your wallet displays the full transaction. Gas and availability

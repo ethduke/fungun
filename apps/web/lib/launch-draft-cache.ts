@@ -236,10 +236,17 @@ export async function draftArtworkKey(
 
 /** Content identity survives object-URL changes and isolates accounts and launch destinations. */
 export async function launchRecoveryScope(wallet: string, pairId: string,
-  draft: Pick<LaunchDraft, 'name' | 'ticker' | 'description'>, image: Blob) {
-  return sha256(new TextEncoder().encode(JSON.stringify([
+  draft: Pick<LaunchDraft, 'name' | 'ticker' | 'description'>, image: Blob,
+  editableMetadata?: boolean) {
+  const identity: unknown[] = [
     4663, wallet.toLowerCase(), pairId, await draftArtworkKey(draft, image),
-  ])));
+  ];
+  // Long scopes retain their original byte-for-byte identity. O1 metadata
+  // authority changes the resulting contract and therefore needs its own
+  // recovery record even when every visible draft field is unchanged.
+  if (pairId === 'native' || /^rwa-[a-f0-9]{24}$/.test(pairId))
+    identity.push(editableMetadata === true);
+  return sha256(new TextEncoder().encode(JSON.stringify(identity)));
 }
 
 export async function encodeLaunchDraft(

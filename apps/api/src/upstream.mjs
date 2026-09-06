@@ -22,7 +22,22 @@ export function withinReadDeadline(load, timeout = 20_000) {
   });
 }
 
-export async function readJson(response, maxBytes, retryScope = "global") {
+const INTERNAL_PROBLEM_CODES = new Set(["stale_plan"]);
+
+function problemCodes(value) {
+  if (value === undefined) return new Set();
+  if (
+    !Array.isArray(value) ||
+    value.length > INTERNAL_PROBLEM_CODES.size ||
+    new Set(value).size !== value.length ||
+    value.some((code) => !INTERNAL_PROBLEM_CODES.has(code))
+  )
+    throw new ServiceError("upstream_unavailable");
+  return new Set(value);
+}
+
+export async function readJson(response, maxBytes, retryScope = "global", allowedProblems) {
+  const allowed = problemCodes(allowedProblems);
   if (response.status === 429) {
     const value = response.headers.get("retry-after")?.trim();
     const seconds =
@@ -39,6 +54,8 @@ export async function readJson(response, maxBytes, retryScope = "global") {
     throw new ServiceError("rate_limited", 429, retryAfter, retryScope);
   }
   const contentType = response.headers.get("content-type") ?? "";
+  const providerProblem =
+    response.status === 409 && /^application\/problem\+json(?:\s*;|$)/i.test(contentType);
   const cursorProblem =
     response.status === 409 && /application\/(?:problem\+)?json/.test(contentType);
   if (
@@ -68,6 +85,11 @@ export async function readJson(response, maxBytes, retryScope = "global") {
     }
     const value = JSON.parse(Buffer.concat(chunks).toString("utf8"));
     if (cursorProblem) {
+      if (allowed.size) {
+        if (providerProblem && value?.status === 409 && allowed.has(value?.code))
+          throw new ServiceError(value.code, 409);
+        throw new ServiceError("upstream_unavailable");
+      }
       if (["cursor_stale", "cursor_filter_mismatch"].includes(value?.code))
         throw new ServiceError("cursor_expired", 409);
       throw new ServiceError("upstream_unavailable");
@@ -167,7 +189,7 @@ export class Upstream {
             : timeoutSignal,
         });
         transient = [408, 500, 502, 503, 504].includes(response.status);
-        return await readJson(response, maxBytes, "operation");
+        return await readJson(response, maxBytes, "operation", policy.problemCodes);
       } catch (error) {
         const safe = safeError(error);
         const scoped =

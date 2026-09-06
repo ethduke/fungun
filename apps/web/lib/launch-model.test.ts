@@ -16,6 +16,7 @@ import {
   pairingName,
   readablePads,
   validateDraft,
+  walletLaunchDestination,
   type Destination,
 } from './launch-model.ts';
 import { LONGBOW_PAIRS } from './longbow-markets.ts';
@@ -324,6 +325,21 @@ await test('Longbow remains outside ticker service requests for every selection 
   assert.deepEqual(readablePads(['long', 'longbow']), ['long']);
   assert.deepEqual(readablePads(['o1', 'longbow']), ['o1']);
   assert.deepEqual(readablePads(['long', 'o1', 'longbow']), ['long', 'o1']);
+});
+
+await test('wallet launch selection keeps Long compatibility and enables only sole-destination O1', () => {
+  const pads = destinations();
+  assert.equal(walletLaunchDestination(pads)?.id, 'long');
+  pads[0].selected = false;
+  pads[1].selected = true;
+  assert.deepEqual(walletLaunchDestination(pads), pads[1]);
+  pads[2].selected = true;
+  assert.equal(walletLaunchDestination(pads), null);
+  pads[0].selected = true;
+  assert.deepEqual(walletLaunchDestination(pads), pads[0]);
+  pads[0].selected = false;
+  pads[1].selected = false;
+  assert.equal(walletLaunchDestination(pads), null);
 });
 
 await test('description has a UTF-8 byte limit', () => {
