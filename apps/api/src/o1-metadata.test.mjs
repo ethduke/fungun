@@ -111,7 +111,8 @@ void test('O1 launch preparation puts the verified native URI in calldata and re
   const p = { chainId: 4663, launchpad: 'o1', launcher: contract(1), tokenDeployer: contract(2), hook: contract(3),
     feeEscrow: contract(4), announcementRegistry: contract(5), quotes: [{ id: 'native', token: null, decimals: 18 }] };
   const initCodeHash = keccak256('0x01'), pool = keccak256('0x02');
-  const rpc = { block: async () => '0x64', verify: async () => {},
+  const pins = [];
+  const rpc = { block: async () => '0x64', verify: async (...args) => { pins.push(args); },
     calls: async (_chain, entries) => entries.map(e => {
       const values = { configVersion: 1n, launchSupply: 10n ** 27n, launchCreationEnabled: true, quoteConfig: [true, 18, 0],
         TOKEN_ADDRESS_SUFFIX: 1, tokenDeployer: p.tokenDeployer.address, hook: p.hook.address,
@@ -140,17 +141,24 @@ void test('O1 launch preparation puts the verified native URI in calldata and re
     budget, { rpc, now: () => now });
   live.metadata = async () => f.publication;
   live.o1Metadata = f.publisher();
-  const plan = await live.prepare(f.input);
+  const launchInput = { ...f.input, chainId: 4663 };
+  const plan = await live.prepare(launchInput);
   assert.equal(budget.db.prepare("SELECT used FROM counters WHERE scope LIKE 'launch-prepare:86400000:%'").get().used, 1);
   assert.equal(plan.review.metadataUri, f.expected.uri);
   assert.equal(plan.o1MetadataVersion, 1);
+  await live.verifyJournalProfile(plan, launchInput, '0x64');
+  assert.equal(pins.at(-1)[3], '0x64');
+  assert.ok(pins.at(-1)[1].some(entry => entry.address === p.launcher.address));
+  const rotated = new O1Live({ o1Launch: { profile: { ...p, launcher: contract(9) } }, o1Key: 'test-api-key' },
+    {}, budget, { rpc, now: () => now });
+  assert.throws(() => rotated.reserve(plan), { code: 'launch_configuration_changed' });
   const legacy = { ...plan, o1MetadataVersion: undefined, buildInput: { ...plan.buildInput, metadataUri: `ipfs://${f.assets.metadata.cid}` } };
   budget.db.prepare('UPDATE long_launches SET plan=? WHERE id=?').run(JSON.stringify(legacy), plan.id);
-  const renewed = await live.prepare(f.input);
+  const renewed = await live.prepare(launchInput);
   assert.equal(renewed.buildInput.metadataUri, f.expected.uri);
   assert.equal(renewed.o1MetadataVersion, 1);
   assert.equal(f.calls.length, 1);
   budget.db.prepare("UPDATE long_launches SET state='submitted',tx_hash=? WHERE id=?").run(keccak256('0x03'), plan.id);
-  assert.ok((await live.prepare(f.input)).recovery);
+  assert.ok((await live.prepare(launchInput)).recovery);
   assert.equal(f.calls.length, 1);
 });

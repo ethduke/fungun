@@ -31,6 +31,10 @@ export class O1Live extends LongLive {
     super({ ...config, longLaunch: config.o1Launch }, upstream, budget, options);
     this.o1Metadata = new O1MetadataPublisher(this.db, upstream, this.fetcher, config.o1Key);
   }
+  journalProfile(value) { return readO1LaunchProfile(value); }
+  journalContracts(profile, quote) {
+    return [...roles.map(role => profile[role]), ...(quote.token ? [quote.token] : [])];
+  }
   async launchFee(block) {
     const [fee] = await this.rpc.calls(4663, [call(this.live.profile.launcher.address, 'nativeLaunchFee')], block);
     if (fee < 0n || fee > 5n * 10n ** 16n) fail('launch_gas_limit');
@@ -62,6 +66,7 @@ export class O1Live extends LongLive {
       const original = JSON.parse(prior.context);
       if (JSON.stringify({ ...input, publication: { ...input.publication, id: original.publication.id } }) !== prior.context) fail('launch_context_locked');
     }
+    if (prior && ['prepared', 'wallet'].includes(prior.state) && !prior.tx_hash) this.assertActionableProfile(prior);
     const retry = prior?.state === 'wallet' && !prior.tx_hash ? JSON.parse(prior.plan) : null;
     const resume = () => ({ recovery: { id: key, binding: JSON.parse(prior.plan).binding, hash: prior.tx_hash ?? null } });
     if (prior && prior.state !== 'prepared' && !retry) return resume();

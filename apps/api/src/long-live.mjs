@@ -42,7 +42,7 @@ const call = (address, functionName, args = []) => ({ address, abi: LONG_STATE_A
 export function validateLongInput(kind, value) {
   if (kind === "launch-estimate") {
     if (!exact(value, ["chainId", "pairId"]) || value.chainId !== 4663
-      || typeof value.pairId !== "string" || !/^(?:long-(?:NVDA|TSLA)|rwa-[a-f0-9]{24}|native|crypto-USDG)$/.test(value.pairId)) fail("invalid_request", 400);
+      || typeof value.pairId !== "string" || !/^(?:long-(?:NVDA|TSLA)|longbow-[A-Z0-9._-]{1,24}|rwa-[a-f0-9]{24}|native|crypto-USDG)$/.test(value.pairId)) fail("invalid_request", 400);
     return value;
   }
   if (kind === "launch-prepare") {
@@ -103,7 +103,10 @@ export class LongLive {
   }
   async run(kind, raw) {
     const input = validateLongInput(kind, raw);
-    if (!this.live || !this.config.readsEnabled) fail("long_launch_disabled", 503);
+    // Status is a read-only recovery path over the durable journal. Keep it
+    // available when launch creation is switched off; every operation that can
+    // offer or reserve a transaction still requires the current live profile.
+    if (!this.config.readsEnabled || (kind !== "launch-status" && !this.live)) fail("long_launch_disabled", 503);
     if (kind === "launch-reserve") return this.reserve(input);
     if (kind === "launch-estimate") return withinReadDeadline(() => this.estimate(input));
     if (this.active) throw new ServiceError("busy", 429, 5);
@@ -148,6 +151,57 @@ export class LongLive {
       blockNumber: rpcNumber(block).toString() };
   }
   row(key) { return this.db.prepare("SELECT * FROM long_launches WHERE id=?").get(key); }
+  journalProfile(value) { return readLongLaunchProfile(value); }
+  journalContracts(profile, quote) {
+    return [...roles.map((role) => profile[role]), quote.token, quote.oracle].filter(Boolean);
+  }
+  journalContext(row) {
+    try { return validateLongInput("launch-prepare", JSON.parse(row.context)); }
+    catch { fail("launch_journal_unverified", 503); }
+  }
+  journalPlan(value, context) {
+    try {
+      const plan = typeof value === "string" ? JSON.parse(value) : value;
+      const profile = this.journalProfile(plan?.profile);
+      const quote = profile.quotes.find((entry) => entry.id === context.pairId);
+      const transaction = plan?.transaction;
+      if (JSON.stringify(profile) !== JSON.stringify(plan.profile) || !quote
+        || !exact(transaction, ["from", "to", "data", "value", "chainId", "nonce", "gas", "gasPrice"])
+        || !same(transaction.from, context.wallet) || !same(transaction.to, profile.launcher.address)
+        || typeof transaction.data !== "string" || !/^0x(?:[a-f0-9]{2})+$/i.test(transaction.data) || transaction.data.length > 131074
+        || rpcNumber(transaction.chainId) !== 4663n || rpcNumber(transaction.value) > 5n * 10n ** 16n
+        || rpcNumber(transaction.nonce) > 2n ** 64n - 1n || rpcNumber(transaction.gas) < 21000n
+        || rpcNumber(transaction.gas) > 8000000n || rpcNumber(transaction.gasPrice) > 10n ** 12n
+        || !id(plan.binding) || !isAddress(plan.predictedAsset) || same(plan.predictedAsset, zeroAddress)
+        || (typeof plan.predictedPool !== "string" || !/^0x(?:[a-f0-9]{40}|[a-f0-9]{64})$/i.test(plan.predictedPool))
+        || plan.review?.pairId !== context.pairId || typeof plan.review?.metadataUri !== "string") fail("launch_journal_unverified", 503);
+      return { ...plan, profile };
+    } catch { fail("launch_journal_unverified", 503); }
+  }
+  scopedProfile(profile, pairId) {
+    const quote = profile.quotes.find((entry) => entry.id === pairId);
+    return quote ? { ...profile, quotes: [quote] } : null;
+  }
+  liveProfileMatches(plan, context) {
+    if (!this.live) return false;
+    try {
+      const current = this.journalProfile(this.live.profile);
+      return JSON.stringify(this.scopedProfile(plan.profile, context.pairId))
+        === JSON.stringify(this.scopedProfile(current, context.pairId));
+    } catch { return false; }
+  }
+  assertActionableProfile(row) {
+    const context = this.journalContext(row), plan = this.journalPlan(row.plan, context);
+    if (!this.liveProfileMatches(plan, context)) fail("launch_configuration_changed", 503);
+    return { context, plan };
+  }
+  async verifyJournalProfile(plan, context, block) {
+    const profile = this.journalProfile(plan.profile), quote = profile.quotes.find((entry) => entry.id === context.pairId);
+    if (!quote) fail("launch_journal_unverified", 503);
+    // Verify the exact deployment profile stored with the plan at the receipt's
+    // canonical block. The current environment may now describe another release.
+    await this.rpc.verify(4663, this.journalContracts(profile, quote), true, block);
+  }
   async metadata(input) {
     return this.cache.get(`publication:${input.wallet}:${JSON.stringify(input.publication)}`, 30000, async () => {
       this.budget.debit([["launch-assets", 6, 60000], ["launch-assets", 60, 86400000]]);
@@ -176,6 +230,7 @@ export class LongLive {
       const publication = await this.metadata(input);
       if (ipfsUri(publication.ipfs.metadataCid) !== JSON.parse(prior.plan).review.metadataUri) fail("launch_assets_unverified");
     }
+    if (prior && ["prepared", "wallet"].includes(prior.state) && !prior.tx_hash) this.assertActionableProfile(prior);
     const retry = prior?.state === "wallet" && !prior.tx_hash ? JSON.parse(prior.plan) : null;
     // A browser that copied another draft (or lost its local record) can recover
     // this exact intent without resubmitting it or asking for wallet history.
@@ -300,6 +355,7 @@ export class LongLive {
   reserve(input) {
     const row = this.row(input.id);
     if (!row || JSON.parse(row.plan).binding !== input.binding) fail("invalid_request", 400);
+    this.assertActionableProfile(row);
     if (row.expires <= this.now()) fail("quote_expired");
     const changed = this.db.prepare("UPDATE long_launches SET state='wallet' WHERE id=? AND state IN ('prepared','wallet') AND tx_hash IS NULL AND expires>?").run(input.id, this.now());
     if (changed.changes !== 1) fail("launch_pending");
@@ -310,11 +366,14 @@ export class LongLive {
     if (!row) fail("launch_unknown");
     if (row.tx_hash && input.hash && !same(row.tx_hash, input.hash)) fail("launch_transaction_changed");
     if (row.result) return JSON.parse(row.result);
+    if (!["prepared", "wallet", "submitted"].includes(row.state)
+      || (row.tx_hash && !/^0x[a-f0-9]{64}$/i.test(row.tx_hash))) fail("launch_journal_unverified", 503);
+    const context = this.journalContext(row), savedPlan = this.journalPlan(row.plan, context);
     let hash = row.tx_hash ?? input.hash;
     if (!hash) {
       if (row.state === "prepared") return { id: input.id, status: "retryable" };
       const found = await this.cache.get(`recover:${input.id}`, 5000,
-        () => this.recovery.find(input.id, JSON.parse(row.plan).transaction));
+        () => this.recovery.find(input.id, savedPlan.transaction));
       if (!found.hash) return { id: input.id, status: found.status };
       hash = found.hash;
     }
@@ -326,7 +385,8 @@ export class LongLive {
       ]);
       if (rpcNumber(chain) !== 4663n) fail("wrong_chain");
       if (!tx) return { id: input.id, status: "uncertain" };
-      const plans = [JSON.parse(row.plan), ...this.db.prepare("SELECT plan FROM long_launch_attempts WHERE id=?").all(input.id).map((r) => JSON.parse(r.plan))];
+      const plans = [savedPlan, ...this.db.prepare("SELECT plan FROM long_launch_attempts WHERE id=?").all(input.id)
+        .map((entry) => this.journalPlan(entry.plan, context))];
       // Match the launch intent, not wallet-controlled fee settings. Extensions
       // may buffer gas again or convert a legacy quote to EIP-1559. The receipt,
       // event and deployed state below determine whether the launch succeeded;
@@ -354,7 +414,8 @@ export class LongLive {
       const paid = rpcNumber(receipt.gasUsed) * rpcNumber(receipt.effectiveGasPrice);
       if (rpcNumber(receipt.status) === 0n) return this.finish(input.id, { status: "failed", hash, paidGasWei: paid.toString() });
       if (rpcNumber(receipt.status) !== 1n || !Array.isArray(receipt.logs)) fail("launch_receipt_unverified");
-      await this.confirm(plan, JSON.parse(row.context), receipt, block);
+      await this.verifyJournalProfile(plan, context, block);
+      await this.confirm(plan, context, receipt, block);
       return this.finish(input.id, { status: "confirmed", hash, paidGasWei: paid.toString(), asset: plan.predictedAsset });
     });
   }

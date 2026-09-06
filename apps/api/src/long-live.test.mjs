@@ -4,7 +4,7 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { createHash } from "node:crypto";
-import { decodeFunctionData, encodeFunctionResult, encodeEventTopics, encodeAbiParameters, getCreate2Address, toHex } from "viem";
+import { decodeFunctionData, encodeFunctionResult, encodeEventTopics, encodeAbiParameters, getCreate2Address, keccak256, toBytes, toHex } from "viem";
 import { Budget } from "./budget.mjs";
 import { LongLive, LONG_STATE_ABI, readLongLiveConfig, validateLongInput } from "./long-live.mjs";
 import { LONG_CREATE_ABI } from "./long-launch.mjs";
@@ -92,6 +92,22 @@ async function fixture(t) {
   return { service, input, p, g, changes, seen, requests, budget, path, config, upstream, options, advance: (n) => now += n };
 }
 
+function confirmableReceipt(f, plan, txHash = hash(600)) {
+  const blockHash = hash(500);
+  f.changes.plan = plan;
+  f.changes.tx = { ...plan.transaction, input: plan.transaction.data, hash: txHash, blockHash, blockNumber: '0x64' };
+  const event = LONG_STATE_ABI.find(entry => entry.type === 'event');
+  const topics = encodeEventTopics({ abi: LONG_STATE_ABI, eventName: 'LaunchCreated', args: {
+    poolOrHook: addr(200), asset: plan.predictedAsset, numeraire: f.p.quotes[0].token.address,
+  } });
+  const data = encodeAbiParameters(event.inputs.filter(input => !input.indexed), [f.p.poolInitializer.address,
+    f.input.wallet, keccak256(toBytes(f.input.draft.ticker)), 100, 86500, f.input.draft.ticker]);
+  f.changes.receipt = { transactionHash: txHash, from: plan.transaction.from, to: plan.transaction.to,
+    blockHash, blockNumber: '0x64', gasUsed: '0x100', effectiveGasPrice: plan.transaction.gasPrice,
+    status: '0x1', logs: [{ address: f.p.launcher.address, topics, data }] };
+  return txHash;
+}
+
 test('preparation binds metadata, verifies dependencies at one block and returns a bounded unsigned transaction', async (t) => {
   const f = await fixture(t), plan = await f.service.run('launch-prepare', f.input);
   assert.equal(plan.launchpadFeeWei, '0'); assert.equal(plan.transaction.value, '0x0');
@@ -161,6 +177,51 @@ test('durable recovery survives restart and requotes only the original unused no
   assert.deepEqual(await service.run('launch-prepare', f.input), { recovery: { id: retry.id, binding: retry.binding, hash: null } });
   await assert.rejects(service.run('launch-prepare', { ...f.input, draft: {...f.input.draft, name:'Changed'} }), /launch_context_locked/);
   assert.equal(service.row(plan.id).plan, JSON.stringify(retry));
+});
+
+test('disabled launch creation keeps existing wallet attempts recoverable but cannot prepare, reserve or estimate', async t => {
+  const f = await fixture(t), plan = await f.service.run('launch-prepare', f.input);
+  f.service.reserve(plan);
+  const disabled = new LongLive({ ...f.config, longLaunch: null }, f.upstream, f.budget, f.options);
+  const before = disabled.row(plan.id);
+  assert.deepEqual(await disabled.run('launch-status', { id: plan.id, hash: null }), {
+    id: plan.id, status: 'retryable',
+  });
+  for (const [kind, input] of [
+    ['launch-prepare', f.input],
+    ['launch-reserve', { id: plan.id, binding: plan.binding }],
+    ['launch-estimate', { chainId: 4663, pairId: f.input.pairId }],
+  ]) await assert.rejects(disabled.run(kind, input), { code: 'long_launch_disabled' });
+  assert.deepEqual(disabled.row(plan.id), before);
+});
+
+test('rotated deployment config blocks old actionable plans while status verifies the journaled profile at the receipt block', async t => {
+  const f = await fixture(t), plan = await f.service.run('launch-prepare', f.input);
+  const rotatedProfile = { ...f.p, launcher: contract(101) };
+  const rotated = new LongLive({ ...f.config,
+    longLaunch: { ...f.config.longLaunch, profile: rotatedProfile } }, f.upstream, f.budget, f.options);
+  await assert.rejects(rotated.run('launch-prepare', f.input), { code: 'launch_configuration_changed' });
+  await assert.rejects(rotated.run('launch-reserve', { id: plan.id, binding: plan.binding }), {
+    code: 'launch_configuration_changed',
+  });
+  assert.equal(rotated.row(plan.id).state, 'prepared');
+
+  f.service.reserve(plan);
+  const txHash = confirmableReceipt(f, plan);
+  f.seen.length = 0;
+  f.changes.code = true;
+  await assert.rejects(rotated.run('launch-status', { id: plan.id, hash: txHash }), {
+    code: 'contract_unverified',
+  });
+  assert.equal(rotated.row(plan.id).result, null);
+  delete f.changes.code;
+  f.advance(16000);
+  const result = await rotated.run('launch-status', { id: plan.id, hash: txHash });
+  assert.equal(result.status, 'confirmed');
+  const [, verified, fresh, block] = f.seen.at(-1);
+  assert.equal(fresh, true); assert.equal(block, '0x64');
+  assert.ok(verified.some(entry => entry.address === f.p.launcher.address));
+  assert.ok(!verified.some(entry => entry.address === rotatedProfile.launcher.address));
 });
 
 test('changed metadata, stale or paused prices, changed implementations, occupied addresses and unsafe gas fail closed', async (t) => {
