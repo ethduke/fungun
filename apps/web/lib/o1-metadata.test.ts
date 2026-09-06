@@ -17,12 +17,12 @@ void test('wallet derives O1 metadata from approved artwork and rejects a fully 
   const cid = 'bafkreierecltpddskr3iszd23i47lb5rp36sxtporgatj3mmayqcyfynb4';
   const published: PublishedAsset = { ...input.publication, status: 'published', launchReady: false, imageUrl: '', metadataUrl: '',
     ipfs: { profile: 'pinata-v1-256k', schema: 'long-ipfs-v1', imageCid: cid, metadataCid: cid } };
-  const now = Date.now(), id = 'd'.repeat(64);
+  const now = Math.floor(Date.now() / 1000) * 1000, id = 'd'.repeat(64);
   const buildInput = { wallet: input.wallet, draft: input.draft, pairId: 'native', editableMetadata: true,
     metadataUri: o1Metadata(input.draft, cid).uri, intentId: id, configVersion: '1', chainDeadline: Math.floor(now / 1000) + 1799,
     totalSupply: '1000000000000000000000000000', launchpadFeeWei: '1000000000000000', initCodeHash: keccak256('0x01') };
-  const response = (metadataUri: string) => {
-    const changedInput = { ...buildInput, metadataUri }, plan = buildUnsignedO1Launch(changedInput, profile);
+  const response = (metadataUri: string, chainDeadline = buildInput.chainDeadline) => {
+    const changedInput = { ...buildInput, metadataUri, chainDeadline }, plan = buildUnsignedO1Launch(changedInput, profile);
     assert.ok(plan);
     return { ...plan, id, buildInput: changedInput, chainId: 4663, quotedAt: now, expiresAt: now + 30000, serverTime: now,
       transaction: { ...plan.transaction, chainId: '0x1237', nonce: '0x1', gas: toHex(6000000), gasPrice: toHex(1000000) },
@@ -32,6 +32,12 @@ void test('wallet derives O1 metadata from approved artwork and rejects a fully 
   };
   const valid = response(buildInput.metadataUri);
   assert.equal(validateLongPlan(valid, input, published, performance.now()).review.metadataUri, buildInput.metadataUri);
+  for (const offset of [-60, 30]) {
+    const boundary = Math.floor(now / 1000) + 1800 + offset;
+    assert.equal(validateLongPlan(response(buildInput.metadataUri, boundary), input, published, performance.now()).buildInput?.chainDeadline, boundary);
+  }
+  for (const offset of [-61, 31])
+    assert.throws(() => validateLongPlan(response(buildInput.metadataUri, Math.floor(now / 1000) + 1800 + offset), input, published, performance.now()));
   for (const uri of [`ipfs://${cid}`, o1Metadata({ ...input.draft, name: 'Changed' }, cid).uri]) {
     assert.throws(() => validateLongPlan(response(uri), input, published, performance.now()));
   }

@@ -46,6 +46,14 @@ export class LaunchPreflightError extends Error {
   override cause: unknown;
   constructor(cause: unknown) { super('launch_preflight'); this.cause = cause; }
 }
+export function formatLaunchTokenAmount(value: string) {
+  if (!/^(?:0|[1-9]\d{0,30})$/.test(value))
+    throw new LaunchError('launch_transaction_changed');
+  const amount = BigInt(value), unit = 10n ** 18n;
+  const whole = (amount / unit).toString().replace(/\B(?=(\d{3})+(?!\d))/g, ',');
+  const fraction = (amount % unit).toString().padStart(18, '0').replace(/0+$/, '');
+  return `${whole}${fraction ? `.${fraction}` : ''}`;
+}
 export function launchMessage(error: unknown) {
   if (error instanceof LaunchPreflightError) return launchMessage(error.cause);
   if (error instanceof LaunchError && error.funding) return fundingMessage(error.funding);
@@ -114,8 +122,10 @@ export function validateLongPlan(raw: unknown, input: LaunchInput, published: Pu
     assert(p.profile?.launchpad === 'o1' && p.buildInput && Number.isInteger(p.saltAttempt) && p.saltAttempt >= 0 && p.saltAttempt < 65536);
     const buildInput: O1BuildInput = { ...p.buildInput!, wallet: assetWallet(input.wallet), draft: inputDraft,
       pairId: input.pairId, metadataUri: o1Metadata(inputDraft, published.ipfs!.imageCid).uri, editableMetadata: input.editableMetadata ?? false };
+    const blockTime = buildInput.chainDeadline * 1000 - 1800000;
     assert(buildInput.intentId === p.id && buildInput.launchpadFeeWei === p.launchpadFeeWei
-      && buildInput.chainDeadline * 1000 > p.expiresAt && buildInput.chainDeadline * 1000 <= p.serverTime + 1800000);
+      && buildInput.chainDeadline * 1000 > p.expiresAt
+      && blockTime >= p.serverTime - 60000 && blockTime <= p.serverTime + 30000);
     rebuilt = buildUnsignedO1Launch(buildInput, p.profile, p.saltAttempt);
   } else {
     assert(Number.isInteger(p.saltAttempt) && p.saltAttempt >= 0 && p.saltAttempt < LONG_SALT_ATTEMPTS

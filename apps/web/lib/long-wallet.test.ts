@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { keccak256, toHex, type EIP1193Provider } from 'viem';
 import { buildUnsignedLongLaunch } from './long-encoding/long-launch.mjs';
-import { sendLongWallet, validateLongPlan, LaunchError, launchMessage, launchRequest, LaunchPreflightError, type LaunchInput, readLaunchRecovery, saveLaunchRecovery, prepareLongWallet, isLongLaunchPair, isO1LaunchPair } from './long-wallet.ts';
+import { sendLongWallet, validateLongPlan, LaunchError, launchMessage, launchRequest, LaunchPreflightError, type LaunchInput, readLaunchRecovery, saveLaunchRecovery, prepareLongWallet, isLongLaunchPair, isO1LaunchPair, formatLaunchTokenAmount } from './long-wallet.ts';
 import { launchRecoveryScope } from './launch-draft-cache.ts';
 import { runLaunchFlow } from './launch-flow.ts';
 import { longWalletCostStep, formatEthBudget, approximateLaunchQuote } from './launch-cost.ts';
@@ -246,4 +246,13 @@ void test('service limits disclose the actual retry interval instead of claiming
   assert.match(launchMessage(new LaunchError('read_daily_limit', 26000)), /Daily service read limit reached.*8 hours/);
   assert.match(launchMessage(new LaunchError('rate_limited', 60)), /1 minute\./);
   assert.match(launchMessage(new LaunchError('rate_limited', 5)), /5 seconds/);
+});
+
+void test('reviewed 18-decimal token economics render as exact human amounts', () => {
+  assert.equal(formatLaunchTokenAmount('0'), '0');
+  assert.equal(formatLaunchTokenAmount('1000000000000000000'), '1');
+  assert.equal(formatLaunchTokenAmount('1000000000000000000000000000'), '1,000,000,000');
+  assert.equal(formatLaunchTokenAmount('1234567890000000001'), '1.234567890000000001');
+  for (const value of ['', '-1', '01', '1.0', '1'.repeat(32)])
+    assert.throws(() => formatLaunchTokenAmount(value), /launch_transaction_changed/);
 });

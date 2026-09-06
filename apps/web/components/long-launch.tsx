@@ -22,6 +22,7 @@ import {
   launchMessage,
   launchRequest,
   LaunchError,
+  formatLaunchTokenAmount,
   isO1LaunchPair,
   readLaunchRecovery,
   saveLaunchRecovery,
@@ -530,9 +531,11 @@ function ScopedLongLaunch({
             <details>
               <summary>Launch details</summary>
               <p>
-                {name} · ${ticker} · supply: {validPlan.review.totalSupply} base
-                units · for sale: {validPlan.review.tokensForSale} base units ·
-                creator allocation: {validPlan.review.creatorAllocation} base units ·{' '}
+                {name} · ${ticker} · supply:{' '}
+                {formatLaunchTokenAmount(validPlan.review.totalSupply)} tokens ·
+                for sale: {formatLaunchTokenAmount(validPlan.review.tokensForSale)} tokens ·
+                creator allocation:{' '}
+                {formatLaunchTokenAmount(validPlan.review.creatorAllocation)} tokens ·{' '}
                 {validPlan.review.metadataMutable ? 'metadata updates allowed' : 'fixed metadata'}
               </p>
               <p>
