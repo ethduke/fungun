@@ -1,16 +1,17 @@
 'use client';
 
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import Image from 'next/image';
 import { ArrowUpRight } from 'lucide-react';
 import { Button } from '@/components/ui/button';
+import { claimLaunchSuccessNotice } from '@/lib/launch-success';
 import {
   Dialog, DialogContent, DialogDescription, DialogTitle, DialogTrigger,
 } from '@/components/ui/dialog';
 
 // The parent is keyed by the wallet + draft + artwork recovery scope, so a
 // pending launch cannot inherit the name or picture from an edited draft.
-export function LaunchSuccessDialog({ name, ticker, imageUrl, tokenUrl, transactionUrl, longCompatible, padName = "Long" }: {
+export function LaunchSuccessDialog({ name, ticker, imageUrl, tokenUrl, transactionUrl, longCompatible, padName = "Long", autoOpen = true }: {
   name: string;
   ticker: string;
   imageUrl: string;
@@ -18,8 +19,20 @@ export function LaunchSuccessDialog({ name, ticker, imageUrl, tokenUrl, transact
   transactionUrl: string;
   longCompatible: boolean;
   padName?: string;
+  autoOpen?: boolean;
 }) {
-  const [open, setOpen] = useState(true);
+  const [open, setOpen] = useState(false);
+  useEffect(() => {
+    let active = true;
+    queueMicrotask(() => {
+      if (!active) return;
+      // Consume confirmations hidden by the launch queue too; changing the
+      // selected destinations later must not replay their success dialogs.
+      const firstNotice = claimLaunchSuccessNotice(transactionUrl);
+      if (autoOpen && firstNotice) setOpen(true);
+    });
+    return () => { active = false; };
+  }, [autoOpen, transactionUrl]);
   return (
     <Dialog open={open} onOpenChange={setOpen}>
       <DialogTrigger render={<Button variant="outline" />}>
