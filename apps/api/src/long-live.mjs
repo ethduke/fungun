@@ -44,16 +44,17 @@ const call = (address, functionName, args = []) => ({ address, abi: LONG_STATE_A
 
 export function validateLongInput(kind, value) {
   if (kind === "launch-estimate") {
-    if (!exact(value, ["chainId", "pairId"]) || (![4663, 8453].includes(value.chainId) || (value.chainId === 8453 && !/^(?:native|rwa-[a-f0-9]{24}|stonks-[a-f0-9]{24})$/.test(value.pairId)))
-      || typeof value.pairId !== "string" || !/^(?:(?:long|longbow)-[A-Z0-9._-]{1,24}|rwa-[a-f0-9]{24}|native|crypto-USDG|stonks-[a-f0-9]{24})$/.test(value.pairId)) fail("invalid_request", 400);
+    if (!exact(value, ["chainId", "pairId", ...(Object.hasOwn(value ?? {}, "wallet") ? ["wallet"] : [])])
+      || (Object.hasOwn(value ?? {}, "wallet") && (value.pairId !== "pons-native" || typeof value.wallet !== "string" || !isAddress(value.wallet) || same(value.wallet, zeroAddress))) || (![4663, 8453].includes(value.chainId) || (value.chainId === 8453 && !/^(?:native|rwa-[a-f0-9]{24}|stonks-[a-f0-9]{24})$/.test(value.pairId)))
+      || typeof value.pairId !== "string" || !/^(?:(?:long|longbow)-[A-Z0-9._-]{1,24}|rwa-[a-f0-9]{24}|native|crypto-USDG|pons-native|stonks-[a-f0-9]{24})$/.test(value.pairId)) fail("invalid_request", 400);
     if (value.pairId.startsWith('stonks-') && value.chainId !== 8453) fail('invalid_request', 400);
     return value;
   }
   if (kind === "launch-prepare") {
     if (!exact(value, ["chainId", "wallet", "draft", "pairId", "publication", ...(Object.hasOwn(value ?? {}, "editableMetadata") ? ["editableMetadata"] : [])]) || (![4663, 8453].includes(value.chainId) || (value.chainId === 8453 && !/^(?:native|rwa-[a-f0-9]{24}|stonks-[a-f0-9]{24})$/.test(value.pairId)))
       || typeof value.wallet !== "string" || !isAddress(value.wallet) || same(value.wallet, zeroAddress)
-      || typeof value.pairId !== "string" || !/^(?:(?:long|longbow)-[A-Z0-9._-]{1,24}|rwa-[a-f0-9]{24}|native|crypto-USDG|stonks-[a-f0-9]{24})$/.test(value.pairId)
-      || (value.editableMetadata !== undefined && (typeof value.editableMetadata !== "boolean" || value.pairId.startsWith("long")))
+      || typeof value.pairId !== "string" || !/^(?:(?:long|longbow)-[A-Z0-9._-]{1,24}|rwa-[a-f0-9]{24}|native|crypto-USDG|pons-native|stonks-[a-f0-9]{24})$/.test(value.pairId)
+      || (value.editableMetadata !== undefined && (typeof value.editableMetadata !== "boolean" || value.pairId.startsWith("long") || value.pairId === "pons-native"))
       || !exact(value.publication, ["id", "imageHash", "metadataHash"])
       || !id(value.publication.id, 48) || !id(value.publication.imageHash) || !id(value.publication.metadataHash)) fail("invalid_request", 400);
     if (value.pairId.startsWith('stonks-') && (value.chainId !== 8453 || value.editableMetadata !== undefined)) fail('invalid_request', 400);

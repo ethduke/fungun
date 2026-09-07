@@ -3,15 +3,17 @@ import {
   LONGBOW_MARKET_TICKERS,
 } from './longbow-markets.ts';
 import { O1_ROBINHOOD_PAIRS, selectableO1Pairs } from './o1-markets.ts';
+import { BASE_PAIRS } from './base-markets.ts';
 import { LONG_MARKET_TICKERS } from './long-encoding/long-markets.mjs';
 
 export { LONG_MARKET_TICKERS };
 
 export type PadId = 'long' | 'o1' | 'stonks';
-export type LaunchpadId = PadId | 'longbow';
+export type LaunchpadId = PadId | 'longbow' | 'pons';
 export type ChainId = 4663 | 8453;
 export type PairId =
   | 'native'
+  | 'pons-native'
   | 'crypto-USDG'
   | 'sample-nvda'
   | 'sample-aapl'
@@ -84,12 +86,12 @@ export function isWebviewChain(chainId: number) {
 }
 
 export function launchpadName(id: LaunchpadId) {
-  return { long: 'Long', o1: 'O1', longbow: 'Longbow', stonks: 'Stonks' }[id];
+  return { long: 'Long', o1: 'O1', longbow: 'Longbow', pons: 'pons', stonks: 'Stonks' }[id];
 }
 
 export function readablePads(pads: LaunchpadId[]): PadId[] {
   // Long and Longbow use the same on-chain ticker reservation registry.
-  return [...new Set(pads.map((pad) => pad === 'longbow' ? 'long' : pad))];
+  return [...new Set(pads.filter((pad): pad is PadId | 'longbow' => pad !== 'pons').map((pad) => pad === 'longbow' ? 'long' : pad))];
 }
 export function hasSharedTickerConflict(destinations: Destination[]) {
   return destinations.some(pad => pad.selected && pad.id === 'long')
@@ -132,6 +134,7 @@ export const DEFAULT_DESTINATIONS: Destination[] = [
     editableMetadata: false,
   },
   { id: 'stonks', selected: false, chainId: 8453, route: 'rwa', pairId: 'stonks-unselected', editableMetadata: false },
+  { id: 'pons', selected: false, chainId: 4663, route: 'standard', pairId: 'pons-native', editableMetadata: false },
 ];
 
 export function chainName(id: ChainId) {
@@ -163,9 +166,9 @@ export function selectChain(destinations: Destination[], chainId: ChainId) {
 
 export function pairingName(id: PairId) {
   if (id === 'crypto-USDG') return 'USDG';
-  return id === 'native'
+  return id === 'native' || id === 'pons-native'
     ? 'ETH'
-    : ([...LONG_PAIRS, ...LONGBOW_PAIRS, ...O1_ROBINHOOD_PAIRS].find(
+    : ([...LONG_PAIRS, ...LONGBOW_PAIRS, ...O1_ROBINHOOD_PAIRS, ...BASE_PAIRS].find(
         (pair) => pair.id === id,
       )?.symbol ?? 'Unselected');
 }
@@ -199,6 +202,8 @@ export function validateDraft(
   )
     errors.destinations = 'Choose launchpads available on the selected chain.';
   for (const pad of active) {
+    if (pad.id === 'pons' && (pad.chainId !== 4663 || pad.route !== 'standard' || pad.pairId !== 'pons-native' || pad.editableMetadata))
+      errors.destinations = 'pons requires Robinhood Chain, ETH pairing and immutable metadata.';
     if (pad.id === 'stonks' && (pad.chainId !== 8453 || pad.route !== 'rwa' || pad.editableMetadata))
       errors.destinations = 'Stonks requires a Base stock pairing and immutable launch details.';
     if (
@@ -215,14 +220,14 @@ export function validateDraft(
         : pad.id === 'longbow'
           ? !LONGBOW_PAIRS.some((pair) => pair.id === pad.pairId)
           : pad.id === 'stonks'
-            ? !(catalog?.chainId === 8453 && catalog.pads.stonks?.status === 'ready' && catalog.pads.stonks.pairs.some(pair => pair.id === pad.pairId))
+            ? !(catalog?.chainId === 8453 && catalog.expiresAt > _now && catalog.pads.stonks?.status === 'ready' && catalog.pads.stonks.pairs.some(pair => pair.id === pad.pairId))
           : !selectableO1Pairs(
               pad.chainId,
-              catalog?.chainId === pad.chainId ? catalog.pads.o1 : undefined,
+              catalog?.chainId === pad.chainId && (pad.chainId !== 8453 || catalog.expiresAt > _now) ? catalog.pads.o1 : undefined,
             ).some((pair) => pair.id === pad.pairId))
     )
       errors.destinations = 'Choose an available RWA pairing.';
-    if (pad.route === 'standard' && pad.pairId !== 'native' && !(pad.id === 'o1' && pad.chainId === 4663 && pad.pairId === 'crypto-USDG'))
+    if (pad.route === 'standard' && !(pad.id === 'pons' && pad.pairId === 'pons-native') && pad.pairId !== 'native' && !(pad.id === 'o1' && pad.chainId === 4663 && pad.pairId === 'crypto-USDG'))
       errors.destinations = 'Choose an available crypto pairing.';
   }
   if (

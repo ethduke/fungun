@@ -15,7 +15,8 @@ export function confirmedLaunchTokenUrl(pad: LaunchpadId, receipt: LaunchReceipt
   if (pad === 'long') return confirmedLongTokenUrl(receipt);
   if (receipt?.status !== 'confirmed' || !/^0x[a-f0-9]{40}$/i.test(receipt.asset ?? '')) return null;
   const asset = receipt.asset!.toLowerCase();
-  return pad === 'stonks' ? `https://www.thestonks.exchange/token/${asset}` : pad === 'longbow' ? `https://longbow.gg/c/${asset}`
+  return pad === 'pons' ? `https://www.ponsfamily.com/launchpad/${asset}`
+    : pad === 'stonks' ? `https://www.thestonks.exchange/token/${asset}` : pad === 'longbow' ? `https://longbow.gg/c/${asset}`
     : `https://launch.o1.exchange/token/${asset}?chain=${chainId}`;
 }
 export function validateLaunchStatus(value: LaunchReceipt, recovery: LaunchRecovery) {

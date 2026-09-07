@@ -537,7 +537,7 @@ export default function Home() {
                       key={pad.id}
                       destination={pad}
                       onChange={updateDestination}
-                      catalog={pad.id === 'longbow' ? undefined : reads.catalog?.pads[pad.id]}
+                      catalog={pad.id === 'longbow' || pad.id === 'pons' ? undefined : reads.catalog?.pads[pad.id]}
                       loading={reads.catalogLoading}
                       onPairingOpen={reads.ensureCatalog}
                     />

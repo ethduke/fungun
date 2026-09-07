@@ -321,7 +321,7 @@ function ScopedLongLaunch({
       await runLaunchFlow({
         isCurrent,
         onProgress: setBusy,
-        availability: () => launchRequest('launch-estimate', { chainId, pairId }),
+        availability: () => launchRequest('launch-estimate', { chainId, pairId, ...(padId === 'pons' ? { wallet: account.address } : {}) }),
         artwork: () =>
           ensureLaunchArtwork({
             bytes: imageBytes,
@@ -581,6 +581,7 @@ function ScopedLongLaunch({
                 {name} · ${ticker} · {Number(wei(validPlan.review.totalSupply) / 10n ** 18n).toLocaleString()} tokens · no creator allocation ·
                 {padId === 'stonks' ? 'launch details recorded on-chain' : validPlan.review.metadataMutable ? "editable metadata" : "fixed metadata"}
                 {padId === "longbow" && " · 1% Longbow allocation"}
+                {padId === "pons" && " · 0% creator tax · buybacks off"}
               </p>
               {padId === 'stonks' && <p>
                 Creator share: {validPlan.terms!.creatorBps / 100}% of the 1% trading fee. Liquidity is locked.

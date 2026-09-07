@@ -45,5 +45,5 @@ export function launchpadFeeInfo(
     (destination.chainId !== 4663 || destination.route !== 'rwa')
   )
     return undefined;
-  return FEE_INFO[destination.id];
+  return destination.id === 'pons' ? undefined : FEE_INFO[destination.id];
 }

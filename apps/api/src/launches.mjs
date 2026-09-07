@@ -3,12 +3,15 @@ import { LongLive } from './long-live.mjs';
 import { O1Live } from './o1-live.mjs';
 import { launchpadForPair } from './launch-catalog.mjs';
 
+import { PonsLive } from "./pons-live.mjs";
+
 export class Launches {
   constructor(config, upstream, budget) {
     this.budget = budget;
     this.db = budget.db;
     this.handlers = {
       stonks: new StonksLive(config, upstream, budget),
+      pons: new PonsLive(config, upstream, budget),
       long: new LongLive(config, upstream, budget),
       longbow: new LongLive({ ...config, longLaunch: config.longbowLaunch }, upstream, budget),
       o1: new O1Live(config, upstream, budget),

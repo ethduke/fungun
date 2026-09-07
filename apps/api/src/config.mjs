@@ -1,5 +1,6 @@
 import { readStonksConfig } from './stonks-live.mjs';
 import { readO1LiveConfig, readO1BaseLiveConfig } from "./o1-live.mjs";
+import { readPonsLiveConfig } from "./pons-live.mjs";
 import { readLongLiveConfig } from "./long-live.mjs";
 import { resolve } from "node:path";
 import { isAddress, isHex, size } from "viem";
@@ -60,6 +61,7 @@ export function readConfig(env = process.env) {
   return {
     stonksLaunch: readStonksConfig(env),
     longLaunch,
+    ponsLaunch: readPonsLiveConfig(env),
     longbowLaunch: readLongLiveConfig(env, "longbow"),
     o1Launch: readO1LiveConfig(env, longLaunch),
     o1BaseLaunch: readO1BaseLiveConfig(env),

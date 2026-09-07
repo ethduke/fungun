@@ -177,3 +177,10 @@ Only continue fee pages under explicit scan intent. Wallet launches use the conf
 `/api/launch-estimate`, `/api/launch-prepare`, `/api/launch-reserve` and `/api/launch-status`
 flow. The server never signs or broadcasts a launch. Upload and paid-image APIs
 require configured services and explicit user actions.
+
+
+pons v2 is available in the Robinhood launchpad selector with ETH pairing
+(`pons-native`), immutable metadata, zero creator tax and buybacks off.
+The connected wallet receives creator fees. Live eligibility, fees and launch
+economics are checked before wallet submission. pons fee claims are not yet
+integrated. It can be combined with O1 and either Long or Longbow.

@@ -72,6 +72,11 @@ export function runtimeStatus(env) {
         ],
         ["READ_UPSTREAMS", "LONG_WALLET_LAUNCH"],
       ),
+      feature("pons_wallet_launch", [
+        rpc,
+        ["PONS_LAUNCH_PROFILE_JSON", present(env.PONS_LAUNCH_PROFILE_JSON)],
+        ["LAUNCH_ASSET_SERVICE_ORIGIN", present(env.LAUNCH_ASSET_SERVICE_ORIGIN)],
+      ], ["READ_UPSTREAMS", "PONS_WALLET_LAUNCH"]),
       feature("o1_base_wallet_launch", [
         o1,
         ["BASE_RPC_URL", present(config.baseRpcUrl)],

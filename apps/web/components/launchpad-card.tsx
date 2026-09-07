@@ -43,11 +43,12 @@ export function LaunchpadCard({
 }) {
   const long = pad.id === 'long';
   const o1 = pad.id === 'o1';
+  const pons = pad.id === 'pons';
   const stonks = pad.id === 'stonks';
   const title = launchpadName(pad.id);
   const live = (o1 || stonks) && catalog?.status === 'ready';
   const saved = (o1 || stonks) && !live;
-  const pairs = long
+  const pairs = pons ? [] : long
     ? LONG_PAIRS
     : pad.id === 'longbow'
       ? LONGBOW_PAIRS
@@ -68,7 +69,7 @@ export function LaunchpadCard({
             <ArrowUpRight size={22} />
           ) : o1 ? (
             'o1'
-          ) : stonks ? 'S' : (
+          ) : pons ? 'p' : stonks ? 'S' : (
             <Crosshair size={22} />
           )}
         </span>
@@ -82,12 +83,13 @@ export function LaunchpadCard({
           }}
           onValueChange={(value) => {
             if (
+              (pons && value === 'pons-native') ||
               (o1 && (value === 'native' || (pad.chainId === 4663 && value === 'crypto-USDG'))) ||
               pairs.some((pair) => pair.id === value)
             )
               onChange({
                 ...pad,
-                route: value === 'native' || value === 'crypto-USDG' ? 'standard' : 'rwa',
+                route: value === 'pons-native' || value === 'native' || value === 'crypto-USDG' ? 'standard' : 'rwa',
                 pairId: value as PairId,
               });
           }}
@@ -97,7 +99,7 @@ export function LaunchpadCard({
             className="pair-select"
           >
             <SelectValue>
-              {pad.pairId === 'native'
+              {pad.pairId === 'pons-native' || pad.pairId === 'native'
                 ? 'ETH'
                 : pad.pairId === 'crypto-USDG' ? 'USDG'
                 : selectedPair
@@ -106,6 +108,7 @@ export function LaunchpadCard({
             </SelectValue>
           </SelectTrigger>
           <SelectContent>
+            {pons && <SelectItem value="pons-native">ETH</SelectItem>}
             {o1 && <SelectItem value="native">ETH</SelectItem>}
             {o1 && pad.chainId === 4663 && <SelectItem value="crypto-USDG">USDG</SelectItem>}
             {pairs.map((pair) => (
@@ -113,12 +116,12 @@ export function LaunchpadCard({
                 {pair.symbol}
               </SelectItem>
             ))}
-            {live && !pairs.length && (
+            {pad.chainId !== 8453 && live && !pairs.length && (
               <SelectItem value="unavailable" disabled>
                 No RWA pairs available
               </SelectItem>
             )}
-            {saved && (
+            {pad.chainId !== 8453 && saved && (
               <SelectItem value="status" disabled>
                 {loading
                   ? 'Checking availability…'
@@ -135,6 +138,12 @@ export function LaunchpadCard({
         {selectedPair && 'priceFresh' in selectedPair && selectedPair.priceFresh === false && <><br />Stock price uses the last saved anchor.</>}
         {catalog?.terms?.pendingFeeSplit && <><br />A fee-share change is scheduled.</>}
       </p>}
+      {pons && (
+        <p className="pad-pons-details">
+          ETH bonding curve · 0% creator tax · buybacks off.
+          {' '}<a href="https://docs.ponsfamily.com/v2" target="_blank" rel="noopener noreferrer">Launch terms</a>
+        </p>
+      )}
       {feeInfo && (
         <div className="pad-fee-share">
           <span>

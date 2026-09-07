@@ -164,3 +164,12 @@ test("Longbow readiness requires its own profile without enabling Long", () => {
     "disabled",
   );
 });
+
+test('pons runtime status identifies its own launch profile and gate', () => {
+  assert.deepEqual(feature({}, 'pons_wallet_launch'), {
+    id: 'pons_wallet_launch',
+    missing: ['ROBINHOOD_RPC', 'PONS_LAUNCH_PROFILE_JSON', 'LAUNCH_ASSET_SERVICE_ORIGIN'],
+    disabled: ['READ_UPSTREAMS', 'PONS_WALLET_LAUNCH'],
+    status: 'missing_configuration',
+  });
+});

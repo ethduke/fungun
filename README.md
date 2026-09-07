@@ -56,3 +56,10 @@ Wallet connection does not authorize a signature or transaction. Claims require 
 verified preflight, a separate confirmation and wallet approval; the backend never
 signs or sends. Public on-chain data is not secret, but
 operational copies do not belong in this repository.
+
+
+pons v2 is available in the Robinhood launchpad selector with ETH pairing
+(`pons-native`), immutable metadata, zero creator tax and buybacks off.
+The connected wallet receives creator fees. Live eligibility, fees and launch
+economics are checked before wallet submission. pons fee claims are not yet
+integrated. It can be combined with O1 and either Long or Longbow.

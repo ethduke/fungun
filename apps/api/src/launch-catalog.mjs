@@ -2,7 +2,7 @@ import { createHash } from 'node:crypto';
 import { isAddress, zeroAddress } from 'viem';
 import { ServiceError } from './errors.mjs';
 
-export const launchpadForPair = pair => typeof pair === 'string' && pair.startsWith('stonks-') ? 'stonks'
+export const launchpadForPair = pair => pair === 'pons-native' ? 'pons' : typeof pair === 'string' && pair.startsWith('stonks-') ? 'stonks'
   : typeof pair === 'string' && pair.startsWith('longbow-') ? 'longbow'
   : typeof pair === 'string' && pair.startsWith('long-') ? 'long' : 'o1';
 export const launchPairId = (pad, token) => pad === 'o1'

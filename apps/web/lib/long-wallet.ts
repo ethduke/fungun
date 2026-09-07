@@ -10,23 +10,26 @@ import { buildUnsignedO1Launch, readO1LaunchProfile } from './long-encoding/o1-l
 import { STONKS_ABI, STONKS_SUPPLY, buildUnsignedStonksLaunch, readStonksProfile, stonksSalt } from './long-encoding/stonks-launch.mjs';
 import { o1Metadata } from './long-encoding/o1-metadata.mjs';
 
+import { PONS_ABI, buildUnsignedPonsLaunch, readPonsLaunchProfile } from './long-encoding/pons-launch.mjs';
+
+export type PonsBuildInput = { wallet: string; draft: AssetDraft; pairId: string; imageUri: string; metadataUri: string; expectedEconomics: string; totalSupply: string; launchpadFeeWei: string; intentId: string };
 export type O1BuildInput = { wallet: string; draft: AssetDraft; pairId: string; metadataUri: string; editableMetadata: boolean;
   configVersion: string; chainDeadline: number; totalSupply: string; launchpadFeeWei: string; intentId: string; initCodeHash?: string };
 export type StonksBuildInput = { wallet: string; draft: AssetDraft; pairId: string; imageUri: string; metadataUri: string; launchpadFeeWei: string; predictedAsset: string; intentId: string };
-export const launchpadForPair = (pairId: string = ''): 'long' | 'longbow' | 'o1' | 'stonks' =>
-  pairId.startsWith('stonks-') ? 'stonks' : pairId.startsWith('longbow-') ? 'longbow' : pairId.startsWith('long-') ? 'long' : 'o1';
+export const launchpadForPair = (pairId: string = ''): 'long' | 'longbow' | 'o1' | 'stonks' | 'pons' =>
+  pairId === 'pons-native' ? 'pons' : pairId.startsWith('stonks-') ? 'stonks' : pairId.startsWith('longbow-') ? 'longbow' : pairId.startsWith('long-') ? 'long' : 'o1';
 export const isEnabledLaunchPair = (pairId: string | undefined): pairId is string =>
-  typeof pairId === 'string' && /^(?:(?:long|longbow)-[A-Z0-9._-]{1,24}|rwa-[a-f0-9]{24}|native|crypto-USDG|stonks-[a-f0-9]{24})$/.test(pairId);
+  typeof pairId === 'string' && /^(?:(?:long|longbow)-[A-Z0-9._-]{1,24}|rwa-[a-f0-9]{24}|native|crypto-USDG|pons-native|stonks-[a-f0-9]{24})$/.test(pairId);
 
 export type LaunchInput = { chainId: ChainId; wallet: string; draft: AssetDraft; pairId: string;
   publication: { id: string; imageHash: string; metadataHash: string }; editableMetadata?: boolean };
 export type LongPlan = {
   id: string; binding: string; chainId: ChainId; quotedAt: number; expiresAt: number; deadline: number;
   transaction: { chainId: '0x1237' | '0x2105'; from: string; to: string; data: `0x${string}`; value: `0x${string}`; nonce: `0x${string}`; gas: `0x${string}`; gasPrice: `0x${string}` };
-  profile: (ReturnType<typeof readLongLaunchProfile> | ReturnType<typeof readO1LaunchProfile> | ReturnType<typeof readStonksProfile>) & { launcher: { address: string; codeHash: string }; launchpad?: string }; startingTick?: number; intentId?: string; buildInput?: O1BuildInput | StonksBuildInput;
+  profile: (ReturnType<typeof readLongLaunchProfile> | ReturnType<typeof readO1LaunchProfile> | ReturnType<typeof readStonksProfile> | ReturnType<typeof readPonsLaunchProfile>) & { launcher: { address: string; codeHash: string }; launchpad?: string }; startingTick?: number; intentId?: string; buildInput?: O1BuildInput | StonksBuildInput; ponsBuildInput?: PonsBuildInput;
   terms?: { creatorBps: number; platformBps: number; lpBps: number };
   condition?: { priceFresh: boolean; openingTickMagnitude: number };
-  predictedAsset: string; saltAttempt: number; predictedPool: string; review: ReturnType<typeof buildUnsignedLongLaunch>['review'];
+  predictedAsset: string; saltAttempt: number; predictedPool: string; review: ReturnType<typeof buildUnsignedLongLaunch>['review'] | ReturnType<typeof buildUnsignedPonsLaunch>['review'];
   baseFees?: { l1DataFeeWei: string; operatorFeeWei: string };
   estimatedGas: string; maximumGasWei: string; launchpadFeeWei: string;
   launchFeeSource: LaunchFeeSource;
@@ -79,6 +82,8 @@ export function launchMessage(error: unknown) {
     invalid_long_salt: 'The prepared token address does not meet Long’s requirements. Refresh the launch estimate.',
     long_launch_disabled: 'The launch service is currently unavailable.',
     stonks_launch_disabled: 'Stonks launches are currently unavailable.',
+    pons_launch_disabled: 'The pons launch service or launch configuration is currently unavailable.',
+    pons_launch_restricted: 'pons is currently restricting launches. This wallet is not allowed to launch.',
     o1_launch_disabled: 'O1 has paused new launches.',
     o1_metadata_unverified: 'O1 has not confirmed your artwork yet. Your draft is saved; try preparing again shortly.',
     unsupported_pair: 'This pairing is not configured on the launch server yet. Choose another pairing.',
@@ -118,9 +123,18 @@ export function validateLongPlan(raw: unknown, input: LaunchInput, published: Pu
   assert(deadline > now);
   const inputDraft = assetDraft(input.draft);
   const o1 = launchpadForPair(input.pairId) === 'o1';
+  const pons = launchpadForPair(input.pairId) === 'pons';
   let rebuilt;
   const stonks = launchpadForPair(input.pairId) === 'stonks';
-  if (stonks) {
+  if (pons) {
+    assert(input.chainId === 4663 && p.profile?.launchpad === 'pons' && p.ponsBuildInput && !input.editableMetadata
+      && /^0x[a-f0-9]{40}$/i.test(p.predictedAsset) && !/^0x0+$/i.test(p.predictedAsset)
+      && /^0x[a-f0-9]{40}$/i.test(p.predictedPool) && !/^0x0+$/i.test(p.predictedPool) && !same(p.predictedAsset, p.predictedPool));
+    const buildInput = { ...p.ponsBuildInput!, wallet: assetWallet(input.wallet), draft: inputDraft, pairId: input.pairId,
+      imageUri: `ipfs://${published.ipfs!.imageCid}`, metadataUri: `ipfs://${published.ipfs!.metadataCid}` };
+    assert(buildInput.intentId === p.id && buildInput.launchpadFeeWei === p.launchpadFeeWei);
+    rebuilt = buildUnsignedPonsLaunch(buildInput, p.profile);
+  } else if (stonks) {
     assert(input.chainId === 8453 && p.profile.launchpad === 'stonks' && p.buildInput);
     assert(p.terms && [p.terms.creatorBps, p.terms.platformBps, p.terms.lpBps].every(v => Number.isInteger(v) && v >= 0 && v <= 10000)
       && p.terms.creatorBps + p.terms.platformBps + p.terms.lpBps === 10000 && p.terms.creatorBps >= 2000
@@ -143,7 +157,7 @@ export function validateLongPlan(raw: unknown, input: LaunchInput, published: Pu
       pairId: input.pairId, metadataUri: `ipfs://${published.ipfs!.metadataCid}`, startingTick: p.startingTick, intentId: p.intentId }, p.profile, undefined, p.saltAttempt);
   }
   if (!rebuilt) throw new LaunchError('launch_transaction_changed');
-  assert(rebuilt.binding === p.binding && same(rebuilt.predictedAsset, p.predictedAsset)
+  assert(rebuilt.binding === p.binding && (pons || ('predictedAsset' in rebuilt && same(rebuilt.predictedAsset, p.predictedAsset)))
     && JSON.stringify(rebuilt.review) === JSON.stringify(p.review));
   const tx = p.transaction;
   let feeSource: LaunchFeeSource;
@@ -161,8 +175,8 @@ export function validateLongPlan(raw: unknown, input: LaunchInput, published: Pu
     extraGas = BigInt(p.baseFees!.l1DataFeeWei) + BigInt(p.baseFees!.operatorFeeWei);
   } else assert(p.baseFees === undefined);
   const estimate = BigInt(p.estimatedGas), gas = BigInt(tx.gas), price = BigInt(tx.gasPrice);
-  assert(estimate >= 21000n && gas === (estimate * 120n + 99n) / 100n && gas <= (o1 || stonks ? 8000000n : 3000000n) && price > 0n
-    && price <= 10n ** 12n && gas * price <= 5n * 10n ** 16n && p.maximumGasWei === String(gas * price + extraGas) && BigInt(tx.value) === BigInt(p.launchpadFeeWei) && (!o1 && !stonks ? p.launchpadFeeWei === '0' : gas * price + extraGas + BigInt(tx.value) <= 5n * 10n ** 16n));
+  assert(estimate >= 21000n && gas === (estimate * 120n + 99n) / 100n && gas <= (o1 || stonks || pons ? 8000000n : 3000000n) && price > 0n
+    && price <= 10n ** 12n && gas * price <= 5n * 10n ** 16n && p.maximumGasWei === String(gas * price + extraGas) && BigInt(tx.value) === BigInt(p.launchpadFeeWei) && (!o1 && !stonks && !pons ? p.launchpadFeeWei === '0' : gas * price + extraGas + BigInt(tx.value) <= 5n * 10n ** 16n));
   assert(p.usd?.sourceLabel === 'Coinbase ETH/USD spot' && /^\d{1,12}$/.test(p.usd.microUsdPerEth)
     && BigInt(p.usd.microUsdPerEth) > 0n && Number.isSafeInteger(p.usd.quotedAt)
     && p.usd.quotedAt <= p.serverTime && p.serverTime - p.usd.quotedAt < 60000);
@@ -215,6 +229,14 @@ export async function sendLongWallet(provider: EIP1193Provider, plan: LongPlan, 
   const balance = BigInt(balanceRaw), required = BigInt(plan.maximumGasWei) + BigInt(tx.value);
   if (balance < required) throw new LaunchError('insufficient_funds', 0, { chainId:plan.chainId,
     balanceWei:String(balance), requiredWei:String(required), shortfallWei:String(required-balance), basis:'simulation' });
+  if (plan.profile.launchpad === 'pons') {
+    // The factory checks canLaunch and expectedEconomics during this wallet-side
+    // simulation, and the returned CREATE2 addresses must match the reviewed plan.
+    const result = await provider.request({ method: 'eth_call', params: [{ from: tx.from, to: tx.to, data: tx.data, value: tx.value } as never, 'pending'] });
+    const [asset, curve] = decodeFunctionResult({ abi: PONS_ABI, functionName: 'launchToken', data: result });
+    if (!same(asset, plan.predictedAsset) || !same(curve, plan.predictedPool)) throw new LaunchError('launch_transaction_changed');
+    await check();
+  }
   await reserve();
   await check();
   } catch (error) { throw new LaunchPreflightError(error); }

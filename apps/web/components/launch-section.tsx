@@ -269,7 +269,7 @@ export function LaunchSection({
         <div className="launch-destinations">
           {destinations.map((pad) => {
             const pairing =
-              (pad.id === 'longbow'
+              (pad.id === 'longbow' || pad.id === 'pons'
                 ? undefined
                 : catalog?.pads[pad.id]?.pairs.find(
                     (pair) => pair.id === pad.pairId,
