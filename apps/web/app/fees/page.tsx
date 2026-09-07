@@ -60,6 +60,7 @@ type SourceResult = {
   error?: string;
   pageError?: string;
   pages: number;
+  scanning?: boolean;
 };
 const label = launchpadName;
 const short = (value: string) => `${value.slice(0, 6)}…${value.slice(-4)}`;
@@ -145,7 +146,10 @@ function ConnectedFees({ address }: { address: string }) {
     results?.address === address && results.revision === refresh
       ? results.entries
       : [];
-  const loading = !!address && entries.length < FEE_SOURCES.length;
+  const loading =
+    !!address &&
+    (entries.length < FEE_SOURCES.length ||
+      entries.some((entry) => entry.scanning));
   const sources = entries.flatMap((entry) =>
     entry.source ? [entry.source] : [],
   );
@@ -214,14 +218,22 @@ function ConnectedFees({ address }: { address: string }) {
         (result) => {
           const key = `${result.padId}:${result.chainId}`;
           const entry: SourceResult = result.source
-            ? { key, source: result.source, pages: 1 }
+            ? {
+                key,
+                source: result.source,
+                pages: result.pages ?? 1,
+                scanning: result.scanning,
+                pageError: result.pageError
+                  ? describeError(result.pageError, 'fees')
+                  : undefined,
+              }
             : { key, error: describeError(result.error, 'fees'), pages: 0 };
           setResults((previous) => ({
             address,
             revision: refresh,
             entries: [
               ...(previous?.address === address && previous.revision === refresh
-                ? previous.entries
+                ? previous.entries.filter((entry) => entry.key !== key)
                 : []),
               entry,
             ],
@@ -549,28 +561,29 @@ function ConnectedFees({ address }: { address: string }) {
             ),
           );
           const incomplete = data?.status === 'partial' || !!data?.nextCursor;
-          const note = !entry
-            ? 'Checking your fees…'
-            : unavailable
-              ? (entry.error ?? unavailableFeeMessage(data))
-              : !balances.length
-                ? incomplete
-                  ? 'No fees found so far.'
-                  : 'No fees to claim.'
-                : !eligible.length
-                  ? (claimUnavailable ??
-                    'These fees are not available to claim yet.')
-                  : unverified
-                    ? 'Some fees still need verification. Claim all includes available fees.'
-                    : incomplete
-                      ? 'More fees may be available. Claim all includes fees found so far.'
-                      : null;
+          const note =
+            !entry || entry.scanning
+              ? 'Checking your fees…'
+              : unavailable
+                ? (entry.error ?? unavailableFeeMessage(data))
+                : !balances.length
+                  ? incomplete
+                    ? 'No fees found so far.'
+                    : 'No fees to claim.'
+                  : !eligible.length
+                    ? (claimUnavailable ??
+                      'These fees are not available to claim yet.')
+                    : unverified
+                      ? 'Some fees are not available to claim here yet.'
+                      : incomplete
+                        ? 'More fees may be available. Claim all includes fees found so far.'
+                        : null;
           return (
             <section
               className="fee-source"
               key={key}
               aria-label={`${label(source.padId)} fees`}
-              aria-busy={!entry}
+              aria-busy={!entry || !!entry.scanning}
             >
               <div className="fee-source-heading">
                 <strong>
@@ -582,16 +595,15 @@ function ConnectedFees({ address }: { address: string }) {
                     Unavailable
                   </span>
                 )}
-                {!unavailable && incomplete && (
-                  <span className="fee-coverage">Partial</span>
-                )}
               </div>
               {balances.length > 0 && (
                 <div
                   className="my-5"
-                  aria-label={unverified ? 'Estimated fees' : 'Fees found'}
+                  aria-label={
+                    unverified ? 'Reported creator fees' : 'Creator fees'
+                  }
                 >
-                  {unverified && <p>Estimated fees</p>}
+                  <p>{unverified ? 'Reported creator fees' : 'Creator fees'}</p>
                   {balances.map((balance) => (
                     <div className="fee-payout font-mono" key={balance.key}>
                       {balance.claimable} {balance.symbol}

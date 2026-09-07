@@ -291,7 +291,16 @@ export async function loadFees(
 
 type FeeLookup = { chainId: ChainId; padId: PadId };
 export type FeeLookupResult = FeeLookup &
-  ({ source: FeeSource; error?: never } | { source?: never; error: unknown });
+  (
+    | {
+        source: FeeSource;
+        error?: never;
+        pageError?: unknown;
+        scanning?: boolean;
+        pages?: number;
+      }
+    | { source?: never; error: unknown }
+  );
 
 // Two launchpads can load together without flooding the shared RPC provider.
 // Navigation/account changes stop queued work; shared in-flight reads may finish.
@@ -307,9 +316,38 @@ export async function loadFeeSources(
       const source = sources[next++];
       let result: FeeLookupResult;
       try {
+        let page = await loadFees(owner, source.chainId, source.padId);
+        let pages = 1;
+        let pageError: unknown;
+        const seen = new Set<string>();
+        // Complete O1's bounded wallet index automatically. Long event scans can
+        // span thousands of pages, so their continuation remains explicit.
+        while (source.padId === 'o1' && page.nextCursor && isCurrent()) {
+          onResult({ ...source, source: page, scanning: true, pages });
+          if (!isCurrent()) return;
+          try {
+            if (seen.has(page.nextCursor) || pages >= 512)
+              throw new AppError('scan_limit');
+            seen.add(page.nextCursor);
+            const nextPage = await loadFees(
+              owner,
+              source.chainId,
+              source.padId,
+              page.nextCursor,
+            );
+            if (!isCurrent()) return;
+            page = mergeFeePages(page, nextPage);
+            pages++;
+          } catch (error) {
+            pageError = error;
+            break;
+          }
+        }
         result = {
           ...source,
-          source: await loadFees(owner, source.chainId, source.padId),
+          source: page,
+          pages,
+          ...(pageError ? { pageError } : {}),
         };
       } catch (error) {
         result = { ...source, error };

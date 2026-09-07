@@ -108,7 +108,7 @@ test("Long wallet launch reports all server settings and remains disabled by def
   });
 });
 
-test("fee readiness requires chain-specific escrow configuration", () => {
+test("fee readiness uses reviewed Robinhood defaults and still requires Base configuration", () => {
   const escrow = `0x${"1".repeat(40)}`;
   const codeHash = `0x${"2".repeat(64)}`;
   const env = {
@@ -122,8 +122,9 @@ test("fee readiness requires chain-specific escrow configuration", () => {
   assert.equal(feature(env, "o1_base_live_fees_and_claims").status, "missing_configuration");
   assert.equal(
     feature({ ...env, FEE_CONTRACTS_JSON: "{}" }, "o1_robinhood_claims").status,
-    "missing_configuration",
+    "needs_live_verification",
   );
+  assert.equal(feature({ ...env, ROBINHOOD_RPC: "" }, "o1_robinhood_claims").status, "missing_configuration");
 });
 
 test("Longbow readiness requires its own profile without enabling Long", () => {

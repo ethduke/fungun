@@ -4,7 +4,7 @@ import { readLongLiveConfig } from "./long-live.mjs";
 import { resolve } from "node:path";
 import { isAddress, isHex, size } from "viem";
 import { ServiceError } from "./errors.mjs";
-import { readFeeContracts } from "./fee-contracts.mjs";
+import { readRuntimeFeeContracts } from "./o1-fee-profiles.mjs";
 
 export function readConfig(env = process.env) {
   const { O1_API_KEY: o1Key = "" } = env;
@@ -75,7 +75,7 @@ export function readConfig(env = process.env) {
     rpcBatchRequests: rpcBatchRequests !== "false",
     feesEnabled: env.READ_FEES === "true",
     claimsEnabled: env.WALLET_CLAIMS === "true",
-    feeContracts: readFeeContracts(env.FEE_CONTRACTS_JSON || undefined),
+    feeContracts: readRuntimeFeeContracts(env.FEE_CONTRACTS_JSON || undefined),
     registry,
     codeHash,
     longQuotes: new Set(longLaunch ? longLaunch.profile.quotes.map(q => q.token.address) : longQuotes.map((value) => value.toLowerCase())),

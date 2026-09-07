@@ -21,14 +21,14 @@ export function disabledClaimMessage(position: FeePosition) {
     case 'claims_disabled':
       return 'Claims are not enabled yet.';
     case 'contract_unverified':
-      return 'Contract verification is required before claiming.';
+      return 'These fees are not available to claim here yet.';
     case 'gas_oracle_not_configured':
       return 'Gas costs cannot be estimated yet.';
     case 'nothing_to_claim':
       return 'No fees to claim.';
     default:
       if (position.verification === 'indexed')
-        return 'Contract verification is required before claiming.';
+        return 'These fees are not available to claim here yet.';
       if (!position.payouts.some((payout) => BigInt(payout.claimableRaw) > 0n))
         return 'No fees to claim.';
       return 'Claims are not available for this position yet.';

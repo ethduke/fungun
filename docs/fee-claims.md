@@ -13,7 +13,8 @@ are not retried. A 20-second operation deadline stops queued work and further re
 before the web proxy times out. Exhausted failures remain cached for at least
 15 seconds, so an immediate Refresh may show the same error.
 The page groups payout balances into one card per launchpad, with one Claim all
-action per card. Check more reads one bounded page. Previously found positions
+action per card. O1 automatically follows its wallet-index pages to completion,
+with at most 512 pages and no polling. Long and Longbow's Check more reads one bounded page. Previously found positions
 remain visible after a failed continuation. Switching accounts or disconnecting
 discards old work and clears displayed fees.
 
@@ -28,6 +29,8 @@ discards old work and clears displayed fees.
 - O1 / Robinhood and Base: resumable wallet-index pages with eight positions per
   page, including historical indexed positions. Every position in an approved
   escrow profile receives a live `owed` read; there is no four-position live cap.
+  All five published Robinhood suites have reviewed runtime defaults, including
+  the three early standard-launch escrows; see [verification evidence](o1-fee-verification.md).
   Identical escrow/recipient/currency positions are deduplicated, never summed.
   Unapproved or incompatible escrows remain indexed and cannot be claimed here.
 - O1 claims support reviewed current and legacy escrow profiles on both chains. Base
@@ -55,7 +58,7 @@ Run `npm run runtime:status` from the running worktree to identify missing
 settings and disabled switches without printing their values. The Fees page
 distinguishes a disabled fee service, missing provider setup and missing contract
 setup from wallet connection. Positions with disabled claims explain whether
-claims need enabling, contract verification, Base gas estimation configuration,
+claims need enabling, are unavailable here, need Base gas estimation configuration,
 or a positive fee balance. Restart the API after changing runtime settings, then
 use Refresh in the connected wallet's Fees page.
 
@@ -64,7 +67,10 @@ Use server-only `O1_API_KEY`, `ROBINHOOD_RPC` (or its existing alias), and
 stalls JSON-RPC batches. This sends the same bounded read methods individually,
 with at most two workers and the same quota accounting. The default retains batch
 requests. Bounded transport retries apply only to fee discovery and preparation;
-wallet transactions are never retried. `FEE_CONTRACTS_JSON` has this shape; the placeholders below are
+wallet transactions are never retried. The interface labels earnings as Creator fees
+(Reported creator fees for index-only amounts), omits the ambiguous Partial badge,
+and shows scan progress or remaining coverage in plain language.
+`FEE_CONTRACTS_JSON` has this shape; the placeholders below are
 intentionally invalid and cannot enable claims:
 
 ```json
@@ -97,7 +103,9 @@ For Longbow, add a separate `longbow` section with the same locked-pool schema a
 manager/hook code pins must agree, and pools cannot be duplicated across profiles.
 Other Longbow routes are not enabled by a default-route profile.
 
-Omit unconfigured sections. Native currency uses the runtime zero address, ETH/18;
+Omit unconfigured sections. The five reviewed Robinhood O1 profiles are supplied
+by the API; explicit profiles override the matching chain/address default.
+Native currency uses the runtime zero address, ETH/18;
 wrapped ETH is distinct. Verify actual pool fee, spacing and token decimals—example
 numbers are not deployment configuration. Pool IDs are computed from the full key.
 O1 supports up to 32 reviewed profiles, unique by chain and escrow address.
