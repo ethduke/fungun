@@ -9,17 +9,17 @@ import { o1Metadata } from '../../web/lib/long-encoding/o1-metadata.mjs';
 import { ipfsContentId, prepareLongIpfsAssets } from './ipfs-content.mjs';
 
 const zero = testHex(0n, { size: 20 });
-async function fixture(t) {
+async function fixture(t, chainId = 4663) {
   const db = new DatabaseSync(':memory:'); t.after(() => db.close());
   const image = await sharp({ create: { width: 16, height: 16, channels: 3, background: '#123456' } }).webp().toBuffer();
   const draft = { name: 'Sample', ticker: 'SAMPLE', description: 'Test artwork' };
   const assets = await prepareLongIpfsAssets(image, draft), expected = o1Metadata(draft, assets.image.cid);
-  const input = { wallet: testHex(1n, { size: 20 }), pairId: 'native', draft, editableMetadata: true,
+  const input = { chainId, wallet: testHex(1n, { size: 20 }), pairId: 'native', draft, editableMetadata: true,
     publication: { id: 'a'.repeat(48), imageHash: assets.image.sha256, metadataHash: assets.metadata.sha256 } };
   const publication = { imageUrl: `https://source.mypinata.cloud/ipfs/${assets.image.cid}`,
     ipfs: { imageCid: assets.image.cid, metadataCid: assets.metadata.cid } };
   const calls = [], reads = [], change = {};
-  const result = { chain_id: 4663, actor: input.wallet, metadata_uri: expected.uri,
+  const result = { chain_id: chainId, actor: input.wallet, metadata_uri: expected.uri,
     image_url: `https://o1.mypinata.cloud/ipfs/${assets.image.cid}` };
   const upstream = { json: async (provider, url, options) => {
     calls.push({ provider, url, ...options });
@@ -150,4 +150,17 @@ void test('O1 launch preparation puts the verified native URI in calldata and re
   f.db.prepare("UPDATE long_launches SET state='submitted',tx_hash=? WHERE id=?").run(keccak256('0x03'), plan.id);
   assert.ok((await live.prepare(f.input)).recovery);
   assert.equal(f.calls.length, 1);
+});
+
+
+void test('Base metadata publication uses the selected chain and rejects a Robinhood response', async t => {
+  const f = await fixture(t, 8453);
+  f.change.result = { chain_id: 4663 };
+  await assert.rejects(f.publisher().prepare('base-intent', f.input, f.publication, zero), { code: 'o1_metadata_unverified' });
+  assert.equal(JSON.parse(f.calls[0].body).chain_id, 8453);
+  delete f.change.result;
+  const result = await f.publisher().prepare('base-intent', f.input, f.publication, zero);
+  assert.equal(result.metadataUri, f.expected.uri);
+  assert.equal(f.calls[0].headers['Idempotency-Key'], f.calls[1].headers['Idempotency-Key']);
+  await assert.rejects(f.publisher().prepare('base-intent', { ...f.input, chainId: 4663 }, f.publication, zero));
 });

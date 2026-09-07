@@ -1,7 +1,7 @@
 # Fungun
 
-A noncustodial launchpad composer for Long, O1 and Longbow on Robinhood Chain.
-Base is temporarily paused in the webview.
+A noncustodial launchpad composer for Long, O1 and Longbow on Robinhood Chain,
+and O1 on Base.
 
 ```sh
 npm run setup
@@ -27,8 +27,10 @@ resumable pages and queues all eligible claims for individual wallet confirmatio
 see [fee setup and coverage](docs/fee-claims.md).
 USDG/x402 image generation is implemented and defaults to disabled until its runtime
 settings are configured; see [image setup and recovery](docs/image-generation.md).
-Drafts, images and published metadata survive reloads. Launch transactions remain
-disabled pending their existing verification work. Telegram is out of scope.
+Drafts, images and published metadata survive reloads. Configured launch services
+prepare verified unsigned transactions for the connected wallet. Base O1 supports
+ETH and registered stock pairings; see [Base launch setup](docs/o1-base-launch.md).
+Telegram is out of scope.
 
 ## Agent documentation
 

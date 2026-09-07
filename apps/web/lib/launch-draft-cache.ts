@@ -236,9 +236,9 @@ export async function draftArtworkKey(
 
 /** Content identity survives object-URL changes and isolates accounts and launch destinations. */
 export async function launchRecoveryScope(wallet: string, pairId: string,
-  draft: Pick<LaunchDraft, 'name' | 'ticker' | 'description'>, image: Blob) {
+  draft: Pick<LaunchDraft, 'name' | 'ticker' | 'description'>, image: Blob, chainId: ChainId = 4663) {
   return sha256(new TextEncoder().encode(JSON.stringify([
-    4663, wallet.toLowerCase(), pairId, await draftArtworkKey(draft, image),
+    chainId, wallet.toLowerCase(), pairId, await draftArtworkKey(draft, image),
   ])));
 }
 

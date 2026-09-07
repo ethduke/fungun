@@ -186,7 +186,7 @@ await test('inline launch status revalidates chain and launchpad selections', ()
   ];
   assert.equal(
     draftStatus(validateDraft(draft, base, 8453), false),
-    'incomplete',
+    'complete',
   );
   assert.equal(
     draftStatus(validateDraft(draft, base, 4663), false),
@@ -265,32 +265,29 @@ await test('Robinhood is the default chain with all three launchpads available',
   );
 });
 
-await test('paused Base selection preserves the current Robinhood draft', () => {
+await test('Base selects O1 and resets chain-specific quote addresses', () => {
   const before = destinations().map((pad) => ({ ...pad, selected: pad.id !== 'longbow' }));
   before[1].route = 'rwa';
-  const pair = O1_ROBINHOOD_PAIRS.find((pair) => pair.symbol === 'AAPL')!;
-  before[1].pairId = pair.id;
+  before[1].pairId = O1_ROBINHOOD_PAIRS.find((pair) => pair.symbol === 'AAPL')!.id;
   const after = selectChain(before, 8453);
-  assert.equal(isWebviewChain(8453), false);
+  assert.equal(isWebviewChain(8453), true);
   assert.equal(isWebviewChain(4663), true);
-  assert.deepEqual(after, before);
-  assert.notEqual(after, before);
-  assert.deepEqual(validateDraft(draft, after, 4663, {
-    chainId: 4663,
-    expiresAt: performance.now() + 1000,
-    pads: { o1: { status: 'ready', pairs: [pair] } },
-  }), {});
+  assert.deepEqual(after.filter(pad => pad.selected).map(pad => pad.id), ['o1']);
+  assert.equal(after[1].chainId, 8453);
+  assert.equal(after[1].pairId, 'native');
+  assert.equal(after[1].route, 'standard');
+  assert.equal(before[1].route, 'rwa');
+  assert.deepEqual(validateDraft(draft, after, 8453), {});
+  assert.equal(selectChain(destinations(), 8453)[1].selected, true);
 });
 
-await test('stale Base destinations fail validation with or without a chain filter', () => {
+await test('Base O1 is valid only with a matching chain selection', () => {
   const base: Destination[] = [
     { ...DEFAULT_DESTINATIONS[1], selected: true, chainId: 8453 },
   ];
-  for (const chainId of [undefined, 4663, 8453] as const)
-    assert.equal(
-      validateDraft(draft, base, chainId).destinations,
-      'Base is paused. Choose Robinhood Chain.',
-    );
+  assert.deepEqual(validateDraft(draft, base), {});
+  assert.deepEqual(validateDraft(draft, base, 8453), {});
+  assert.ok(validateDraft(draft, base, 4663).destinations);
   assert.ok(validateDraft(draft, destinations(), 8453).destinations);
   const recovered = selectChain(base, 4663);
   assert.equal(recovered[0].chainId, 4663);

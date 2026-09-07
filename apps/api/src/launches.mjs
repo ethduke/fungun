@@ -10,11 +10,14 @@ export class Launches {
       long: new LongLive(config, upstream, budget),
       longbow: new LongLive({ ...config, longLaunch: config.longbowLaunch }, upstream, budget),
       o1: new O1Live(config, upstream, budget),
+      o1Base: new O1Live({ ...config, o1Launch: config.o1BaseLaunch }, upstream, budget),
     };
   }
   run(kind, input) {
     const saved = input?.id && this.db.prepare('SELECT context FROM long_launches WHERE id=?').get(input.id);
-    const pair = saved ? JSON.parse(saved.context).pairId : input?.pairId;
-    return this.budget.withLaunch(() => this.handlers[launchpadForPair(pair)].run(kind, input));
+    const context = saved ? JSON.parse(saved.context) : input;
+    const pad = launchpadForPair(context?.pairId);
+    const handler = pad === 'o1' && context?.chainId === 8453 ? this.handlers.o1Base : this.handlers[pad];
+    return this.budget.withLaunch(() => handler.run(kind, input));
   }
 }

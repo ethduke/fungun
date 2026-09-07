@@ -169,7 +169,7 @@ void test('insufficient funds retains exact balance, required budget and shortfa
   await assert.rejects(launchRequest('launch-prepare', {}), error => {
     assert.equal(launchMessage(error), 'You have 0.0002 ETH on Robinhood Chain. This launch needs 0.0012 ETH including the gas buffer; add 0.001 ETH.');return true;
   });
-  for(const change of [{chainId:8453},{balanceWei:'secret'},{requiredWei:'-1'},{shortfallWei:'1'},{basis:'unknown'},{unexpectedField:'must not appear'}]) {
+  for(const change of [{chainId:1},{balanceWei:'secret'},{requiredWei:'-1'},{shortfallWei:'1'},{basis:'unknown'},{unexpectedField:'must not appear'}]) {
     const error = new LaunchError('insufficient_funds',0,{...funding,...change});
     assert.equal(error.funding,undefined);assert.equal(launchMessage(error).includes('secret'),false);
   }

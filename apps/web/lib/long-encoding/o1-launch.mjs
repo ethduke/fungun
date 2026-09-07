@@ -20,20 +20,41 @@ export const O1_LAUNCH_ABI = parseAbi([
   'event Launched(address indexed token,bytes32 indexed poolId,address indexed originalCreator,address quoteToken,uint256 launchSupply,int24 tickSpacing)',
 ]);
 const roles = ['launcher', 'tokenDeployer', 'hook', 'feeEscrow', 'announcementRegistry'];
+const baseRoles = ['launcher', 'launchTokenValidator', 'hook', 'feeEscrow', 'announcementRegistry'];
+// Base protocol precompiles, not launchpad deployment addresses.
+export const B20_FACTORY = toHex(0xb20fn << 144n, { size: 20 });
+export const B20_ACTIVATION = toHex((0x8453n << 144n) | 1n, { size: 20 });
+export const O1_BASE_ABI = parseAbi([
+  'function launchTokenValidator() view returns (address)',
+  'function getB20Address(uint8 variant,address sender,bytes32 salt) view returns (address)',
+  'function isB20Initialized(address token) view returns (bool)',
+  'function isActivated(bytes32 feature) view returns (bool)',
+  'function validate(address token,address creator,address factory,address hook,uint256 supply,bool metadataEditable) view',
+]);
+export const o1LaunchRoles = chainId => chainId === 8453 ? baseRoles : roles;
+export const isB20Asset = address => typeof address === 'string' && /^0xb200000000000000000000[a-f0-9]{18}$/i.test(address);
+export function predictO1B20Address(factory, scopedSalt) {
+  const digest = keccak256(encodeAbiParameters([{ type: 'address' }, { type: 'bytes32' }], [factory, scopedSalt]));
+  return `0xb200000000000000000000${digest.slice(2, 20)}`;
+}
 const hash = value => typeof value === 'string' && /^0x[a-f0-9]{64}$/i.test(value) && !/^0x0+$/.test(value);
 const contract = value => value && Object.keys(value).sort().join(',') === 'address,codeHash'
   && isAddress(value.address) && value.address.toLowerCase() !== zeroAddress && hash(value.codeHash);
 const reject = () => { throw new ServiceError('invalid_o1_launch', 400); };
 export function readO1LaunchProfile(value) {
-  if (!value || value.chainId !== 4663 || value.launchpad !== 'o1'
-    || Object.keys(value).sort().join(',') !== ['chainId', 'launchpad', ...roles, 'quotes'].sort().join(',')
-    || roles.some(role => !contract(value[role])) || !Array.isArray(value.quotes) || !value.quotes.length || value.quotes.length > 513
-    || value.quotes.some(q => !q || Object.keys(q).sort().join(',') !== 'decimals,id,token' || ![6, 18].includes(q.decimals)
-      || (q.id === 'native' ? q.token !== null : !/^(?:rwa-[a-f0-9]{24}|crypto-USDG)$/.test(q.id) || !contract(q.token)))
+  const selectedRoles = o1LaunchRoles(value?.chainId);
+  const base = value?.chainId === 8453;
+  const quoteToken = token => base ? token && Object.keys(token).join(',') === 'address' && isB20Asset(token.address) : contract(token);
+  if (!value || ![4663, 8453].includes(value.chainId) || value.launchpad !== 'o1'
+    || Object.keys(value).sort().join(',') !== ['chainId', 'launchpad', ...selectedRoles, 'quotes'].sort().join(',')
+    || selectedRoles.some(role => !contract(value[role])) || !Array.isArray(value.quotes) || !value.quotes.length || value.quotes.length > 513
+    || value.quotes.some(q => !q || Object.keys(q).sort().join(',') !== 'decimals,id,token' || !(base ? [8, 18] : [6, 18]).includes(q.decimals)
+      || (q.id === 'native' ? q.token !== null || q.decimals !== 18 : !(base ? /^rwa-[a-f0-9]{24}$/ : /^(?:rwa-[a-f0-9]{24}|crypto-USDG)$/).test(q.id) || !quoteToken(q.token)))
+    || (base && value.quotes.some(q => q.token && q.id !== `rwa-${sha256(toBytes(`8453:${q.token.address.toLowerCase()}`)).slice(2, 26)}`))
     || new Set(value.quotes.map(q => q.id)).size !== value.quotes.length) reject();
-  return { chainId: 4663, launchpad: 'o1',
-    ...Object.fromEntries(roles.map(role => [role, { address: value[role].address.toLowerCase(), codeHash: value[role].codeHash.toLowerCase() }])),
-    quotes: value.quotes.map(q => ({ id: q.id, decimals: q.decimals, token: q.token ? { address: q.token.address.toLowerCase(), codeHash: q.token.codeHash.toLowerCase() } : null })) };
+  return { chainId: value.chainId, launchpad: 'o1',
+    ...Object.fromEntries(selectedRoles.map(role => [role, { address: value[role].address.toLowerCase(), codeHash: value[role].codeHash.toLowerCase() }])),
+    quotes: value.quotes.map(q => ({ id: q.id, decimals: q.decimals, token: q.token ? { address: q.token.address.toLowerCase(), ...(!base ? { codeHash: q.token.codeHash.toLowerCase() } : {}) } : null })) };
 }
 export function o1Params(input, quote, creatorSalt = toHex(0n, { size: 32 })) {
   const draft = normalizeLaunchDetails(input.draft);
@@ -45,7 +66,7 @@ export function o1Params(input, quote, creatorSalt = toHex(0n, { size: 32 })) {
 }
 export function buildUnsignedO1Launch(input, configuredProfile, saltAttempt) {
   const profile = readO1LaunchProfile(configuredProfile), quote = profile.quotes.find(q => q.id === input.pairId);
-  if (!quote || !isAddress(input.wallet) || input.wallet.toLowerCase() === zeroAddress || !hash(input.initCodeHash)
+  if (!quote || !isAddress(input.wallet) || input.wallet.toLowerCase() === zeroAddress || (profile.chainId === 4663 && !hash(input.initCodeHash))
     || !/^[a-f0-9]{64}$/.test(input.intentId) || !/^\d{1,20}$/.test(input.configVersion)
     || BigInt(input.configVersion) < 1n || !Number.isSafeInteger(input.chainDeadline) || input.chainDeadline < 1
     || !/^\d{1,31}$/.test(input.totalSupply) || BigInt(input.totalSupply) < 10n ** 24n || BigInt(input.totalSupply) > 10n ** 30n
@@ -57,7 +78,8 @@ export function buildUnsignedO1Launch(input, configuredProfile, saltAttempt) {
   for (let attempt = first; attempt < last; attempt++) {
     const creatorSalt = `0x${binding.slice(0, 56)}${attempt.toString(16).padStart(8, '0')}`;
     const salt = keccak256(encodeAbiParameters([{ type: 'address' }, { type: 'bytes32' }], [input.wallet, creatorSalt]));
-    const predictedAsset = getCreate2Address({ from: profile.tokenDeployer.address, salt, bytecodeHash: input.initCodeHash }).toLowerCase();
+    const predictedAsset = profile.chainId === 8453 ? predictO1B20Address(profile.launcher.address, salt)
+      : getCreate2Address({ from: profile.tokenDeployer.address, salt, bytecodeHash: input.initCodeHash }).toLowerCase();
     if (!predictedAsset.endsWith('01')) continue;
     return { binding, predictedAsset, saltAttempt: attempt, profile,
       transaction: { from: input.wallet.toLowerCase(), to: profile.launcher.address,

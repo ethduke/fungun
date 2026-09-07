@@ -4,6 +4,7 @@ import {
   apiEnvironment,
   API_RUNTIME_NAMES,
   LONG_WALLET_LAUNCH_RUNTIME_NAMES,
+  O1_WALLET_LAUNCH_RUNTIME_NAMES,
 } from "./runtime-env.mjs";
 
 test("API receives only its explicit runtime configuration", () => {
@@ -86,4 +87,12 @@ test("all four Long wallet launch settings stay API-only and are forwarded toget
       LONG_WALLET_LAUNCH_RUNTIME_NAMES.map((name) => [name, `${name}-VALUE`]),
     ),
   );
+});
+
+
+test("O1 launch settings for both chains remain API-only", () => {
+  const expected = ["O1_WALLET_LAUNCH", "O1_LAUNCH_PROFILE_JSON", "O1_LAUNCH_TOKENS_JSON", "O1_BASE_WALLET_LAUNCH", "O1_BASE_LAUNCH_PROFILE_JSON"];
+  assert.deepEqual(O1_WALLET_LAUNCH_RUNTIME_NAMES, expected);
+  const local = Object.fromEntries(expected.map(name => [name, "EXAMPLE"]));
+  assert.deepEqual(apiEnvironment({}, { ...local, NEXT_PUBLIC_O1_BASE_LAUNCH_PROFILE_JSON: "LEAK" }), local);
 });

@@ -501,8 +501,8 @@ export default function Home() {
                     Robinhood
                   </label>
                   <label className="chain-choice" htmlFor="chain-base">
-                    <RadioGroupItem id="chain-base" value="8453" disabled />
-                    Base (paused)
+                    <RadioGroupItem id="chain-base" value="8453" />
+                    Base
                   </label>
                 </RadioGroup>
                 {destinations
@@ -517,9 +517,9 @@ export default function Home() {
                       onPairingOpen={reads.ensureCatalog}
                     />
                   ))}
-                <p className="launch-disclosure">
+                {chainId === 4663 && <p className="launch-disclosure">
                   Long and Longbow share a 24-hour ticker reservation. Choose one; selecting the other switches your choice.
-                </p>
+                </p>}
                 {errors.destinations && (
                   <p role="alert" className="field-error">
                     {errors.destinations}
@@ -558,7 +558,7 @@ export default function Home() {
                   key={JSON.stringify([chainId, account.address?.toLowerCase(), name, ticker, description, image?.url,
                     active.map(pad => [pad.id, pad.pairId, pad.editableMetadata])])}
                   destinations={active}
-                  enabled={chainId === 4663}
+                  enabled={isWebviewChain(chainId)}
                   ready={!imagePending && !Object.keys(errors).length}
                   tickerReserved={tickerReserved}
                   name={name} ticker={ticker} description={description} image={image}

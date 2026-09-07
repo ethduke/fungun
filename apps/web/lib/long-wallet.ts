@@ -4,24 +4,26 @@ import { LONG_SALT_ATTEMPTS, isCanonicalLongAsset } from './long-encoding/long-s
 import { assetDraft, assetWallet, type AssetDraft, type PublishedAsset } from './asset-protocol.ts';
 import { parseLaunchFunding, fundingMessage, type LaunchFunding } from './launch-funding.ts';
 import { parseLaunchFeeSource, type LaunchFeeSource } from './launch-fee-source.ts';
+import type { ChainId } from './launch-model.ts';
 import { isOutdatedPage } from './page-version.ts';
 import { buildUnsignedO1Launch, readO1LaunchProfile } from './long-encoding/o1-launch.mjs';
 import { o1Metadata } from './long-encoding/o1-metadata.mjs';
 
 export type O1BuildInput = { wallet: string; draft: AssetDraft; pairId: string; metadataUri: string; editableMetadata: boolean;
-  configVersion: string; chainDeadline: number; totalSupply: string; launchpadFeeWei: string; intentId: string; initCodeHash: string };
+  configVersion: string; chainDeadline: number; totalSupply: string; launchpadFeeWei: string; intentId: string; initCodeHash?: string };
 export const launchpadForPair = (pairId: string = ''): 'long' | 'longbow' | 'o1' =>
   pairId.startsWith('longbow-') ? 'longbow' : pairId.startsWith('long-') ? 'long' : 'o1';
 export const isEnabledLaunchPair = (pairId: string | undefined): pairId is string =>
   typeof pairId === 'string' && /^(?:(?:long|longbow)-[A-Z0-9._-]{1,24}|rwa-[a-f0-9]{24}|native|crypto-USDG)$/.test(pairId);
 
-export type LaunchInput = { chainId: 4663; wallet: string; draft: AssetDraft; pairId: string;
+export type LaunchInput = { chainId: ChainId; wallet: string; draft: AssetDraft; pairId: string;
   publication: { id: string; imageHash: string; metadataHash: string }; editableMetadata?: boolean };
 export type LongPlan = {
-  id: string; binding: string; chainId: 4663; quotedAt: number; expiresAt: number; deadline: number;
-  transaction: { chainId: '0x1237'; from: string; to: string; data: `0x${string}`; value: `0x${string}`; nonce: `0x${string}`; gas: `0x${string}`; gasPrice: `0x${string}` };
+  id: string; binding: string; chainId: ChainId; quotedAt: number; expiresAt: number; deadline: number;
+  transaction: { chainId: '0x1237' | '0x2105'; from: string; to: string; data: `0x${string}`; value: `0x${string}`; nonce: `0x${string}`; gas: `0x${string}`; gasPrice: `0x${string}` };
   profile: (ReturnType<typeof readLongLaunchProfile> | ReturnType<typeof readO1LaunchProfile>) & { launcher: { address: string; codeHash: string }; launchpad?: string }; startingTick?: number; intentId?: string; buildInput?: O1BuildInput;
   predictedAsset: string; saltAttempt: number; predictedPool: string; review: ReturnType<typeof buildUnsignedLongLaunch>['review'];
+  baseFees?: { l1DataFeeWei: string; operatorFeeWei: string };
   estimatedGas: string; maximumGasWei: string; launchpadFeeWei: string;
   launchFeeSource: LaunchFeeSource;
   usd: { microUsdPerEth: string; sourceLabel: string; quotedAt: number };
@@ -79,13 +81,13 @@ export function launchMessage(error: unknown) {
     oracle_stale: 'The stock price is paused or out of date. Wait for a fresh market price before launching.',
     contract_unverified: 'A launch contract or price feed changed. Launching is paused for review.',
     ticker_reserved: 'This ticker is reserved. Choose another ticker.',
-    insufficient_funds: 'Your wallet needs more ETH on Robinhood Chain for gas.',
+    insufficient_funds: 'Your wallet needs more ETH on the selected network for this launch.',
     launch_gas_limit: 'Gas is above the launch limit. Wait for fees to fall and refresh the estimate.',
     launch_pending: 'Your launch is being checked automatically.',
     launch_context_locked: 'Coin details changed while preparing. Launch again with the current details.',
     quote_expired: 'The gas estimate expired. Refresh it before opening your wallet.',
     wrong_account: 'The connected account changed. Restore the account used for this launch.',
-    wrong_chain: 'Switch your wallet to Robinhood Chain before continuing.',
+    wrong_chain: 'Switch your wallet to the selected launch network before continuing.',
     launch_eoa_required: 'This launch currently supports ordinary wallet accounts only.',
     busy: 'Another launch check is running. Try again shortly.',
     reverted: 'The launch simulation failed. No transaction was sent. Refresh the ticker and estimate.',
@@ -104,7 +106,7 @@ const same = (a: unknown, b: unknown) => typeof a === 'string' && typeof b === '
 const assert = (ok: unknown) => { if (!ok) throw new LaunchError('launch_transaction_changed'); };
 export function validateLongPlan(raw: unknown, input: LaunchInput, published: PublishedAsset, started: number, now = performance.now()): LongPlan {
   const p = raw as LongPlan & { serverTime: number };
-  assert(p && p.chainId === 4663 && /^[a-f0-9]{64}$/.test(p.id) && /^[a-f0-9]{64}$/.test(p.binding));
+  assert(p && [4663, 8453].includes(input.chainId) && p.chainId === input.chainId && p.profile?.chainId === input.chainId && /^[a-f0-9]{64}$/.test(p.id) && /^[a-f0-9]{64}$/.test(p.binding));
   assert([p.quotedAt, p.expiresAt, p.serverTime].every(Number.isSafeInteger) && p.expiresAt - p.quotedAt === 30000
     && p.serverTime >= p.quotedAt && p.serverTime < p.expiresAt && published.ipfs);
   const deadline = started + p.expiresAt - p.serverTime;
@@ -120,7 +122,7 @@ export function validateLongPlan(raw: unknown, input: LaunchInput, published: Pu
       && buildInput.chainDeadline * 1000 > p.expiresAt && buildInput.chainDeadline * 1000 <= p.serverTime + 1800000);
     rebuilt = buildUnsignedO1Launch(buildInput, p.profile, p.saltAttempt);
   } else {
-    assert(Number.isInteger(p.saltAttempt) && p.saltAttempt >= 0 && p.saltAttempt < LONG_SALT_ATTEMPTS
+    assert(input.chainId === 4663 && Number.isInteger(p.saltAttempt) && p.saltAttempt >= 0 && p.saltAttempt < LONG_SALT_ATTEMPTS
       && isCanonicalLongAsset(p.predictedAsset));
     rebuilt = buildUnsignedLongLaunch({ chainId: 4663, wallet: assetWallet(input.wallet), draft: inputDraft,
       pairId: input.pairId, metadataUri: `ipfs://${published.ipfs!.metadataCid}`, startingTick: p.startingTick, intentId: p.intentId }, p.profile, undefined, p.saltAttempt);
@@ -134,12 +136,18 @@ export function validateLongPlan(raw: unknown, input: LaunchInput, published: Pu
   catch { throw new LaunchError('contract_unverified'); }
   assert(same(feeSource.contract, p.profile.launcher.address) && feeSource.amountWei === p.launchpadFeeWei);
   assert(tx && Object.keys(tx).sort().join(',') === 'chainId,data,from,gas,gasPrice,nonce,to,value'
-    && tx.chainId === '0x1237' && hex(tx.value) && BigInt(tx.value) === BigInt(rebuilt.transaction.value) && same(tx.from, input.wallet)
+    && tx.chainId === (input.chainId === 8453 ? '0x2105' : '0x1237') && hex(tx.value) && BigInt(tx.value) === BigInt(rebuilt.transaction.value) && same(tx.from, input.wallet)
     && same(tx.to, rebuilt.transaction.to) && tx.data === rebuilt.transaction.data
     && [tx.gas, tx.gasPrice, tx.nonce].every(hex));
+  let extraGas = 0n;
+  if (input.chainId === 8453) {
+    assert(o1 && p.baseFees && Object.keys(p.baseFees).sort().join(',') === 'l1DataFeeWei,operatorFeeWei'
+      && [p.baseFees.l1DataFeeWei, p.baseFees.operatorFeeWei].every(v => typeof v === 'string' && /^(0|[1-9][0-9]{0,16})$/.test(v)));
+    extraGas = BigInt(p.baseFees!.l1DataFeeWei) + BigInt(p.baseFees!.operatorFeeWei);
+  } else assert(p.baseFees === undefined);
   const estimate = BigInt(p.estimatedGas), gas = BigInt(tx.gas), price = BigInt(tx.gasPrice);
   assert(estimate >= 21000n && gas === (estimate * 120n + 99n) / 100n && gas <= (o1 ? 8000000n : 3000000n) && price > 0n
-    && price <= 10n ** 12n && gas * price <= 5n * 10n ** 16n && p.maximumGasWei === String(gas * price) && BigInt(tx.value) === BigInt(p.launchpadFeeWei) && (!o1 ? p.launchpadFeeWei === '0' : gas * price + BigInt(tx.value) <= 5n * 10n ** 16n));
+    && price <= 10n ** 12n && gas * price <= 5n * 10n ** 16n && p.maximumGasWei === String(gas * price + extraGas) && BigInt(tx.value) === BigInt(p.launchpadFeeWei) && (!o1 ? p.launchpadFeeWei === '0' : gas * price + extraGas + BigInt(tx.value) <= 5n * 10n ** 16n));
   assert(p.usd?.sourceLabel === 'Coinbase ETH/USD spot' && /^\d{1,12}$/.test(p.usd.microUsdPerEth)
     && BigInt(p.usd.microUsdPerEth) > 0n && Number.isSafeInteger(p.usd.quotedAt)
     && p.usd.quotedAt <= p.serverTime && p.serverTime - p.usd.quotedAt < 60000);
@@ -160,7 +168,7 @@ export async function sendLongWallet(provider: EIP1193Provider, plan: LongPlan, 
     const accounts = await provider.request({ method: 'eth_accounts' });
     const chain = await provider.request({ method: 'eth_chainId' });
     if (!same(accounts[0], plan.transaction.from)) throw new LaunchError('wrong_account');
-    if (BigInt(chain) !== 4663n) throw new LaunchError('wrong_chain');
+    if (BigInt(chain) !== BigInt(plan.chainId)) throw new LaunchError('wrong_chain');
     if (!isCurrent() || performance.now() >= plan.deadline) throw new LaunchError('quote_expired');
   };
   const tx = plan.transaction;
@@ -173,8 +181,8 @@ export async function sendLongWallet(provider: EIP1193Provider, plan: LongPlan, 
   const balanceRaw = await provider.request({ method: 'eth_getBalance', params: [tx.from as `0x${string}`, 'pending'] });
   await check();
   if (typeof balanceRaw !== 'string' || !/^0x[0-9a-f]{1,64}$/i.test(balanceRaw)) throw new LaunchError('unavailable');
-  const balance = BigInt(balanceRaw), required = BigInt(tx.gas) * BigInt(tx.gasPrice) + BigInt(tx.value);
-  if (balance < required) throw new LaunchError('insufficient_funds', 0, { chainId:4663,
+  const balance = BigInt(balanceRaw), required = BigInt(plan.maximumGasWei) + BigInt(tx.value);
+  if (balance < required) throw new LaunchError('insufficient_funds', 0, { chainId:plan.chainId,
     balanceWei:String(balance), requiredWei:String(required), shortfallWei:String(required-balance), basis:'simulation' });
   await reserve();
   await check();

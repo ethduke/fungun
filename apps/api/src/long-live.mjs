@@ -44,12 +44,12 @@ const call = (address, functionName, args = []) => ({ address, abi: LONG_STATE_A
 
 export function validateLongInput(kind, value) {
   if (kind === "launch-estimate") {
-    if (!exact(value, ["chainId", "pairId"]) || value.chainId !== 4663
+    if (!exact(value, ["chainId", "pairId"]) || (![4663, 8453].includes(value.chainId) || (value.chainId === 8453 && !/^(?:native|rwa-[a-f0-9]{24})$/.test(value.pairId)))
       || typeof value.pairId !== "string" || !/^(?:(?:long|longbow)-[A-Z0-9._-]{1,24}|rwa-[a-f0-9]{24}|native|crypto-USDG)$/.test(value.pairId)) fail("invalid_request", 400);
     return value;
   }
   if (kind === "launch-prepare") {
-    if (!exact(value, ["chainId", "wallet", "draft", "pairId", "publication", ...(Object.hasOwn(value ?? {}, "editableMetadata") ? ["editableMetadata"] : [])]) || value.chainId !== 4663
+    if (!exact(value, ["chainId", "wallet", "draft", "pairId", "publication", ...(Object.hasOwn(value ?? {}, "editableMetadata") ? ["editableMetadata"] : [])]) || (![4663, 8453].includes(value.chainId) || (value.chainId === 8453 && !/^(?:native|rwa-[a-f0-9]{24})$/.test(value.pairId)))
       || typeof value.wallet !== "string" || !isAddress(value.wallet) || same(value.wallet, zeroAddress)
       || typeof value.pairId !== "string" || !/^(?:(?:long|longbow)-[A-Z0-9._-]{1,24}|rwa-[a-f0-9]{24}|native|crypto-USDG)$/.test(value.pairId)
       || (value.editableMetadata !== undefined && (typeof value.editableMetadata !== "boolean" || value.pairId.startsWith("long")))
@@ -114,7 +114,8 @@ export class LongLive {
     this.config = config; this.live = config.longLaunch; this.upstream = upstream; this.budget = budget;
     this.db = budget.db; this.now = now; this.fetcher = fetcher;
     this.rpc = rpc ?? new LongRpc(config, upstream, now, { queue: true, parallel: true });
-    this.recovery = new LongRecovery(this.rpc);
+    this.chainId = this.live?.profile.chainId ?? 4663;
+    this.recovery = new LongRecovery(this.rpc, this.chainId);
     this.cache = new ReadCache(now, 32); this.active = false;
     this.miningNow = miningNow;
     // Additive table on the existing durable volume; never prune an attempted launch.
@@ -130,6 +131,7 @@ export class LongLive {
   async run(kind, raw) {
     const input = validateLongInput(kind, raw);
     if (!this.live || !this.config.readsEnabled) fail("long_launch_disabled", 503);
+    if (input.chainId !== undefined && input.chainId !== this.chainId) fail("wrong_chain", 400);
     if (kind === "launch-reserve") return this.reserve(input);
     if (kind === "launch-estimate") return withinReadDeadline(() => this.estimate(input));
     if (this.active) throw new ServiceError("busy", 429, 5);
@@ -416,6 +418,7 @@ export class LongLive {
   async status(input) {
     const row = this.row(input.id);
     if (!row) fail("launch_unknown");
+    if (JSON.parse(row.context).chainId !== this.chainId) fail("wrong_chain");
     if (row.tx_hash && input.hash && !same(row.tx_hash, input.hash)) fail("launch_transaction_changed");
     if (row.result) return JSON.parse(row.result);
     let hash = row.tx_hash ?? input.hash;
@@ -428,11 +431,11 @@ export class LongLive {
     }
     if (row.state === "prepared") fail("launch_unknown");
     return this.cache.get(`receipt:${input.id}:${hash}`, 10000, async () => {
-      const [chain, tx, receipt] = await this.rpc.batch(4663, [
+      const [chain, tx, receipt] = await this.rpc.batch(this.chainId, [
         { method: "eth_chainId", params: [] }, { method: "eth_getTransactionByHash", params: [hash] },
         { method: "eth_getTransactionReceipt", params: [hash] },
       ]);
-      if (rpcNumber(chain) !== 4663n) fail("wrong_chain");
+      if (rpcNumber(chain) !== BigInt(this.chainId)) fail("wrong_chain");
       if (!tx) return { id: input.id, status: "uncertain" };
       const plans = [JSON.parse(row.plan), ...this.db.prepare("SELECT plan FROM long_launch_attempts WHERE id=?").all(input.id).map((r) => JSON.parse(r.plan))];
       // Match the launch intent, not wallet-controlled fee settings. Extensions
@@ -448,23 +451,26 @@ export class LongLive {
       const expected = plan.transaction;
       if (!same(tx.hash, hash) || !same(tx.from, expected.from) || !same(tx.to, expected.to)
         || !same(tx.input, expected.data) || rpcNumber(tx.value) !== rpcNumber(expected.value) || rpcNumber(tx.nonce) !== rpcNumber(expected.nonce)
-        || rpcNumber(tx.chainId) !== 4663n) fail("launch_transaction_changed");
+        || rpcNumber(tx.chainId) !== BigInt(this.chainId)) fail("launch_transaction_changed");
       this.db.prepare("UPDATE long_launches SET tx_hash=?,state='submitted' WHERE id=? AND tx_hash IS NULL").run(hash, input.id);
       if (!receipt) return { id: input.id, status: "submitted", hash };
       if (!same(receipt.transactionHash, hash) || !same(receipt.from, expected.from) || !same(receipt.to, expected.to)
         || !same(receipt.blockHash, tx.blockHash) || receipt.blockNumber !== tx.blockNumber) fail("launch_receipt_unverified");
       const block = receipt.blockNumber;
-      const [header, head] = await this.rpc.batch(4663, [
+      const [header, head] = await this.rpc.batch(this.chainId, [
         { method: "eth_getBlockByNumber", params: [block, false] }, { method: "eth_blockNumber", params: [] },
       ]);
       if (!same(header?.hash, receipt.blockHash) || rpcNumber(head) < rpcNumber(block) + 12n)
         return { id: input.id, status: "confirming", hash };
-      const paid = rpcNumber(receipt.gasUsed) * rpcNumber(receipt.effectiveGasPrice);
+      const paid = await this.paidGas(receipt, block);
       if (rpcNumber(receipt.status) === 0n) return this.finish(input.id, { status: "failed", hash, paidGasWei: paid.toString() });
       if (rpcNumber(receipt.status) !== 1n || !Array.isArray(receipt.logs)) fail("launch_receipt_unverified");
       await this.confirm(plan, JSON.parse(row.context), receipt, block);
       return this.finish(input.id, { status: "confirmed", hash, paidGasWei: paid.toString(), asset: plan.predictedAsset });
     });
+  }
+  async paidGas(receipt, _block) {
+    return rpcNumber(receipt.gasUsed) * rpcNumber(receipt.effectiveGasPrice);
   }
   async confirm(plan, context, receipt, block) {
     const expected = plan.transaction;

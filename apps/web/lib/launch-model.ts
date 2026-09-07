@@ -77,8 +77,7 @@ export function autofillGrokPrompt(
 export const IMAGE_LIMIT = 2 * 1024 * 1024;
 export const DESCRIPTION_LIMIT = 2000;
 export const DEFAULT_CHAIN_ID: ChainId = 4663;
-// Base remains in the service models but is temporarily paused in the webview.
-export const ENABLED_WEBVIEW_CHAINS: readonly ChainId[] = [4663];
+export const ENABLED_WEBVIEW_CHAINS: readonly ChainId[] = [4663, 8453];
 export function isWebviewChain(chainId: number) {
   return ENABLED_WEBVIEW_CHAINS.includes(chainId as ChainId);
 }
@@ -224,7 +223,7 @@ export function validateDraft(
     (chainId !== undefined && !isWebviewChain(chainId)) ||
     active.some((pad) => !isWebviewChain(pad.chainId))
   )
-    errors.destinations = 'Base is paused. Choose Robinhood Chain.';
+    errors.destinations = 'Choose a supported launch network.';
   return errors;
 }
 

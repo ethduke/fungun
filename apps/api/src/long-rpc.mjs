@@ -18,13 +18,15 @@ export class LongRpc extends FeeRpc {
   async batch(chainId, calls) {
     if (!Array.isArray(calls)) throw new ServiceError("invalid_request", 400);
     if (!calls.some((c) => extra.has(c?.method))) return super.batch(chainId, calls);
-    if (chainId !== 4663 || calls.length < 1 || calls.length > 12 || !calls.every(validCall))
+    if (![4663, 8453].includes(chainId) || calls.length < 1 || calls.length > 12 || !calls.every(validCall))
       throw new ServiceError("invalid_request", 400);
     const output = [];
     for (const c of calls) {
       checkReadDeadline();
       if (!extra.has(c.method)) { output.push((await super.batch(chainId, [c]))[0]); continue; }
-      const body = await this.upstream.json("rpc", this.config.rpcUrl, {
+      const url = chainId === 8453 ? this.config.baseRpcUrl : this.config.rpcUrl;
+      if (!url) throw new ServiceError("not_configured");
+      const body = await this.upstream.json("rpc", url, {
         method: "POST", headers: { "content-type": "application/json" },
         body: JSON.stringify({ jsonrpc: "2.0", id: 1, ...c }),
       }, 256 * 1024);

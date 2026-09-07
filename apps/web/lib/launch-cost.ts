@@ -8,6 +8,7 @@ export const HIGH_NETWORK_FEE_WEI = 10n ** 16n;
 
 export type NetworkEstimate =
   | { chainId: 4663; gasUnits: bigint; gasPriceWei: bigint }
+  | { chainId: 8453; gasUnits: bigint; gasPriceWei: bigint; l1DataFeeWei: bigint; operatorFeeWei: bigint }
   | {
       chainId: 8453;
       gasUnits: bigint;
@@ -26,9 +27,11 @@ export type CostStep = {
 };
 
 /** Display the gas limit actually requested from the wallet, including its buffer. */
-export function longWalletCostStep(plan: Pick<LongPlan, 'transaction' | 'launchpadFeeWei'>): CostStep {
+export function longWalletCostStep(plan: Pick<LongPlan, 'transaction' | 'launchpadFeeWei' | 'baseFees'>): CostStep {
   return { kind: 'launch', valueWei: BigInt(plan.transaction.value), launchpadFeeWei: BigInt(plan.launchpadFeeWei),
-    network: { chainId: 4663, gasUnits: BigInt(plan.transaction.gas), gasPriceWei: BigInt(plan.transaction.gasPrice) } };
+    network: plan.transaction.chainId === '0x2105' ? { chainId: 8453, gasUnits: BigInt(plan.transaction.gas), gasPriceWei: BigInt(plan.transaction.gasPrice),
+      l1DataFeeWei: BigInt(plan.baseFees!.l1DataFeeWei), operatorFeeWei: BigInt(plan.baseFees!.operatorFeeWei) }
+      : { chainId: 4663, gasUnits: BigInt(plan.transaction.gas), gasPriceWei: BigInt(plan.transaction.gasPrice) } };
 }
 
 export type LaunchCostQuote = {
@@ -169,6 +172,11 @@ export function estimateNetworkFee(input: NetworkEstimate): bigint | null {
     if (!amount(input.gasPriceWei) || input.gasPriceWei === 0n) return null;
     // Nitro gas units already include the L1 posting component.
     const fee = input.gasUnits * input.gasPriceWei;
+    return amount(fee) ? fee : null;
+  }
+  if (input.chainId === 8453 && 'gasPriceWei' in input) {
+    if (![input.gasPriceWei, input.l1DataFeeWei, input.operatorFeeWei].every(amount) || input.gasPriceWei === 0n) return null;
+    const fee = input.gasUnits * input.gasPriceWei + input.l1DataFeeWei + input.operatorFeeWei;
     return amount(fee) ? fee : null;
   }
   if (

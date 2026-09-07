@@ -1,4 +1,4 @@
-import { readO1LiveConfig } from "./o1-live.mjs";
+import { readO1LiveConfig, readO1BaseLiveConfig } from "./o1-live.mjs";
 import { readLongLiveConfig } from "./long-live.mjs";
 import { resolve } from "node:path";
 import { isAddress, isHex, size } from "viem";
@@ -60,6 +60,7 @@ export function readConfig(env = process.env) {
     longLaunch,
     longbowLaunch: readLongLiveConfig(env, "longbow"),
     o1Launch: readO1LiveConfig(env, longLaunch),
+    o1BaseLaunch: readO1BaseLiveConfig(env),
     production,
     origin,
     databasePath,

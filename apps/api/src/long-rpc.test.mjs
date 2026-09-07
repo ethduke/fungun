@@ -56,7 +56,7 @@ test("Long RPC rejects unapproved chains, methods, shapes and oversized batches 
     return Response.json({ jsonrpc: "2.0", id: 1, result: null });
   });
   const invalid = [
-    [8453, extraCalls.slice(0, 1)],
+    [1, extraCalls.slice(0, 1)],
     [4663, Array.from({ length: 13 }, () => extraCalls[0])],
     [4663, [extraCalls[0], { method: "eth_sendRawTransaction", params: ["0x"] }]],
     [4663, [{ ...extraCalls[0], id: 7 }]],
@@ -135,4 +135,16 @@ test("Long RPC bounds transport bodies, rate limits and retries", async () => {
   });
   assert.equal(requests, 1);
   assert.equal(f.debits(), 1);
+});
+
+
+test("Base launch receipts and recovery blocks use only the Base endpoint", async () => {
+  const f = fixture(async (url, options) => {
+    assert.equal(url, config.baseRpcUrl);
+    const body = JSON.parse(options.body);
+    return Response.json({ jsonrpc: "2.0", id: 1, result: body.method });
+  });
+  assert.deepEqual(await f.rpc.batch(8453, extraCalls), extraCalls.map(({ method }) => method));
+  const missing = new LongRpc({ ...config, baseRpcUrl: "" }, { json: () => assert.fail("No fallback to Robinhood") });
+  await assert.rejects(missing.batch(8453, extraCalls), { code: "not_configured" });
 });

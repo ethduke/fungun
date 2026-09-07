@@ -64,8 +64,10 @@ external reads default to disabled.
 - Upload/drop a PNG, JPEG, WebP or GIF, preview and remove it. Picture bytes are cached in IndexedDB with the draft.
 - Enter name, ticker and optional description; review per-launchpad validation.
 - Ticker edits auto-fill the coin name unless a custom name has been entered.
-- Robinhood offers Long, O1 and Longbow. Base is temporarily paused in the
-  selector, draft validation, wallet configuration and fee lookup sources.
+- Robinhood offers Long, O1 and Longbow. Base offers O1 with ETH and its live
+  registered stock pairings. Changing chains resets incompatible pairings and
+  separates pending-launch recovery. Base launch configuration is documented in
+  [O1 Base launch setup](o1-base-launch.md). Base fee lookups remain paused.
 - Select launchpads and pairings; Longbow starts unselected.
 - Long uses a static list of 64 market tickers supplied on 4 September 2026.
   Longbow uses its 194-entry dropdown registry snapshot from 2 September,

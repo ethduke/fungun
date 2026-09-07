@@ -1,13 +1,13 @@
 # Fungun agent guide
 
 Status: composer with optional guarded fee reads, wallet claims and paid image generation.
-Launch transactions are not enabled. USDG/x402 image generation requires configured runtime services. Provider reads default to disabled; the public
+Configured launch services prepare unsigned transactions for the connected wallet. USDG/x402 image generation requires configured runtime services. Provider reads default to disabled; the public
 market feed updates automatically without provider credentials.
 Start with [llms.txt](/llms.txt) for the site overview.
 
 ## Prepare a draft
 
-1. Open the [launch composer](/). Robinhood Chain is enabled; Base is paused.
+1. Open the [launch composer](/). Choose Robinhood Chain (Long, O1, Longbow) or Base (O1).
 2. Enter a ticker and coin name. Ticker edits auto-fill the name until a custom
    name is entered. Names allow 1–50 characters; tickers allow 1–11 without
    whitespace. Long and Longbow require uppercase letters only.
@@ -27,7 +27,7 @@ Start with [llms.txt](/llms.txt) for the site overview.
    check their shared reservation registry after a typing pause; focus or Enter
    checks again. O1 allows any ticker within the form's input rules and makes no
    reservation request. Mixed selections retain each platform's status.
-   Results expire and edits invalidate them. Launch stays disabled.
+   Results expire and edits invalidate them. Launch availability also depends on server configuration.
 
 The launch cost panel separates launchpad fees and complete network fees in ETH,
 with approximate USD when a fresh reference price is available. Live quoting is
@@ -159,7 +159,7 @@ Same-origin JSON POSTs use `/api/catalog` with `{ "chainId": 4663 }`, or
 The `x-fungun-intent` header must match `catalog` or `ticker`. These are bounded
 anonymous read endpoints, not authentication or consent for financial actions.
 The webview only requests Robinhood (4663). Base (8453) remains supported by the
-backend but is paused in the webview. Longbow is excluded from catalog/ticker requests.
+backend and the O1 launch composer; Base fee lookups remain paused. Longbow is excluded from catalog/ticker requests.
 Never send keys, wallet addresses, signatures, images or prompts to these routes.
 Fee lookup supports Long, O1 and Longbow through `/api/fees` with `address`, `chainId`, `padId` and an optional
 opaque `cursor` returned by the previous page. It returns `nextCursor` and coverage.

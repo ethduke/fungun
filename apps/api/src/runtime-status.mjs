@@ -67,6 +67,13 @@ export function runtimeStatus(env) {
         ],
         ["READ_UPSTREAMS", "LONG_WALLET_LAUNCH"],
       ),
+      feature("o1_base_wallet_launch", [
+        o1,
+        ["BASE_RPC_URL", present(config.baseRpcUrl)],
+        ["O1_BASE_LAUNCH_PROFILE_JSON", present(env.O1_BASE_LAUNCH_PROFILE_JSON)],
+        ["LAUNCH_ASSET_SERVICE_ORIGIN", present(env.LAUNCH_ASSET_SERVICE_ORIGIN)],
+        ["FEE_CONTRACTS_JSON.baseOracle", !!config.feeContracts.baseOracle],
+      ], ["READ_UPSTREAMS", "O1_BASE_WALLET_LAUNCH"]),
       feature("o1_indexed_fees", [o1], fees),
       ...["long", "longbow"].flatMap((padId) => [
         feature(`${padId}_locked_pool_fees`, [rpc, lockedFees(padId)], fees),

@@ -41,9 +41,9 @@ export class O1MetadataPublisher {
     )`);
   }
   async prepare(id, input, publication, quoteAddress) {
-    if (!this.apiKey) fail();
+    if (!this.apiKey || ![4663, 8453].includes(input.chainId)) fail();
     const expected = o1Metadata(input.draft, publication.ipfs.imageCid), metadataCid = expected.uri.slice(7);
-    const identity = { chain_id: 4663, creator: input.wallet, market: input.pairId.startsWith('rwa-') ? 'rwa' : 'standard',
+    const identity = { chain_id: input.chainId, creator: input.wallet, market: input.pairId.startsWith('rwa-') ? 'rwa' : 'standard',
       quote_address: quoteAddress, token: { name: input.draft.name, symbol: input.draft.ticker,
         description: input.draft.description, editable_metadata: input.editableMetadata ?? false, image_type: 'image/webp' } };
     const requestHash = hash(JSON.stringify({ identity, imageHash: input.publication.imageHash, metadataUri: expected.uri }));
@@ -67,7 +67,7 @@ export class O1MetadataPublisher {
           'content-type': 'application/json' }, body: JSON.stringify({ ...identity, token: { ...identity.token, image_base64: image.toString('base64') } }),
       }, 32768);
       const data = response?.data;
-      if (data?.chain_id !== 4663 || data.actor?.toLowerCase() !== input.wallet.toLowerCase()
+      if (data?.chain_id !== input.chainId || data.actor?.toLowerCase() !== input.wallet.toLowerCase()
         || data.metadata_uri !== expected.uri) fail();
       pinned = { metadataUri: expected.uri, imageUrl: gatewayUrl(data.image_url, publication.ipfs.imageCid) };
       // Use the native pinning result only. Our independent launch builder still

@@ -1,6 +1,6 @@
 # Fungun
 
-> Noncustodial launchpad composer for Long, O1 and Longbow on Robinhood Chain, with optional guarded fee reads and wallet claims. Base is paused. Launches remain disabled; USDG/x402 image generation requires runtime configuration.
+> Noncustodial launchpad composer for Long, O1 and Longbow on Robinhood Chain and O1 on Base, with optional guarded fee reads and wallet claims. Wallet launches require configured, verified server profiles; USDG/x402 image generation requires runtime configuration.
 
 Agents can help prepare a coin draft and explain its validation. Configured
 backends can load RWA catalogs and check the shared Long/Longbow ticker registry
@@ -10,7 +10,7 @@ Long/Longbow beneficiary-pool discovery and O1 wallet-index positions, with clai
 reviewed contracts. Each launchpad's Claim all queues its eligible discovered positions with
 separate review, wallet confirmation and receipt proof for every claim. Base fee lookups are
 paused. Longbow uses a separate reviewed pool profile.
-Live launch quotes are not enabled. Configured image generation uses USDG/x402; drafts and pictures are cached for reloads.
+Base launch quotes include execution, L1 data and operator fees after transaction simulation. Configured image generation uses USDG/x402; drafts and pictures are cached for reloads.
 An unavailable balance is unknown, not zero. A reservation check is not proof
 of global ticker uniqueness or launch readiness.
 

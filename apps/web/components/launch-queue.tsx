@@ -33,6 +33,7 @@ export function LaunchQueue({ destinations, enabled, ready, tickerReserved, name
       <div key={pad.id} hidden={pad.id !== step.current && !queue.confirmed.includes(pad.id)}>
         <LongLaunch
           enabled={enabled}
+          chainId={pad.chainId}
           ready={ready && !conflicting && (pad.id === 'o1' || !tickerReserved)}
           pairId={pad.pairId}
           editableMetadata={pad.editableMetadata}
