@@ -36,9 +36,11 @@ function usdPrice(amount: string) {
 export function ImageGeneration({
   open,
   onOpenChange,
+  onImageAttach,
 }: {
   open: boolean;
   onOpenChange: (value: boolean) => void;
+  onImageAttach?: () => void;
 }) {
   const account = useConnectedAccount();
   const [name] = useDraftField('name');
@@ -107,6 +109,7 @@ export function ImageGeneration({
     !!account.signImage;
   function attach(blob: Blob, id: string, explicit = false) {
     if (!explicit && attached.current === id) return;
+    onImageAttach?.();
     attached.current = id;
     setImage({ url: URL.createObjectURL(blob), size: blob.size, blob });
   }

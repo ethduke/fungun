@@ -20,8 +20,9 @@ with shared server caching, request coalescing and failure backoff. It uses no
 configured RPC calls and is independent of the optional read service.
 Popularity counts similarly named distinct token
 contracts in the source's selected tracked cohort, not social trends.
-COPY fills the launch form with the selected token's name and ticker. The feed
-does not supply artwork; choose an image separately.
+COPY fills the launch form with the selected token's name and ticker. This test
+branch also retrieves artwork for recognized Robinhood O1 tokens when available.
+Other launchpads need a separate image.
 Compact venue labels include O1 RWA, UniV3 and UniV4. O1 hooks are recognized
 using a daily server cache of the official current and historical suite registry,
 with no RPC enrichment. Migration labels require explicit upstream provenance.

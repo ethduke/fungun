@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import Image from 'next/image';
 import {
   Check,
@@ -28,9 +28,6 @@ import { BulletProgress } from '@/components/launch-motion';
 import { ImageGeneration } from '@/components/image-generation';
 import {
   autofillCoinName,
-  IMAGE_LIMIT,
-  imageFileError,
-  imageKind,
   isWebviewChain,
   normalizeTicker,
   readablePads,
@@ -47,6 +44,14 @@ import { useReadService } from '@/lib/use-read-service';
 import { tickerAvailability } from '@/lib/auto-ticker';
 import { launchCostKey } from '@/lib/launch-cost';
 import { useConnectedAccount } from '@/lib/account-context';
+import {
+  COPIED_IMAGE_ERROR,
+  ImageRequests,
+  copiedTokenImage,
+  tokenImageSource,
+  validateDraftImage,
+  type ImageRequest,
+} from '@/lib/copied-token-image';
 
 export default function Home() {
   const account = useConnectedAccount();
@@ -64,7 +69,7 @@ export default function Home() {
   const [dragging, setDragging] = useState(false);
   const [generationOpen, setGenerationOpen] = useState(false);
   const fileInput = useRef<HTMLInputElement>(null);
-  const imageSequence = useRef(0);
+  const imageRequests = useRef(new ImageRequests());
   const active = destinations.filter((pad) => pad.selected);
   const offered = active.map(pad => padCosts[pad.id]).filter((cost): cost is NonNullable<LongCosts> => !!cost);
   const longCosts = offered.length === active.length && offered.length ? {
@@ -97,30 +102,83 @@ export default function Home() {
 
   useEffect(
     () => () => {
-      imageSequence.current += 1;
+      imageRequests.current.cancel();
     },
     [],
   );
 
+  const loadImage = useCallback(
+    async (
+      load: () => Promise<Blob>,
+      request: ImageRequest,
+      copied = false,
+    ) => {
+      setImageError('');
+      setImagePending(true);
+      try {
+        const file = await load();
+        if (!request.isCurrent()) return;
+        const source = await validateDraftImage(file);
+        if (request.isCurrent())
+          setImage({
+            url: URL.createObjectURL(source),
+            size: source.size,
+            blob: source,
+          });
+      } catch (error) {
+        if (!request.isCurrent()) return;
+        setImage(null);
+        const safeErrors = [
+          'Choose an image smaller than 2 MiB.',
+          'Choose a valid PNG, JPEG, WebP or GIF image.',
+          'Use an image no larger than 4096 × 4096 pixels.',
+        ];
+        setImageError(
+          copied
+            ? COPIED_IMAGE_ERROR
+            : error instanceof Error && safeErrors.includes(error.message)
+              ? error.message
+              : 'This image could not be decoded. Choose another file.',
+        );
+      } finally {
+        if (request.isCurrent()) setImagePending(false);
+      }
+    },
+    [setImage],
+  );
+
   useEffect(() => {
     function copyTrackedToken(event: Event) {
-      if (!(event instanceof CustomEvent)) return;
+      if (!hydrated || !(event instanceof CustomEvent)) return;
       const { name: copiedName, ticker: copiedTicker } = event.detail ?? {};
-      if (typeof copiedName !== 'string' || typeof copiedTicker !== 'string') return;
+      if (typeof copiedName !== 'string' || typeof copiedTicker !== 'string')
+        return;
       // A pending upload must not attach another token's artwork to this draft.
-      imageSequence.current += 1;
+      const request = imageRequests.current.begin();
       setName(copiedName);
       setTicker(copiedTicker);
       setImage(null);
       setImagePending(false);
       setImageError('');
-      document.querySelector('[aria-labelledby="coin-details-heading"]')
+      document
+        .querySelector('[aria-labelledby="coin-details-heading"]')
         ?.scrollIntoView({ behavior: 'instant', block: 'start' });
       document.getElementById('coin-name')?.focus({ preventScroll: true });
+      const source = tokenImageSource(event.detail.imageSource);
+      if (source)
+        void loadImage(
+          () => copiedTokenImage(source, request.signal),
+          request,
+          true,
+        );
     }
     document.addEventListener('fungun:copy-tracked-token', copyTrackedToken);
-    return () => document.removeEventListener('fungun:copy-tracked-token', copyTrackedToken);
-  }, [setName, setTicker, setImage]);
+    return () =>
+      document.removeEventListener(
+        'fungun:copy-tracked-token',
+        copyTrackedToken,
+      );
+  }, [hydrated, setName, setTicker, setImage, loadImage]);
 
   usePreviewTools(
     () => ({
@@ -148,40 +206,7 @@ export default function Home() {
 
   async function selectImage(file?: File) {
     if (!file || !hydrated) return;
-    const sequence = ++imageSequence.current;
-    setImageError('');
-    setImagePending(true);
-    try {
-      if (!file.size || file.size > IMAGE_LIMIT)
-        throw new Error('Choose an image smaller than 2 MiB.');
-      const header = new Uint8Array(await file.slice(0, 32).arrayBuffer());
-      const error = imageFileError(file.size, file.type, header);
-      if (error) throw new Error(error);
-      const source = file.slice(0, file.size, imageKind(header) ?? '');
-      const bitmap = await createImageBitmap(source);
-      const oversized = bitmap.width > 4096 || bitmap.height > 4096;
-      bitmap.close();
-      if (oversized)
-        throw new Error('Use an image no larger than 4096 × 4096 pixels.');
-      if (sequence === imageSequence.current)
-        setImage({ url: URL.createObjectURL(source), size: file.size, blob: source });
-    } catch (error) {
-      if (sequence === imageSequence.current) {
-        setImage(null);
-        const safeErrors = [
-          'Choose an image smaller than 2 MiB.',
-          'Choose a valid PNG, JPEG, WebP or GIF image.',
-          'Use an image no larger than 4096 × 4096 pixels.',
-        ];
-        setImageError(
-          error instanceof Error && safeErrors.includes(error.message)
-            ? error.message
-            : 'This image could not be decoded. Choose another file.',
-        );
-      }
-    } finally {
-      if (sequence === imageSequence.current) setImagePending(false);
-    }
+    await loadImage(() => Promise.resolve(file), imageRequests.current.begin());
   }
 
   function updateDestination(destination: Destination) {
@@ -316,7 +341,7 @@ export default function Home() {
                     )}
                     {imagePending && (
                       <span className="image-pending">
-                        <BulletProgress label="Checking image…" />
+                        <BulletProgress label="Loading image…" />
                       </span>
                     )}
                   </button>
@@ -331,7 +356,7 @@ export default function Home() {
                         size="icon-sm"
                         aria-label="Remove coin image"
                         onClick={() => {
-                          imageSequence.current += 1;
+                          imageRequests.current.cancel();
                           setImage(null);
                           setImagePending(false);
                         }}
@@ -590,7 +615,15 @@ export default function Home() {
           <span className="footer-year">2026</span>
         </footer>
       </main>
-      <ImageGeneration open={generationOpen} onOpenChange={setGenerationOpen} />
+      <ImageGeneration
+        open={generationOpen}
+        onOpenChange={setGenerationOpen}
+        onImageAttach={() => {
+          imageRequests.current.cancel();
+          setImagePending(false);
+          setImageError('');
+        }}
+      />
     </>
   );
 }

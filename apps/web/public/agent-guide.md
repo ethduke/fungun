@@ -99,8 +99,10 @@ Popularity counts similarly named distinct contracts by
 chain, ranked by count then inflow, with links to X search. It makes no claim
 about social trends or complete market coverage. This feed cannot trade or sign.
 COPY fills the coin name and ticker and jumps to the launch form immediately.
-It clears prior artwork and pending uploads. This source does not provide a token
-image or metadata URL; upload artwork separately.
+It clears prior artwork and pending uploads. On this test branch, recognized
+Robinhood O1 tokens then load artwork through O1's API and save its bytes with
+the draft. Missing artwork leaves the copied text usable; upload an image instead.
+Other launchpads still require a separate image.
 
 Canonical stablecoins do not appear as tracked tokens, including stable/stable
 and USDG/stock pairs. A nonstable token may still use a stablecoin as its quote.
