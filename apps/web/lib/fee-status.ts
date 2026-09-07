@@ -34,3 +34,15 @@ export function disabledClaimMessage(position: FeePosition) {
       return 'Claims are not available for this position yet.';
   }
 }
+
+export function disabledFeeSourceMessage(positions: FeePosition[]) {
+  const positive = positions.filter((position) =>
+    position.payouts.some((payout) => BigInt(payout.claimableRaw) > 0n),
+  );
+  // An empty currency must not hide the blocker for a displayed positive balance.
+  return (
+    (positive.length ? positive : positions)
+      .map(disabledClaimMessage)
+      .find(Boolean) ?? null
+  );
+}

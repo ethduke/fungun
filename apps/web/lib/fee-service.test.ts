@@ -13,7 +13,11 @@ import {
   type ClaimQuote,
   type FeeLookupResult,
 } from './fee-service.ts';
-import { disabledClaimMessage, unavailableFeeMessage } from './fee-status.ts';
+import {
+  disabledClaimMessage,
+  disabledFeeSourceMessage,
+  unavailableFeeMessage,
+} from './fee-status.ts';
 
 const addr = (digit: string) => `0x${digit.repeat(40)}` as `0x${string}`;
 const owner = addr('a');
@@ -158,6 +162,32 @@ await test('disabled claims explain unverified balances and feature setup withou
     }),
     'Claims are not enabled yet.',
   );
+});
+
+await test('an empty currency never hides the claim blocker for a positive fee balance', () => {
+  const empty = {
+    ...position,
+    claimable: false,
+    claimDisabledReason: 'nothing_to_claim' as const,
+    payouts: [{ ...payout, claimableRaw: '0' }],
+  };
+  const blocked = {
+    ...position,
+    claimable: false,
+    verification: 'indexed' as const,
+    claimDisabledReason: 'contract_unverified' as const,
+  };
+  for (const positions of [
+    [empty, blocked],
+    [blocked, empty],
+  ])
+    assert.equal(
+      disabledFeeSourceMessage(positions),
+      disabledClaimMessage(blocked),
+    );
+  assert.equal(disabledFeeSourceMessage([empty]), 'No fees to claim.');
+  assert.equal(disabledFeeSourceMessage([empty, position]), null);
+  assert.equal(disabledFeeSourceMessage([]), null);
 });
 
 await test('escrow versions stay bound across fee pages and fresh claim preparation', async () => {

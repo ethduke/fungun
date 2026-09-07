@@ -51,7 +51,10 @@ import {
 } from '@/lib/claim-queue';
 import { formatEth, HIGH_NETWORK_FEE_WEI } from '@/lib/launch-cost';
 import { describeError } from '@/lib/user-error';
-import { disabledClaimMessage, unavailableFeeMessage } from '@/lib/fee-status';
+import {
+  disabledFeeSourceMessage,
+  unavailableFeeMessage,
+} from '@/lib/fee-status';
 import { formatGasUsd } from '@/lib/fee-usd';
 
 type SourceResult = {
@@ -548,9 +551,7 @@ function ConnectedFees({ address }: { address: string }) {
           const unverified = positions.some(
             (position) => position.verification === 'indexed',
           );
-          const claimUnavailable = positions
-            .map(disabledClaimMessage)
-            .find(Boolean);
+          const claimUnavailable = disabledFeeSourceMessage(positions);
           const balances = groupFeeBalances(
             positions.flatMap((position) =>
               position.payouts.map((payout) => ({
