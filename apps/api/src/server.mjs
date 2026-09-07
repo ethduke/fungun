@@ -13,7 +13,7 @@ import { Fees } from "./fees.mjs";
 import { createFomoRelayHandler } from "./fomo-relay.mjs";
 import { createFomoService } from "./fomo-service.mjs";
 import { TrackedPrices } from "./tracked-prices.mjs";
-import { O1TokenImages } from "./o1-token-image.mjs";
+import { TokenImages } from "./token-image.mjs";
 
 process.umask(0o077);
 try {
@@ -30,7 +30,7 @@ try {
   const launches = new Launches(config, upstream, budget);
   const fomo = createFomoService(budget.db);
   const trackedPrices = new TrackedPrices(config, upstream);
-  const tokenImages = new O1TokenImages(config, upstream);
+  const tokenImages = new TokenImages(config, upstream);
   const server = createServer(
     { maxHeaderSize: 8192 },
     createFomoRelayHandler(fomo, process.env.FOMO_RELAY_TOKEN,

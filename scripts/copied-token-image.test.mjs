@@ -9,15 +9,35 @@ const source = { chainId: 4663, address };
 const png = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+aQ1cAAAAASUVORK5CYII=', 'base64');
 const payload = { ...source, size: png.length, mime: 'image/png', base64: png.toString('base64') };
 
-test('only recognized Robinhood O1 rows request artwork, preserving other COPY drafts', () => {
+test('COPY preserves O1 dispatch and probes supported chains even with generic feed labels', () => {
   for (const launchpad of ['o1', 'O1 RWA', 'O1 migrated']) {
     const draft = trackedTokenDraft({ meme: address, name: 'Moon', sym: 'MOON', launchpad });
     assert.deepEqual(draft, { name: 'Moon', ticker: 'MOON', imageSource: source });
   }
-  for (const row of [{ launchpad: 'long' }, { launchpad: 'longbow' }, {},
-    { launchpad: 'o1', chain_id: 8453 }, { launchpad: 'o1', meme: 'bad' }])
+  for (const chainId of [4663, 8453]) {
+    for (const launchpad of ['long', 'longbow', 'Uniswap V4', 'unknown', undefined]) {
+      const draft = trackedTokenDraft({ token: address, sym: 'MOON', chain_id: chainId, launchpad });
+      assert.deepEqual(draft, { name: 'MOON', ticker: 'MOON', imageSource: {
+        chainId, address, provider: 'doppler',
+      } });
+      assert.deepEqual(tokenImageSource(draft.imageSource), draft.imageSource);
+    }
+  }
+  for (const row of [{ chain_id: 1 }, { meme: 'bad' }])
     assert.equal(trackedTokenDraft({ meme: address, ...row }).imageSource, undefined);
-  assert.equal(tokenImageSource({ ...source, chainId: 8453 }), null);
+  for (const bad of [{ ...source, chainId: 8453 }, { ...source, provider: 'unknown' },
+    { ...source, chainId: 1, provider: 'doppler' }]) assert.equal(tokenImageSource(bad), null);
+});
+
+test('Doppler COPY posts to the generic route with source identity and provider', async () => {
+  const doppler = { ...source, provider: 'doppler' };
+  const blob = await copiedTokenImage(doppler, new AbortController().signal, async (url, options) => {
+    assert.equal(url, '/api/token-image');
+    assert.equal(options.headers['x-fungun-intent'], 'token-image');
+    assert.deepEqual(JSON.parse(options.body), doppler);
+    return Response.json(payload);
+  });
+  assert.equal(blob.size, png.length);
 });
 
 test('COPY downloads only the source identity and produces a persistable Blob', async () => {
@@ -48,7 +68,7 @@ test('a later COPY/upload or removal/unmount invalidates even a request that ign
   const requests = new ImageRequests();
   let resolve;
   const first = requests.begin();
-  const pending = copiedTokenImage(source, first.signal, () => new Promise(r => { resolve = r; }));
+  const pending = copiedTokenImage({ ...source, provider: 'doppler' }, first.signal, () => new Promise(r => { resolve = r; }));
   const upload = requests.begin();
   assert.equal(first.signal.aborted, true);
   resolve(Response.json(payload));

@@ -4,8 +4,10 @@ import { ServiceError, safeError, serviceErrorBody } from "./errors.mjs";
 import { validAddress } from "./fee-contracts.mjs";
 import { validatePriceInput } from "./tracked-prices.mjs";
 import { validateTokenImageInput } from "./o1-token-image.mjs";
+import { validateCopiedTokenImageInput } from "./token-image.mjs";
 
 export function validateInput(kind, input) {
+  if (kind === "token-image") return validateCopiedTokenImageInput(input);
   if (kind === "o1-token-image") return validateTokenImageInput(input);
   if (kind === "fomo") {
     if (!input || typeof input !== "object" || Array.isArray(input) || Object.keys(input).length)
@@ -117,7 +119,7 @@ export function createHandler(config, budget, adapters, fees, trackedPrices, lau
         request.headers["sec-fetch-site"] === "cross-site"
       )
         throw new ServiceError("origin_denied", 403);
-      const kind = ["o1-token-image", "fomo", "catalog", "ticker", "fees", "claim-prepare", "tracked-prices", "launch-prepare", "launch-reserve", "launch-status", "launch-estimate"].find(
+      const kind = ["token-image", "o1-token-image", "fomo", "catalog", "ticker", "fees", "claim-prepare", "tracked-prices", "launch-prepare", "launch-reserve", "launch-status", "launch-estimate"].find(
         (operation) => request.url === `/v1/${operation}`,
       );
       if (!kind || request.method !== "POST" || request.headers["x-fungun-intent"] !== kind)
@@ -128,7 +130,7 @@ export function createHandler(config, budget, adapters, fees, trackedPrices, lau
       budget.request(ip, kind === "ticker");
       const input = validateInput(kind, await readBody(request, kind.startsWith("launch-") ? 4096 : 2048));
       const value =
-        kind === "o1-token-image" ? await tokenImages.get(input) :
+        ["token-image", "o1-token-image"].includes(kind) ? await tokenImages.get(input) :
         kind === "fomo" ? fomo.snapshot() :
         kind.startsWith("launch-")
           ? await launches.run(kind, input)
