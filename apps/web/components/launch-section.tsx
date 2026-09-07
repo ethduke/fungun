@@ -107,7 +107,7 @@ export function LaunchSection({
           const started = performance.now();
           const raw = await launchRequest('launch-estimate', { chainId, pairId });
           if (stopped) return;
-          if (chainId === 8453) {
+          if (chainId === 8453 && !pairId.startsWith('stonks-')) {
             if (raw.chainId !== chainId || raw.pairId !== pairId || raw.basis !== 'requires-calldata') throw new Error('Invalid Base estimate');
             continue;
           }
@@ -171,7 +171,7 @@ export function LaunchSection({
     },
     costNow,
   );
-  const approximateQuotes = approximate?.length === estimatePairs.length && approximate.every(e => e.chainId === chainId && estimatePairs.includes(e.pairId))
+  const approximateQuotes = approximate?.length && approximate.every(e => e.chainId === chainId && estimatePairs.includes(e.pairId))
     ? approximate.map(e => approximateLaunchQuote(e, costContextKey, costNow)) : [];
   const allApproximate = approximateQuotes.length > 0 && approximateQuotes.every(q => q !== null);
   const fallbackCosts = calculateLaunchCosts(
@@ -305,7 +305,7 @@ export function LaunchSection({
                   ) : (
                     <span>
                       <LockKeyhole size={14} aria-hidden="true" />
-                      Immutable metadata
+                      {pad.id === 'stonks' ? 'Launch details recorded on-chain' : 'Immutable metadata'}
                     </span>
                   )}
                 </div>
@@ -383,12 +383,13 @@ export function LaunchSection({
                           <dt>Launch fee</dt>
                           <dd>
                             {amount && feeSource
-                              ? <a href={`https://robinhoodchain.blockscout.com/address/${feeSource.contract}?tab=contract`}
+                              ? <a href={`${chainId === 8453 ? 'https://basescan.org' : 'https://robinhoodchain.blockscout.com'}/address/${feeSource.contract}`}
                                   target="_blank" rel="noopener noreferrer" title={`Verified contract fee at block ${feeSource.blockNumber}`}>
                                   {formatEth(amount.launchpadWei)} · Verified
                                 </a>
                               : amount ? formatEth(amount.launchpadWei)
-                              : pad.id === 'long' && supportsEstimate
+                              : chainId === 8453 && pad.id === 'o1' && !estimateFailed ? 'Calculated at launch'
+                              : isEnabledLaunchPair(pad.pairId) && supportsEstimate
                                 ? estimateFailed ? 'Unavailable' : 'Checking…'
                                 : 'Unavailable'}
                           </dd>

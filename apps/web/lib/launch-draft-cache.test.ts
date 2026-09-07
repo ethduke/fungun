@@ -257,3 +257,13 @@ await test('a failed write does not prevent the next edit from being saved', asy
   await succeeded;
   assert.equal(saved, 'Latest');
 });
+
+await test('legacy three-pad drafts retain artwork and selections when Stonks is added', async () => {
+  const encoded = await encodeLaunchDraft(draft());
+  const legacy = { ...encoded, selection: { ...encoded.selection,
+    destinations: encoded.selection.destinations.filter(pad => pad.id !== 'stonks') } };
+  const restored = await decodeLaunchDraft(legacy);
+  assert.ok(restored?.image instanceof Blob);
+  assert.deepEqual(restored.selection.destinations.filter(pad => pad.id !== 'stonks'), legacy.selection.destinations);
+  assert.equal(restored.selection.destinations.find(pad => pad.id === 'stonks')?.selected, false);
+});

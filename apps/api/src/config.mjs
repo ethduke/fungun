@@ -1,3 +1,4 @@
+import { readStonksConfig } from './stonks-live.mjs';
 import { readO1LiveConfig, readO1BaseLiveConfig } from "./o1-live.mjs";
 import { readLongLiveConfig } from "./long-live.mjs";
 import { resolve } from "node:path";
@@ -57,6 +58,7 @@ export function readConfig(env = process.env) {
     throw new ServiceError("invalid_long_configuration");
   const longLaunch = readLongLiveConfig(env);
   return {
+    stonksLaunch: readStonksConfig(env),
     longLaunch,
     longbowLaunch: readLongLiveConfig(env, "longbow"),
     o1Launch: readO1LiveConfig(env, longLaunch),

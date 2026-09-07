@@ -258,15 +258,16 @@ function card(row) {
     : '';
   const quote =
     row.quote_symbol || (row.quote_kind === 'eth' ? 'ETH' : 'SHARES');
-  const chart = gmgnTokenUrl(row);
+  const stonks = chain(row) === 8453 && row.launchpad === 'Stonks';
+  const chart = stonks && /^0x[a-f0-9]{40}$/i.test(address) ? `https://www.thestonks.exchange/token/${address.toLowerCase()}` : gmgnTokenUrl(row);
   const short = address
     ? `${address.slice(0, 8)}…${address.slice(-6)}`
     : 'Address unavailable';
   return `<div class="metadata"><span class="launchpad" title="${esc(launchpadTitle)}">${launchpadIcon}${esc(launchpad)}</span><button class="copy-button" type="button" aria-label="Copy ${esc(name)} to launch form"${!draft.name && !draft.ticker ? ' disabled' : ''}>COPY</button></div>
-    <div class="flow"><div class="metric-title">ETH-equivalent per bin</div>${ladder(row.trail)}</div>
+    ${stonks ? '<div class="flow"><span class="quote">Base · Liquidity locked on Uniswap V3</span></div>' : `<div class="flow"><div class="metric-title">ETH-equivalent per bin</div>${ladder(row.trail)}</div>`}
     <div class="identity"><strong title="${esc(name)}">${esc(name)}</strong><span class="quote">/ ${esc(quote)}</span></div>
     <div class="address">${chart ? `<a href="${esc(chart)}" target="_blank" rel="noopener noreferrer" title="${esc(address)}">${esc(short)} ↗</a>` : esc(short)}${row.sym && row.name ? ` <span>${esc(row.sym)}</span>` : ''}</div>
-    <div class="totals"><span>Total inflow <b>${number(row.total_in)} ETH</b></span><span>${number(row.swaps)} swaps</span></div>`;
+    ${stonks ? `<div class="totals"><span>Stonks index · ${esc(new Date(row.created_at * 1000).toLocaleString())}</span></div>` : `<div class="totals"><span>Total inflow <b>${number(row.total_in)} ETH</b></span><span>${number(row.swaps)} swaps</span></div>`}`;
 }
 
 const styles = `
@@ -307,8 +308,11 @@ if (
     constructor() {
       super();
       this.attachShadow({ mode: 'open' });
-      this.shadowRoot.innerHTML = `<style>${styles}</style><section aria-label="Tracked market feed"><div class="top"><div class="heading"><h2>Market feed</h2><div class="statuses"><span class="status" role="status" aria-live="polite">Connecting…</span><span class="price-status" role="status" aria-live="polite" hidden></span></div></div><div class="popular"></div><div class="fomo" aria-label="FOMO trader purchases"><div class="fomo-line"><span class="fomo-label">FOMO:</span><div class="fomo-buys" tabindex="0" role="region" aria-label="Recorded trader buys"></div></div><span class="fomo-health" role="status"></span></div><div class="inflow"><span class="popular-label">&gt;10ETH INFL:</span><nav class="inflow-tokens" aria-label="Tokens over 10 ETH total inflow, oldest first"></nav></div></div><div class="columns"><div class="lane"><h3>ETH <span class="count-eth"></span></h3><div class="list" data-kind="eth" tabindex="0" role="region" aria-label="Tracked ETH pairs"></div></div><div class="lane"><h3>SHARES <span class="count-shares"></span></h3><div class="list" data-kind="shares" tabindex="0" role="region" aria-label="Tracked SHARES pairs"></div></div></div></section>`;
+      this.shadowRoot.innerHTML = `<style>${styles}</style><section aria-label="Tracked market feed"><div class="top"><div class="heading"><h2>Market feed</h2><div class="statuses"><span class="status" role="status" aria-live="polite">Connecting…</span><span class="stonks-status status" role="status"></span><span class="price-status" role="status" aria-live="polite" hidden></span></div></div><div class="popular"></div><div class="fomo" aria-label="FOMO trader purchases"><div class="fomo-line"><span class="fomo-label">FOMO:</span><div class="fomo-buys" tabindex="0" role="region" aria-label="Recorded trader buys"></div></div><span class="fomo-health" role="status"></span></div><div class="inflow"><span class="popular-label">&gt;10ETH INFL:</span><nav class="inflow-tokens" aria-label="Tokens over 10 ETH total inflow, oldest first"></nav></div></div><div class="columns"><div class="lane"><h3>ETH <span class="count-eth"></span></h3><div class="list" data-kind="eth" tabindex="0" role="region" aria-label="Tracked ETH pairs"></div></div><div class="lane"><h3>SHARES <span class="count-shares"></span></h3><div class="list" data-kind="shares" tabindex="0" role="region" aria-label="Tracked SHARES pairs"></div></div></div></section>`;
       this.rows = [];
+      this.robinhoodRows = [];
+      this.stonksRows = [];
+      this.stonksUnavailable = false;
       this.inflowQueue = new TrackedInflowQueue();
       this.inflows = [];
       this.priceController = null;
@@ -330,7 +334,7 @@ if (
         },
         onSnapshot: (snapshot) => {
           const seen = new Set();
-          this.rows = snapshot.pools.filter((row) => {
+          this.robinhoodRows = snapshot.pools.filter((row) => {
             if (
               !row ||
               chain(row) !== 4663 ||
@@ -342,6 +346,7 @@ if (
             seen.add(key);
             return true;
           });
+          this.rows = [...this.robinhoodRows, ...this.stonksRows];
           // Shared responses keep the relay's receipt time, including cache hits.
           const received = Date.parse(snapshot.fetched_at);
           this.receivedAt = Number.isFinite(received) ? received : Date.now();
@@ -354,6 +359,15 @@ if (
           this.error = true;
           this.render();
         },
+      });
+      this.stonksPoller = new TrackedFeedPoller({
+        getUrl: () => '/api/stonks-feed', intervalMs: 60000,
+        validateSnapshot: body => body?.status === 'ready' && Array.isArray(body.pools) && body.pools.length <= 30
+          && body.pools.every(row => row?.chain_id === 8453 && row.launchpad === 'Stonks' && /^0x[a-f0-9]{40}$/i.test(row.meme) && Number.isFinite(row.created_at)),
+        fetcher: (url, options) => fetch(url, { ...options, method: 'POST', credentials: 'omit',
+          headers: { 'content-type': 'application/json', 'x-fungun-intent': 'stonks-feed' }, body: '{}' }),
+        onSnapshot: snapshot => { this.stonksRows = snapshot.pools; this.stonksUnavailable = false; this.rows = [...this.robinhoodRows, ...this.stonksRows]; this.render(); },
+        onError: () => { this.stonksUnavailable = true; this.render(); },
       });
       this.fomoPayload = null;
       this.fomoUnavailable = false;
@@ -451,6 +465,7 @@ if (
       window.removeEventListener('pagehide', this.onPageHide);
       window.removeEventListener('pageshow', this.onPageShow);
       this.poller.setActive(false);
+      this.stonksPoller.setActive(false);
       this.fomoPoller.setActive(false);
       this.priceController?.abort();
       this.priceController = null;
@@ -475,6 +490,7 @@ if (
         return;
       this.pauseReason = reason;
       this.poller.setActive(marketActive);
+      this.stonksPoller.setActive(marketActive);
       this.fomoPoller.setActive(active);
       if (!marketActive) {
         this.priceController?.abort();
@@ -570,6 +586,7 @@ if (
 
     render() {
       this.renderFomo();
+      this.shadowRoot.querySelector('.stonks-status').textContent = this.stonksUnavailable ? 'Stonks feed unavailable' : this.stonksRows.length ? 'Stonks · Base online' : '';
       const status = this.shadowRoot.querySelector('.status');
       const priceStatus = this.shadowRoot.querySelector('.price-status');
       const priceView = priceServiceStatus(this.priceState);

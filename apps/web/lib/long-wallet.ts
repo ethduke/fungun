@@ -1,4 +1,4 @@
-import { keccak256, type EIP1193Provider } from 'viem';
+import { decodeFunctionResult, encodeFunctionData, toHex, toBytes, keccak256, type EIP1193Provider } from 'viem';
 import { buildUnsignedLongLaunch, readLongLaunchProfile } from './long-encoding/long-launch.mjs';
 import { LONG_SALT_ATTEMPTS, isCanonicalLongAsset } from './long-encoding/long-salt.mjs';
 import { assetDraft, assetWallet, type AssetDraft, type PublishedAsset } from './asset-protocol.ts';
@@ -7,21 +7,25 @@ import { parseLaunchFeeSource, type LaunchFeeSource } from './launch-fee-source.
 import type { ChainId } from './launch-model.ts';
 import { isOutdatedPage } from './page-version.ts';
 import { buildUnsignedO1Launch, readO1LaunchProfile } from './long-encoding/o1-launch.mjs';
+import { STONKS_ABI, STONKS_SUPPLY, buildUnsignedStonksLaunch, readStonksProfile, stonksSalt } from './long-encoding/stonks-launch.mjs';
 import { o1Metadata } from './long-encoding/o1-metadata.mjs';
 
 export type O1BuildInput = { wallet: string; draft: AssetDraft; pairId: string; metadataUri: string; editableMetadata: boolean;
   configVersion: string; chainDeadline: number; totalSupply: string; launchpadFeeWei: string; intentId: string; initCodeHash?: string };
-export const launchpadForPair = (pairId: string = ''): 'long' | 'longbow' | 'o1' =>
-  pairId.startsWith('longbow-') ? 'longbow' : pairId.startsWith('long-') ? 'long' : 'o1';
+export type StonksBuildInput = { wallet: string; draft: AssetDraft; pairId: string; imageUri: string; metadataUri: string; launchpadFeeWei: string; predictedAsset: string; intentId: string };
+export const launchpadForPair = (pairId: string = ''): 'long' | 'longbow' | 'o1' | 'stonks' =>
+  pairId.startsWith('stonks-') ? 'stonks' : pairId.startsWith('longbow-') ? 'longbow' : pairId.startsWith('long-') ? 'long' : 'o1';
 export const isEnabledLaunchPair = (pairId: string | undefined): pairId is string =>
-  typeof pairId === 'string' && /^(?:(?:long|longbow)-[A-Z0-9._-]{1,24}|rwa-[a-f0-9]{24}|native|crypto-USDG)$/.test(pairId);
+  typeof pairId === 'string' && /^(?:(?:long|longbow)-[A-Z0-9._-]{1,24}|rwa-[a-f0-9]{24}|native|crypto-USDG|stonks-[a-f0-9]{24})$/.test(pairId);
 
 export type LaunchInput = { chainId: ChainId; wallet: string; draft: AssetDraft; pairId: string;
   publication: { id: string; imageHash: string; metadataHash: string }; editableMetadata?: boolean };
 export type LongPlan = {
   id: string; binding: string; chainId: ChainId; quotedAt: number; expiresAt: number; deadline: number;
   transaction: { chainId: '0x1237' | '0x2105'; from: string; to: string; data: `0x${string}`; value: `0x${string}`; nonce: `0x${string}`; gas: `0x${string}`; gasPrice: `0x${string}` };
-  profile: (ReturnType<typeof readLongLaunchProfile> | ReturnType<typeof readO1LaunchProfile>) & { launcher: { address: string; codeHash: string }; launchpad?: string }; startingTick?: number; intentId?: string; buildInput?: O1BuildInput;
+  profile: (ReturnType<typeof readLongLaunchProfile> | ReturnType<typeof readO1LaunchProfile> | ReturnType<typeof readStonksProfile>) & { launcher: { address: string; codeHash: string }; launchpad?: string }; startingTick?: number; intentId?: string; buildInput?: O1BuildInput | StonksBuildInput;
+  terms?: { creatorBps: number; platformBps: number; lpBps: number };
+  condition?: { priceFresh: boolean; openingTickMagnitude: number };
   predictedAsset: string; saltAttempt: number; predictedPool: string; review: ReturnType<typeof buildUnsignedLongLaunch>['review'];
   baseFees?: { l1DataFeeWei: string; operatorFeeWei: string };
   estimatedGas: string; maximumGasWei: string; launchpadFeeWei: string;
@@ -74,6 +78,7 @@ export function launchMessage(error: unknown) {
     long_salt_unavailable: 'A Long-compatible token address could not be prepared in time. No transaction was sent. Try preparing again.',
     invalid_long_salt: 'The prepared token address does not meet Long’s requirements. Refresh the launch estimate.',
     long_launch_disabled: 'The launch service is currently unavailable.',
+    stonks_launch_disabled: 'Stonks launches are currently unavailable.',
     o1_launch_disabled: 'O1 has paused new launches.',
     o1_metadata_unverified: 'O1 has not confirmed your artwork yet. Your draft is saved; try preparing again shortly.',
     unsupported_pair: 'This pairing is not configured on the launch server yet. Choose another pairing.',
@@ -114,9 +119,19 @@ export function validateLongPlan(raw: unknown, input: LaunchInput, published: Pu
   const inputDraft = assetDraft(input.draft);
   const o1 = launchpadForPair(input.pairId) === 'o1';
   let rebuilt;
-  if (o1) {
+  const stonks = launchpadForPair(input.pairId) === 'stonks';
+  if (stonks) {
+    assert(input.chainId === 8453 && p.profile.launchpad === 'stonks' && p.buildInput);
+    assert(p.terms && [p.terms.creatorBps, p.terms.platformBps, p.terms.lpBps].every(v => Number.isInteger(v) && v >= 0 && v <= 10000)
+      && p.terms.creatorBps + p.terms.platformBps + p.terms.lpBps === 10000 && p.terms.creatorBps >= 2000
+      && p.condition && typeof p.condition.priceFresh === 'boolean' && Number.isInteger(p.condition.openingTickMagnitude));
+    const buildInput: StonksBuildInput = { ...(p.buildInput as StonksBuildInput), wallet: assetWallet(input.wallet), draft: inputDraft, pairId: input.pairId,
+      imageUri: `ipfs://${published.ipfs!.imageCid}`, metadataUri: `ipfs://${published.ipfs!.metadataCid}`, predictedAsset: p.predictedAsset };
+    assert(buildInput.intentId === p.id && buildInput.launchpadFeeWei === p.launchpadFeeWei);
+    rebuilt = buildUnsignedStonksLaunch(buildInput, p.profile);
+  } else if (o1) {
     assert(p.profile?.launchpad === 'o1' && p.buildInput && Number.isInteger(p.saltAttempt) && p.saltAttempt >= 0 && p.saltAttempt < 65536);
-    const buildInput: O1BuildInput = { ...p.buildInput!, wallet: assetWallet(input.wallet), draft: inputDraft,
+    const buildInput: O1BuildInput = { ...(p.buildInput as O1BuildInput), wallet: assetWallet(input.wallet), draft: inputDraft,
       pairId: input.pairId, metadataUri: o1Metadata(inputDraft, published.ipfs!.imageCid).uri, editableMetadata: input.editableMetadata ?? false };
     assert(buildInput.intentId === p.id && buildInput.launchpadFeeWei === p.launchpadFeeWei
       && buildInput.chainDeadline * 1000 > p.expiresAt && buildInput.chainDeadline * 1000 <= p.serverTime + 1800000);
@@ -141,13 +156,13 @@ export function validateLongPlan(raw: unknown, input: LaunchInput, published: Pu
     && [tx.gas, tx.gasPrice, tx.nonce].every(hex));
   let extraGas = 0n;
   if (input.chainId === 8453) {
-    assert(o1 && p.baseFees && Object.keys(p.baseFees).sort().join(',') === 'l1DataFeeWei,operatorFeeWei'
+    assert((o1 || stonks) && p.baseFees && Object.keys(p.baseFees).sort().join(',') === 'l1DataFeeWei,operatorFeeWei'
       && [p.baseFees.l1DataFeeWei, p.baseFees.operatorFeeWei].every(v => typeof v === 'string' && /^(0|[1-9][0-9]{0,16})$/.test(v)));
     extraGas = BigInt(p.baseFees!.l1DataFeeWei) + BigInt(p.baseFees!.operatorFeeWei);
   } else assert(p.baseFees === undefined);
   const estimate = BigInt(p.estimatedGas), gas = BigInt(tx.gas), price = BigInt(tx.gasPrice);
-  assert(estimate >= 21000n && gas === (estimate * 120n + 99n) / 100n && gas <= (o1 ? 8000000n : 3000000n) && price > 0n
-    && price <= 10n ** 12n && gas * price <= 5n * 10n ** 16n && p.maximumGasWei === String(gas * price + extraGas) && BigInt(tx.value) === BigInt(p.launchpadFeeWei) && (!o1 ? p.launchpadFeeWei === '0' : gas * price + extraGas + BigInt(tx.value) <= 5n * 10n ** 16n));
+  assert(estimate >= 21000n && gas === (estimate * 120n + 99n) / 100n && gas <= (o1 || stonks ? 8000000n : 3000000n) && price > 0n
+    && price <= 10n ** 12n && gas * price <= 5n * 10n ** 16n && p.maximumGasWei === String(gas * price + extraGas) && BigInt(tx.value) === BigInt(p.launchpadFeeWei) && (!o1 && !stonks ? p.launchpadFeeWei === '0' : gas * price + extraGas + BigInt(tx.value) <= 5n * 10n ** 16n));
   assert(p.usd?.sourceLabel === 'Coinbase ETH/USD spot' && /^\d{1,12}$/.test(p.usd.microUsdPerEth)
     && BigInt(p.usd.microUsdPerEth) > 0n && Number.isSafeInteger(p.usd.quotedAt)
     && p.usd.quotedAt <= p.serverTime && p.serverTime - p.usd.quotedAt < 60000);
@@ -176,6 +191,22 @@ export async function sendLongWallet(provider: EIP1193Provider, plan: LongPlan, 
   await check();
   const code = await provider.request({ method: 'eth_getCode', params: [tx.to as `0x${string}`, 'latest'] });
   if (code === '0x' || !same(keccak256(code), plan.profile.launcher.codeHash)) throw new LaunchError('contract_unverified');
+  if (plan.profile.launchpad === 'stonks') {
+    const profile = readStonksProfile(plan.profile);
+    const slot = toHex(BigInt(keccak256(toBytes('eip1967.proxy.implementation'))) - 1n, { size: 32 });
+    for (const contract of [profile.launcher, profile.locker]) {
+      const stored = await provider.request({ method: 'eth_getStorageAt', params: [contract.address, slot, 'latest'] });
+      const implementationCode = await provider.request({ method: 'eth_getCode', params: [contract.implementation, 'latest'] });
+      if (!same(`0x${stored?.slice(-40)}`, contract.implementation) || !same(keccak256(implementationCode), contract.implementationCodeHash))
+        throw new LaunchError('contract_unverified');
+    }
+    const build = plan.buildInput as StonksBuildInput;
+    const data = encodeFunctionData({ abi: STONKS_ABI, functionName: 'predictTokenAddress',
+      args: [build.draft.name, build.draft.ticker, STONKS_SUPPLY, tx.from as `0x${string}`, stonksSalt(build.intentId)] });
+    const result = await provider.request({ method: 'eth_call', params: [{ to: tx.to as `0x${string}`, data }, 'latest'] });
+    if (!same(decodeFunctionResult({ abi: STONKS_ABI, functionName: 'predictTokenAddress', data: result }), plan.predictedAsset))
+      throw new LaunchError('contract_unverified');
+  }
   const nonce = await provider.request({ method: 'eth_getTransactionCount', params: [tx.from as `0x${string}`, 'pending'] });
   if (BigInt(nonce) !== BigInt(tx.nonce)) throw new LaunchError('quote_expired');
   const balanceRaw = await provider.request({ method: 'eth_getBalance', params: [tx.from as `0x${string}`, 'pending'] });

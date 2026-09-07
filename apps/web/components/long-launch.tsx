@@ -579,9 +579,14 @@ function ScopedLongLaunch({
               <summary>Launch details</summary>
               <p>
                 {name} · ${ticker} · {Number(wei(validPlan.review.totalSupply) / 10n ** 18n).toLocaleString()} tokens · no creator allocation ·
-                {validPlan.review.metadataMutable ? "editable metadata" : "fixed metadata"}
+                {padId === 'stonks' ? 'launch details recorded on-chain' : validPlan.review.metadataMutable ? "editable metadata" : "fixed metadata"}
                 {padId === "longbow" && " · 1% Longbow allocation"}
               </p>
+              {padId === 'stonks' && <p>
+                Creator share: {validPlan.terms!.creatorBps / 100}% of the 1% trading fee. Liquidity is locked.
+                {!validPlan.condition!.priceFresh && ' The stock price uses its saved anchor.'}
+                {' '}The opening price can change while wallet approval is pending. Cancel old wallet requests before retrying.
+              </p>}
               <p>
                 Maximum gas budget: {formatEth(wei(validPlan.maximumGasWei))} (
                 {formatUsd(wei(validPlan.maximumGasWei), usd, 0)}). Includes a

@@ -26,6 +26,8 @@ const claimDisabledReasons = [
 export type FeePosition = {
   id: string;
   target: string;
+  collectionToken?: string;
+  claimMode?: 'collect' | 'claim';
   payouts: FeePayout[];
   verification: 'live' | 'indexed';
   claimable: boolean;
@@ -50,6 +52,8 @@ export type ClaimQuote = {
   chainId: ChainId;
   address: string;
   target: string;
+  collectionToken?: string;
+  claimMode?: 'collect' | 'claim';
   escrowVersion?: 'current' | 'legacy';
   data: `0x${string}`;
   poolId?: `0x${string}`;
@@ -65,6 +69,7 @@ export type ClaimQuote = {
   expiresAt: number;
 };
 
+export const stonksClaimAbi = parseAbi(['function collectAll(address token)', 'function claim(address token)', 'event Transfer(address indexed from,address indexed to,uint256 value)', 'event PayoutClaimed(address indexed to,address indexed token,uint256 amount)']);
 export const claimAbi = parseAbi([
   'function claimFor(address recipient, address currency)',
   'function collectFees(bytes32 poolId) returns (uint128 fees0, uint128 fees1)',
@@ -210,7 +215,7 @@ export function parseFees(
     !equal(result.address, owner) ||
     result.chainId !== chainId ||
     result.padId !== padId ||
-    !['long', 'o1', 'longbow'].includes(padId) ||
+    !['long', 'o1', 'longbow', 'stonks'].includes(padId) ||
     !supportsChain(padId, chainId) ||
     !['ready', 'partial', 'unavailable'].includes(result.status) ||
     (result.reason !== undefined &&
@@ -240,6 +245,7 @@ export function parseFees(
         !id(position.id) ||
         !nonzeroAddress(position.target) ||
         !payouts(position.payouts) ||
+        (padId === 'stonks' && (!nonzeroAddress(position.collectionToken) || !['collect', 'claim'].includes(position.claimMode ?? '') || position.verification !== 'live')) ||
         !['live', 'indexed'].includes(position.verification) ||
         typeof position.claimable !== 'boolean' ||
         (isLockedPoolClaim(padId) &&
@@ -334,7 +340,7 @@ export function mergeFeePages(previous: FeeSource, page: FeeSource): FeeSource {
     const existing = positions.get(position.id);
     if (
       existing &&
-      (!equal(existing.target, position.target) ||
+      (!equal(existing.target, position.target) || existing.collectionToken !== position.collectionToken || existing.claimMode !== position.claimMode ||
         (existing.escrowVersion ?? 'current') !==
           (position.escrowVersion ?? 'current') ||
         existing.payouts.length !== position.payouts.length ||
@@ -369,10 +375,10 @@ export function validateClaim(value: unknown): ClaimQuote {
   if (
     !quote ||
     !id(quote.positionId) ||
-    !['long', 'o1', 'longbow'].includes(quote.kind) ||
+    !['long', 'o1', 'longbow', 'stonks'].includes(quote.kind) ||
     !(isLockedPoolClaim(quote.kind)
       ? quote.chainId === 4663
-      : [4663, 8453].includes(quote.chainId)) ||
+      : quote.kind === 'stonks' ? quote.chainId === 8453 : [4663, 8453].includes(quote.chainId)) ||
     !nonzeroAddress(quote.address) ||
     !nonzeroAddress(quote.target) ||
     (quote.escrowVersion !== undefined &&
@@ -401,14 +407,20 @@ export function validateClaim(value: unknown): ClaimQuote {
   let decoded;
   try {
     decoded = decodeFunctionData({
-      abi: quote.escrowVersion === 'legacy' ? legacyClaimAbi : claimAbi,
+      abi: quote.kind === 'stonks' ? stonksClaimAbi : quote.escrowVersion === 'legacy' ? legacyClaimAbi : claimAbi,
       data: quote.data,
     });
   } catch {
     throw new AppError('invalid_response');
   }
   if (
-    isLockedPoolClaim(quote.kind)
+    quote.kind === 'stonks'
+      ? !nonzeroAddress(quote.collectionToken) || !['collect', 'claim'].includes(quote.claimMode ?? '')
+        || quote.data.length !== 74 || decoded.functionName !== (quote.claimMode === 'collect' ? 'collectAll' : 'claim')
+        || !equal(decoded.args[0] as string, quote.collectionToken!)
+        || (quote.claimMode === 'claim' ? quote.payouts.length !== 1 || !equal(quote.collectionToken!, quote.payouts[0].asset)
+          : quote.payouts.length !== 2 || !quote.payouts.some(p => equal(p.asset, quote.collectionToken!)))
+      : isLockedPoolClaim(quote.kind)
       ? quote.payouts.length !== 2 ||
         decoded.functionName !== 'collectFees' ||
         quote.data.length !== 74 ||
@@ -418,7 +430,7 @@ export function validateClaim(value: unknown): ClaimQuote {
           (quote.escrowVersion === 'legacy' ? 'claim' : 'claimFor') ||
         quote.data.length !== 138 ||
         !equal(decoded.args[0], quote.address) ||
-        !equal(decoded.args[1], quote.payouts[0].asset)
+        !equal(decoded.args[1] as string, quote.payouts[0].asset)
   )
     throw new AppError('invalid_response');
   return quote;
@@ -437,6 +449,7 @@ export async function prepareClaim(
     quote.chainId !== source.chainId ||
     quote.kind !== source.padId ||
     quote.positionId !== position.id ||
+    quote.collectionToken !== position.collectionToken || quote.claimMode !== position.claimMode ||
     !equal(quote.target, position.target) ||
     (quote.escrowVersion ?? 'current') !==
       (position.escrowVersion ?? 'current') ||

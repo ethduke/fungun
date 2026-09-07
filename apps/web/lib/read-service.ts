@@ -4,12 +4,13 @@ import { AppError, retrySeconds } from './user-error.ts';
 const CATALOG_MAX_AGE = 6 * 60 * 60 * 1000;
 
 export type CatalogPair = {
-  id: Extract<PairId, `rwa-${string}` | `long-${string}`>;
+  id: Extract<PairId, `rwa-${string}` | `long-${string}` | `stonks-${string}`>;
   symbol: string;
 };
 export type CatalogPad = {
   status: 'ready' | 'unavailable';
-  pairs: CatalogPair[];
+  pairs: (CatalogPair & { priceFresh?: boolean })[];
+  terms?: { creatorBps: number; platformBps: number; lpBps: number; tradingFeeBps: number; amountWei: string; pendingFeeSplit: { platformBps: number; lpBps: number; executeAfter: number } | null };
 };
 export type Catalog = {
   chainId: ChainId;
@@ -174,8 +175,8 @@ export function parseCatalog(value: unknown, chainId: ChainId): Catalog {
     throw new AppError('invalid_response');
   for (const [pad, entry] of Object.entries(catalog.pads)) {
     if (
-      !['long', 'o1'].includes(pad) ||
-      (chainId === 8453 && pad === 'long') ||
+      !['long', 'o1', 'stonks'].includes(pad) ||
+      (chainId === 8453 && pad === 'long') || (chainId !== 8453 && pad === 'stonks') ||
       !entry ||
       !['ready', 'unavailable'].includes(entry.status) ||
       !Array.isArray(entry.pairs) ||
@@ -186,11 +187,21 @@ export function parseCatalog(value: unknown, chainId: ChainId): Catalog {
           typeof pair.id !== 'string' ||
           !(pad === 'long'
             ? /^long-[A-Z0-9._-]{1,24}$/.test(pair.id)
-            : /^rwa-[a-f0-9]{24}$/.test(pair.id)) ||
+            : pad === 'stonks' ? /^stonks-[a-f0-9]{24}$/.test(pair.id) : /^rwa-[a-f0-9]{24}$/.test(pair.id)) ||
           typeof pair.symbol !== 'string' ||
           !/^[A-Za-z0-9._-]{1,24}$/.test(pair.symbol),
       )
     )
+      throw new AppError('invalid_response');
+  }
+  const stonks = catalog.pads.stonks;
+  if (stonks?.status === 'ready') {
+    const terms = stonks.terms;
+    if (!terms || ![terms.creatorBps, terms.platformBps, terms.lpBps].every(v => Number.isInteger(v) && v >= 0 && v <= 10000)
+      || terms.creatorBps + terms.platformBps + terms.lpBps !== 10000 || terms.tradingFeeBps !== 100
+      || typeof terms.amountWei !== 'string' || !/^(0|[1-9][0-9]{0,16})$/.test(terms.amountWei)
+      || stonks.pairs.some(pair => typeof pair.priceFresh !== 'boolean')
+      || (terms.pendingFeeSplit !== null && (!terms.pendingFeeSplit || !Number.isSafeInteger(terms.pendingFeeSplit.executeAfter))))
       throw new AppError('invalid_response');
   }
   if (!catalog.pads.o1 || (chainId === 4663 && !catalog.pads.long))
@@ -227,7 +238,7 @@ export async function checkTicker(
           !['unsupported', 'not_configured', 'unavailable'].includes(
             result.reason,
           )) ||
-        (pad === 'o1' && result.status !== 'unverified') ||
+        (['o1', 'stonks'].includes(pad) && result.status !== 'unverified') ||
         (result.status !== 'unverified' &&
           (!Number.isFinite(result.checkedAt) ||
             !Number.isFinite(result.expiresAt)))
@@ -242,7 +253,7 @@ export function tickerNotice(check: TickerCheck | null) {
   if (!check) return null;
   return Object.entries(check.results)
     .map(([pad, result]) => {
-      const label = pad === 'long' ? 'Long' : 'O1';
+      const label = pad === 'long' ? 'Long' : pad === 'stonks' ? 'Stonks' : 'O1';
       if (result?.status !== 'unverified')
         return `${label}: reservation checked; see Launch below.`;
       if (result.reason === 'unsupported')

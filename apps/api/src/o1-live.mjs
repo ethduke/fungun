@@ -1,10 +1,9 @@
 import { createHash, createHmac } from 'node:crypto';
-import { decodeEventLog, decodeFunctionData, decodeFunctionResult, encodeAbiParameters, keccak256, serializeTransaction, toBytes, toHex, zeroAddress } from 'viem';
-import { LongLive } from './long-live.mjs';
+import { decodeEventLog, decodeFunctionData, decodeFunctionResult, encodeAbiParameters, keccak256, toBytes, toHex, zeroAddress } from 'viem';
+import { BaseLaunchLive } from './base-launch-live.mjs';
 import { O1MetadataPublisher } from './o1-metadata.mjs';
 import { readLaunchTokens, launchPairId } from './launch-catalog.mjs';
 import { O1_LAUNCH_ABI, O1_BASE_ABI, B20_FACTORY, B20_ACTIVATION, o1LaunchRoles, buildUnsignedO1Launch, o1Params, readO1LaunchProfile } from '../../web/lib/long-encoding/o1-launch.mjs';
-import { oracleAbi } from './fee-contracts.mjs';
 import { ipfsContentId, ipfsUri } from './ipfs-content.mjs';
 import { rpcNumber } from './fee-rpc.mjs';
 import { checkReadDeadline } from './upstream.mjs';
@@ -37,7 +36,7 @@ export function readO1LiveConfig(env, longLaunch) {
     return { profile, assetOrigin: longLaunch.assetOrigin };
   } catch { throw new ServiceError('o1_configuration', 503); }
 }
-export class O1Live extends LongLive {
+export class O1Live extends BaseLaunchLive {
   constructor(config, upstream, budget, options) {
     super({ ...config, longLaunch: config.o1Launch }, upstream, budget, options);
     this.o1Metadata = new O1MetadataPublisher(this.db, upstream, this.fetcher, config.o1Key);
@@ -56,30 +55,6 @@ export class O1Live extends LongLive {
       ], block);
       if (!same(deployer, p.tokenDeployer.address) || !same(factory, p.launcher.address)) fail('contract_unverified');
     }
-  }
-  async baseFees(transaction, gas, gasPrice, nonce, block) {
-    const oracle = this.config.feeContracts?.baseOracle;
-    if (!oracle) fail('contract_unverified');
-    await this.rpc.verify(8453, [oracle], true, block);
-    if (nonce > BigInt(Number.MAX_SAFE_INTEGER)) fail('launch_gas_limit');
-    const encoded = serializeTransaction({ chainId: 8453, type: 'legacy', nonce: Number(nonce),
-      to: transaction.to, data: transaction.data, value: BigInt(transaction.value), gas, gasPrice });
-    const [l1, operator] = await this.rpc.calls(8453, [
-      { address: oracle.address, abi: oracleAbi, functionName: 'getL1Fee', args: [encoded] },
-      { address: oracle.address, abi: oracleAbi, functionName: 'getOperatorFee', args: [gas] },
-    ], block);
-    if (l1 < 0n || operator < 0n || l1 + operator > 5n * 10n ** 16n) fail('launch_gas_limit');
-    return { l1DataFeeWei: ((l1 * 120n + 99n) / 100n).toString(), operatorFeeWei: operator.toString() };
-  }
-  async paidGas(receipt, block) {
-    const execution = await super.paidGas(receipt, block);
-    if (this.chainId !== 8453) return execution;
-    const oracle = this.config.feeContracts?.baseOracle;
-    if (!oracle) fail('contract_unverified');
-    await this.rpc.verify(8453, [oracle], true, block);
-    const [operator] = await this.rpc.calls(8453, [{ address: oracle.address, abi: oracleAbi,
-      functionName: 'getOperatorFee', args: [rpcNumber(receipt.gasUsed)] }], block);
-    return execution + rpcNumber(receipt.l1Fee) + operator;
   }
   async launchFee(block) {
     const [fee] = await this.rpc.calls(this.chainId, [call(this.live.profile.launcher.address, 'nativeLaunchFee')], block);

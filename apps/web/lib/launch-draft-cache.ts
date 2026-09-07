@@ -97,13 +97,13 @@ function selection(value: unknown): LaunchDraft['selection'] {
     !record(value) ||
     !isWebviewChain(Number(value.chainId)) ||
     !Array.isArray(value.destinations) ||
-    value.destinations.length !== 3
+    ![3, 4].includes(value.destinations.length)
   )
     return invalid();
   const destinations: Destination[] = value.destinations.map((item) => {
     if (
       !record(item) ||
-      !['long', 'o1', 'longbow'].includes(String(item.id)) ||
+      !['long', 'o1', 'longbow', 'stonks'].includes(String(item.id)) ||
       typeof item.selected !== 'boolean' ||
       ![4663, 8453].includes(Number(item.chainId)) ||
       typeof item.chainId !== 'number' ||
@@ -124,7 +124,9 @@ function selection(value: unknown): LaunchDraft['selection'] {
       editableMetadata: item.editableMetadata,
     };
   });
-  if (new Set(destinations.map((item) => item.id)).size !== 3) return invalid();
+  if (new Set(destinations.map((item) => item.id)).size !== destinations.length) return invalid();
+  if (!destinations.some(item => item.id === 'stonks')) destinations.push({ ...DEFAULT_DESTINATIONS.find(item => item.id === 'stonks')! });
+  if (destinations.length !== 4) return invalid();
   return { chainId: Number(value.chainId) as ChainId, destinations };
 }
 

@@ -2,6 +2,7 @@ const text = (value) => (typeof value === 'string' ? value.trim() : '');
 
 export function feedLaunchpad(row) {
   const raw = text(row.launchpad);
+  if (raw === 'Stonks' && Number(row.chain_id) === 8453) return { label: 'Stonks · Base', title: 'Stonks Exchange · Base' };
   const version = /^(?:v)?([34])$/i.exec(String(row.version ?? ''))?.[1];
   const uni = /^(?:uniswap|uni)\s*v?\s*([34])?$/i.exec(raw);
   const protocol = uni?.[1] || version;

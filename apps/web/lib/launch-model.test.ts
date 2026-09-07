@@ -35,18 +35,18 @@ await test('selecting Long or Longbow switches the shared ticker destination and
   let selected = destinations().map(pad => pad.id === 'o1' ? { ...pad, selected: true } : pad);
   const original = structuredClone(selected);
   selected = selectDestination(selected, { ...selected[2], selected: true });
-  assert.deepEqual(selected.map(pad => pad.selected), [false, true, true]);
+  assert.deepEqual(selected.map(pad => pad.selected), [false, true, true, false]);
   assert.deepEqual(validateDraft(draft, selected, 4663), {});
   selected = selectDestination(selected, { ...selected[0], selected: true });
-  assert.deepEqual(selected.map(pad => pad.selected), [true, true, false]);
+  assert.deepEqual(selected.map(pad => pad.selected), [true, true, false, false]);
   assert.deepEqual(selected.map(pad => pad.pairId), original.map(pad => pad.pairId));
   selected = selectDestination(selected, { ...selected[0], selected: false });
-  assert.deepEqual(selected.map(pad => pad.selected), [false, true, false]);
-  assert.deepEqual(original.map(pad => pad.selected), [true, true, false]);
+  assert.deepEqual(selected.map(pad => pad.selected), [false, true, false, false]);
+  assert.deepEqual(original.map(pad => pad.selected), [true, true, false, false]);
 });
 
 await test('a restored legacy selection with both ticker-sharing pads cannot launch', () => {
-  const selected = destinations().map(pad => ({ ...pad, selected: true }));
+  const selected = destinations().map(pad => ({ ...pad, selected: pad.chainId === 4663 }));
   assert.equal(hasSharedTickerConflict(selected), true);
   assert.match(validateDraft(draft, selected, 4663).destinations, /Choose Long or Longbow/);
   assert.equal(draftStatus(validateDraft(draft, selected, 4663), false), 'incomplete');
@@ -240,7 +240,7 @@ await test('Long rejects unsupported chain, route and editable metadata', () => 
 });
 
 await test('multi-launch validates every selected destination', () => {
-  const pads = destinations().map((pad) => ({ ...pad, selected: pad.id !== 'longbow' }));
+  const pads = destinations().map((pad) => ({ ...pad, selected: ['long', 'o1'].includes(pad.id) }));
   assert.deepEqual(validateDraft(draft, pads), {});
   assert.ok(
     validateDraft(
@@ -255,7 +255,7 @@ await test('multi-launch validates every selected destination', () => {
 await test('Robinhood is the default chain with all three launchpads available', () => {
   assert.equal(DEFAULT_CHAIN_ID, 4663);
   assert.ok(
-    destinations().every((pad) => supportsChain(pad.id, DEFAULT_CHAIN_ID)),
+    destinations().filter(pad => pad.id !== 'stonks').every((pad) => supportsChain(pad.id, DEFAULT_CHAIN_ID)),
   );
   assert.deepEqual(
     destinations()
@@ -266,7 +266,7 @@ await test('Robinhood is the default chain with all three launchpads available',
 });
 
 await test('Base selects O1 and resets chain-specific quote addresses', () => {
-  const before = destinations().map((pad) => ({ ...pad, selected: pad.id !== 'longbow' }));
+  const before = destinations().map((pad) => ({ ...pad, selected: ['long', 'o1'].includes(pad.id) }));
   before[1].route = 'rwa';
   before[1].pairId = O1_ROBINHOOD_PAIRS.find((pair) => pair.symbol === 'AAPL')!.id;
   const after = selectChain(before, 8453);

@@ -8,6 +8,7 @@ import {
 } from 'viem';
 import { base, robinhood } from 'viem/chains';
 import {
+  stonksClaimAbi,
   claimAbi,
   legacyClaimAbi,
   isLockedPoolClaim,
@@ -247,6 +248,15 @@ export function receiptPayouts(
     return null;
   const amounts = quote.payouts.map(() => 0n);
   for (const log of receipt.logs) {
+    if (quote.kind === 'stonks') {
+      try {
+        const event = decodeEventLog({ abi: stonksClaimAbi, data: log.data, topics: log.topics as [`0x${string}`, ...`0x${string}`[]] });
+        const index = quote.payouts.findIndex(p => p.asset.toLowerCase() === log.address.toLowerCase());
+        if (event.eventName === 'Transfer' && index >= 0 && event.args.from.toLowerCase() === quote.target.toLowerCase() && event.args.to.toLowerCase() === quote.address.toLowerCase())
+          amounts[index] += event.args.value;
+      } catch { /* Only actual matching ERC-20 payouts count as received. */ }
+      continue;
+    }
     if (log.address.toLowerCase() !== quote.target.toLowerCase()) continue;
     let event;
     try {

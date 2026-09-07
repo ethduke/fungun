@@ -11,11 +11,11 @@ export function confirmedLongTokenUrl(receipt: LaunchReceipt | null) {
     : null;
 }
 export function confirmedLaunchTokenUrl(pad: LaunchpadId, receipt: LaunchReceipt | null, chainId: ChainId = 4663) {
-  if (chainId === 8453 && pad !== 'o1') return null;
+  if ((chainId === 8453 && !['o1', 'stonks'].includes(pad)) || (pad === 'stonks' && chainId !== 8453)) return null;
   if (pad === 'long') return confirmedLongTokenUrl(receipt);
   if (receipt?.status !== 'confirmed' || !/^0x[a-f0-9]{40}$/i.test(receipt.asset ?? '')) return null;
   const asset = receipt.asset!.toLowerCase();
-  return pad === 'longbow' ? `https://longbow.gg/c/${asset}`
+  return pad === 'stonks' ? `https://www.thestonks.exchange/token/${asset}` : pad === 'longbow' ? `https://longbow.gg/c/${asset}`
     : `https://launch.o1.exchange/token/${asset}?chain=${chainId}`;
 }
 export function validateLaunchStatus(value: LaunchReceipt, recovery: LaunchRecovery) {

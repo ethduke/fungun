@@ -5,7 +5,7 @@ import { validAddress } from "./fee-contracts.mjs";
 import { validatePriceInput } from "./tracked-prices.mjs";
 
 export function validateInput(kind, input) {
-  if (kind === "fomo") {
+  if (['fomo', 'stonks-feed'].includes(kind)) {
     if (!input || typeof input !== "object" || Array.isArray(input) || Object.keys(input).length)
       throw new ServiceError("invalid_request", 400);
     return {};
@@ -27,8 +27,8 @@ export function validateInput(kind, input) {
     if (
       kind === "fees"
         ? ![4663, 8453].includes(input.chainId) ||
-          !["long", "o1", "longbow"].includes(input.padId) ||
-          (input.padId !== "o1" && input.chainId !== 4663) ||
+          !["long", "o1", "longbow", "stonks"].includes(input.padId) ||
+          (input.padId === 'stonks' ? input.chainId !== 8453 : input.padId !== 'o1' && input.chainId !== 4663) ||
           (Object.hasOwn(input, "cursor") &&
             (typeof input.cursor !== "string" || !/^[a-f0-9]{64}$/.test(input.cursor)))
         : typeof input.positionId !== "string" || !/^[a-f0-9]{64}$/.test(input.positionId)
@@ -56,7 +56,7 @@ export function validateInput(kind, input) {
       input.pads.length > 2 ||
       new Set(input.pads).size !== input.pads.length ||
       input.pads.some(
-        (pad) => !["long", "o1"].includes(pad) || (pad === "long" && input.chainId !== 4663),
+        (pad) => !['long', 'o1', 'stonks'].includes(pad) || (pad === 'long' && input.chainId !== 4663) || (pad === 'stonks' && input.chainId !== 8453),
       ) ||
       (input.pads.includes("long") && !/^[A-Z]{1,11}$/.test(input.ticker)))
   )
@@ -115,7 +115,7 @@ export function createHandler(config, budget, adapters, fees, trackedPrices, lau
         request.headers["sec-fetch-site"] === "cross-site"
       )
         throw new ServiceError("origin_denied", 403);
-      const kind = ["fomo", "catalog", "ticker", "fees", "claim-prepare", "tracked-prices", "launch-prepare", "launch-reserve", "launch-status", "launch-estimate"].find(
+      const kind = ["fomo", "stonks-feed", "catalog", "ticker", "fees", "claim-prepare", "tracked-prices", "launch-prepare", "launch-reserve", "launch-status", "launch-estimate"].find(
         (operation) => request.url === `/v1/${operation}`,
       );
       if (!kind || request.method !== "POST" || request.headers["x-fungun-intent"] !== kind)
@@ -126,6 +126,7 @@ export function createHandler(config, budget, adapters, fees, trackedPrices, lau
       budget.request(ip, kind === "ticker");
       const input = validateInput(kind, await readBody(request, kind.startsWith("launch-") ? 4096 : 2048));
       const value =
+        kind === 'stonks-feed' ? await launches.handlers.stonks.feed() :
         kind === "fomo" ? fomo.snapshot() :
         kind.startsWith("launch-")
           ? await launches.run(kind, input)

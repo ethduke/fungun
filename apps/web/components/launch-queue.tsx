@@ -34,7 +34,7 @@ export function LaunchQueue({ destinations, enabled, ready, tickerReserved, name
         <LongLaunch
           enabled={enabled}
           chainId={pad.chainId}
-          ready={ready && !conflicting && (pad.id === 'o1' || !tickerReserved)}
+          ready={ready && !conflicting && (!['long', 'longbow'].includes(pad.id) || !tickerReserved)}
           pairId={pad.pairId}
           editableMetadata={pad.editableMetadata}
           showPadName={destinations.length > 1}

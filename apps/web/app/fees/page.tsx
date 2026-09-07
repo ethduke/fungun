@@ -599,6 +599,7 @@ function ConnectedFees({ address }: { address: string }) {
                   ))}
                 </div>
               )}
+              {source.padId === 'stonks' && <p>Indexed Stonks creations. Fees pay the current recipients; redirected fees may belong to another wallet. Custom-recipient and older-launch coverage can be incomplete. Undelivered payouts appear separately when supported.</p>}
               {note && <p>{note}</p>}
               {entry?.pageError && (
                 <p className="field-error" role="alert">

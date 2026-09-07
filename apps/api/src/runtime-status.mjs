@@ -41,6 +41,11 @@ export function runtimeStatus(env) {
     message:
       "Configuration presence only; no live verification, requests or writes were performed.",
     features: [
+      feature("stonks_base_wallet_launch", [
+        ["STONKS_BASE_PROFILE_JSON", !!config.stonksLaunch], ["BASE_RPC_URL", present(config.baseRpcUrl)],
+        ["FEE_CONTRACTS_JSON.baseOracle", !!config.feeContracts.baseOracle],
+      ], ["READ_UPSTREAMS", "STONKS_BASE_WALLET_LAUNCH"]),
+      feature("stonks_base_creator_fees", [["STONKS_BASE_PROFILE_JSON", !!config.stonksLaunch], ["BASE_RPC_URL", present(config.baseRpcUrl)]], fees),
       feature("o1_catalog", [o1], reads),
       feature(
         "long_catalog_subset",

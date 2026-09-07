@@ -44,13 +44,13 @@ export type LaunchCostQuote = {
 };
 
 export type ApproximateLaunchCost = {
-  chainId: 4663; pairId: string; gasUnits: bigint; gasPriceWei: bigint;
+  chainId: ChainId; baseFees?: { l1DataFeeWei: bigint; operatorFeeWei: bigint }; pairId: string; gasUnits: bigint; gasPriceWei: bigint;
   basis: 'recent-simulations' | 'gas-limit'; expiresAt: number;
   launchpadFeeWei: bigint; launchFeeSource: LaunchFeeSource;
 };
 export function parseApproximateLaunchCost(raw: unknown, started: number, pairId: string = 'long-NVDA'): ApproximateLaunchCost {
   const value = raw as Record<string, unknown>;
-  if (!value || value.chainId !== 4663 || value.pairId !== pairId || typeof value.launchpadFeeWei !== 'string' || !/^(0|[1-9][0-9]{0,16})$/.test(value.launchpadFeeWei)
+  if (!value || (value.chainId !== 4663 && value.chainId !== 8453) || value.pairId !== pairId || typeof value.launchpadFeeWei !== 'string' || !/^(0|[1-9][0-9]{0,16})$/.test(value.launchpadFeeWei)
     || !['recent-simulations', 'gas-limit'].includes(String(value.basis))
     || typeof value.gasUnits !== 'string' || !/^\d{1,7}$/.test(value.gasUnits)
     || typeof value.gasPriceWei !== 'string' || !/^\d{1,13}$/.test(value.gasPriceWei)
@@ -59,19 +59,25 @@ export function parseApproximateLaunchCost(raw: unknown, started: number, pairId
   const launchFeeSource = parseLaunchFeeSource(value.launchFeeSource);
   if (launchFeeSource.amountWei !== value.launchpadFeeWei) throw new Error('Invalid launch fee');
   const quoted = Number(value.quotedAt), expires = Number(value.expiresAt), server = Number(value.serverTime);
-  if (gasUnits < 21000n || gasUnits > (launchpadForPair(pairId) === 'o1' ? 8000000n : 3000000n) || gasPriceWei <= 0n || gasPriceWei > 10n ** 12n
+  if (gasUnits < 21000n || gasUnits > (['o1', 'stonks'].includes(launchpadForPair(pairId)) ? 8000000n : 3000000n) || gasPriceWei <= 0n || gasPriceWei > 10n ** 12n
     || expires - quoted !== 300000 || server < quoted || server >= expires || !Number.isFinite(started) || started < 0)
     throw new Error('Invalid gas estimate');
-  return { chainId: 4663, pairId, gasUnits, gasPriceWei, launchpadFeeWei: BigInt(value.launchpadFeeWei), launchFeeSource,
+  let baseFees: ApproximateLaunchCost['baseFees'];
+  if (value.chainId === 8453) {
+    const fees = value.baseFees as Record<string, unknown>;
+    if (!fees || ![fees.l1DataFeeWei, fees.operatorFeeWei].every(v => typeof v === 'string' && /^(0|[1-9][0-9]{0,16})$/.test(v))) throw new Error('Invalid Base fees');
+    baseFees = { l1DataFeeWei: BigInt(fees.l1DataFeeWei as string), operatorFeeWei: BigInt(fees.operatorFeeWei as string) };
+  }
+  return { chainId: value.chainId as ChainId, baseFees, pairId, gasUnits, gasPriceWei, launchpadFeeWei: BigInt(value.launchpadFeeWei), launchFeeSource,
     basis: value.basis as ApproximateLaunchCost['basis'], expiresAt: started + expires - server };
 }
 export function approximateLaunchQuote(estimate: ApproximateLaunchCost | null, contextKey: string, now: number): LaunchCostQuote | null {
   if (!estimate || estimate.expiresAt <= now) return null;
   const gasUnits = estimate.basis === 'gas-limit' ? estimate.gasUnits
     : (estimate.gasUnits * 120n + 99n) / 100n;
-  return { contextKey, chainId: 4663, quotedAt: now, expiresAt: now + 30000, nativeOnly: true,
+  return { contextKey, chainId: estimate.chainId, quotedAt: now, expiresAt: now + 30000, nativeOnly: true,
     pads: [{ id: launchpadForPair(estimate.pairId), launchFeeSource: estimate.launchFeeSource, steps: [{ kind: 'launch', valueWei: estimate.launchpadFeeWei, launchpadFeeWei: estimate.launchpadFeeWei,
-      network: { chainId: 4663, gasUnits, gasPriceWei: estimate.gasPriceWei } }] }] };
+      network: estimate.chainId === 8453 ? { chainId: 8453, gasUnits, gasPriceWei: estimate.gasPriceWei, ...estimate.baseFees! } : { chainId: 4663, gasUnits, gasPriceWei: estimate.gasPriceWei } }] }] };
 }
 
 export type UsdRate = {
@@ -254,8 +260,8 @@ export function calculateLaunchCosts(
   padLoop: for (const pad of quote.pads) {
     if (
       !selection.pads.includes(pad.id) ||
-      !['long', 'o1', 'longbow'].includes(pad.id) ||
-      (pad.id !== 'o1' && quote.chainId !== 4663) ||
+      !['long', 'o1', 'longbow', 'stonks'].includes(pad.id) ||
+      (pad.id === 'stonks' ? quote.chainId !== 8453 : pad.id !== 'o1' && quote.chainId !== 4663) ||
       !Array.isArray(pad.steps) ||
       pad.steps.length > 8 ||
       pad.steps.some((step) => !step || typeof step !== 'object') ||

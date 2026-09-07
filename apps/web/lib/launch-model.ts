@@ -7,7 +7,7 @@ import { LONG_MARKET_TICKERS } from './long-encoding/long-markets.mjs';
 
 export { LONG_MARKET_TICKERS };
 
-export type PadId = 'long' | 'o1';
+export type PadId = 'long' | 'o1' | 'stonks';
 export type LaunchpadId = PadId | 'longbow';
 export type ChainId = 4663 | 8453;
 export type PairId =
@@ -18,7 +18,8 @@ export type PairId =
   | 'sample-tsla'
   | `long-${(typeof LONG_MARKET_TICKERS)[number]}`
   | `longbow-${(typeof LONGBOW_MARKET_TICKERS)[number]}`
-  | `rwa-${string}`;
+  | `rwa-${string}`
+  | `stonks-${string}`;
 import type { Catalog } from './read-service';
 export type Route = 'rwa' | 'standard';
 
@@ -83,7 +84,7 @@ export function isWebviewChain(chainId: number) {
 }
 
 export function launchpadName(id: LaunchpadId) {
-  return { long: 'Long', o1: 'O1', longbow: 'Longbow' }[id];
+  return { long: 'Long', o1: 'O1', longbow: 'Longbow', stonks: 'Stonks' }[id];
 }
 
 export function readablePads(pads: LaunchpadId[]): PadId[] {
@@ -130,6 +131,7 @@ export const DEFAULT_DESTINATIONS: Destination[] = [
     pairId: 'longbow-NVDA',
     editableMetadata: false,
   },
+  { id: 'stonks', selected: false, chainId: 8453, route: 'rwa', pairId: 'stonks-unselected', editableMetadata: false },
 ];
 
 export function chainName(id: ChainId) {
@@ -137,7 +139,7 @@ export function chainName(id: ChainId) {
 }
 
 export function supportsChain(id: LaunchpadId, chainId: ChainId) {
-  return chainId === 4663 || (id === 'o1' && chainId === 8453);
+  return id === 'stonks' ? chainId === 8453 : chainId === 4663 || (id === 'o1' && chainId === 8453);
 }
 
 export function selectChain(destinations: Destination[], chainId: ChainId) {
@@ -197,6 +199,8 @@ export function validateDraft(
   )
     errors.destinations = 'Choose launchpads available on the selected chain.';
   for (const pad of active) {
+    if (pad.id === 'stonks' && (pad.chainId !== 8453 || pad.route !== 'rwa' || pad.editableMetadata))
+      errors.destinations = 'Stonks requires a Base stock pairing and immutable launch details.';
     if (
       (pad.id === 'long' || pad.id === 'longbow') &&
       (pad.chainId !== 4663 || pad.route !== 'rwa' || pad.editableMetadata)
@@ -210,6 +214,8 @@ export function validateDraft(
         ? !LONG_PAIRS.some((pair) => pair.id === pad.pairId)
         : pad.id === 'longbow'
           ? !LONGBOW_PAIRS.some((pair) => pair.id === pad.pairId)
+          : pad.id === 'stonks'
+            ? !(catalog?.chainId === 8453 && catalog.pads.stonks?.status === 'ready' && catalog.pads.stonks.pairs.some(pair => pair.id === pad.pairId))
           : !selectableO1Pairs(
               pad.chainId,
               catalog?.chainId === pad.chainId ? catalog.pads.o1 : undefined,
