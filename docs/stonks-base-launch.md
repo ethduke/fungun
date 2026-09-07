@@ -20,9 +20,9 @@ The launch salt binds the wallet, metadata hash, pairing and chain to the durabl
 
 Confirmation checks the successful transaction, both launch events, identity and metadata, on-chain token information, fixed supply, pool, NFT ownership and creator routing. An NFT ID from simulation is not assumed to remain valid: another user's launch can advance that global counter before this transaction is mined.
 
-## Feed and creator fees
+## Creator fees and market-feed scope
 
-The feed reads the official coin index and includes the latest 30 supported Stonks stock launches with Base identity and Stonks token links. Missing trade counts, inflow and price history remain unknown. The official feed is cached for two minutes, feed contract wiring for 15 minutes, and the stock catalog for ten minutes to stay within the shared read allowance. Launch and claim preparation always recheck contract state. Stonks polling has an independent unavailable state and stops while the market feed is hidden.
+The Market feed tracks Robinhood Chain only. Base launches remain available in the composer, and supported Stonks creator fees remain in Fees. There is no Stonks feed endpoint or background polling. The stock catalog is cached for ten minutes; launch and claim preparation always recheck contract state.
 
 Fees discovery uses the official index as a hint, then reads the verified launcher, locker, positions and current recipients. Coverage is marked partial because the index does not enumerate every custom recipient or old creator reassignment. The integration supports the standard creator route and calculates later split routing when an indexed creation is found.
 
@@ -33,7 +33,7 @@ Fees discovery uses the official index as a hint, then reads the verified launch
 - `STONKS_BASE_WALLET_LAUNCH=true` enables launch preparation.
 - `STONKS_BASE_PROFILE_JSON` supplies `chainId`, `launchpad`, `launcher`, `locker`, `registry`, `positionManager`, `factory`, `tokenDeployer` and `quotes`. Launcher/locker pins include implementation addresses and implementation hashes. Each quote has `id`, `token`, on-chain `symbol` and `decimals`.
 - Existing `BASE_RPC_URL`, `READ_UPSTREAMS`, `LAUNCH_ASSET_SERVICE_ORIGIN` and `FEE_CONTRACTS_JSON.baseOracle` are required for launches.
-- Existing `READ_FEES` and `WALLET_CLAIMS` govern discovery and wallet claims. Keeping the profile while disabling launches preserves fee and feed reads.
+- Existing `READ_FEES` and `WALLET_CLAIMS` govern discovery and wallet claims. Keeping the profile while disabling launches preserves creator-fee reads.
 
 All deployment values remain in ignored operational files or server runtime settings. Keep these variables out of the web build and public-prefixed environment variables.
 

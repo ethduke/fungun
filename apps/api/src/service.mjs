@@ -7,7 +7,7 @@ import { validateTokenImageInput } from "./o1-token-image.mjs";
 
 export function validateInput(kind, input) {
   if (kind === "o1-token-image") return validateTokenImageInput(input);
-  if (['fomo', 'stonks-feed'].includes(kind)) {
+  if (kind === "fomo") {
     if (!input || typeof input !== "object" || Array.isArray(input) || Object.keys(input).length)
       throw new ServiceError("invalid_request", 400);
     return {};
@@ -117,7 +117,7 @@ export function createHandler(config, budget, adapters, fees, trackedPrices, lau
         request.headers["sec-fetch-site"] === "cross-site"
       )
         throw new ServiceError("origin_denied", 403);
-      const kind = ["o1-token-image", "fomo", "stonks-feed", "catalog", "ticker", "fees", "claim-prepare", "tracked-prices", "launch-prepare", "launch-reserve", "launch-status", "launch-estimate"].find(
+      const kind = ["o1-token-image", "fomo", "catalog", "ticker", "fees", "claim-prepare", "tracked-prices", "launch-prepare", "launch-reserve", "launch-status", "launch-estimate"].find(
         (operation) => request.url === `/v1/${operation}`,
       );
       if (!kind || request.method !== "POST" || request.headers["x-fungun-intent"] !== kind)
@@ -128,7 +128,6 @@ export function createHandler(config, budget, adapters, fees, trackedPrices, lau
       budget.request(ip, kind === "ticker");
       const input = validateInput(kind, await readBody(request, kind.startsWith("launch-") ? 4096 : 2048));
       const value =
-        kind === 'stonks-feed' ? await launches.handlers.stonks.feed() :
         kind === "o1-token-image" ? await tokenImages.get(input) :
         kind === "fomo" ? fomo.snapshot() :
         kind.startsWith("launch-")
