@@ -1,4 +1,3 @@
-import { stonksCoins, stonksFeedRows } from './stonks-index.mjs';
 import { createHash, createHmac } from 'node:crypto';
 import { decodeEventLog, decodeFunctionResult, toHex, zeroAddress } from 'viem';
 import { BaseLaunchLive } from './base-launch-live.mjs';
@@ -61,19 +60,6 @@ export class StonksLive extends BaseLaunchLive {
     if (!state[0] || !state[3]) throw new UnsupportedPairError(this.live.profile.quotes.map(q => q.id));
     if (state[1] !== quote.decimals || state[4] !== quote.symbol || state[2] <= 0 || state[2] >= 887200) fail('contract_unverified');
     return { priceFresh: price[0], anchorTick: price[2], openingTickMagnitude: price[3] ? price[1] : price[2] };
-  }
-  async feed() {
-    if (!this.live || !this.config.readsEnabled) return { status: 'unavailable', pools: [] };
-    return this.cache.get('feed', 120000, () => withinReadDeadline(async () => {
-      // Browsing must fit the shared daily read allowance. Refresh feed wiring
-      // every 15 minutes; transaction preparation always verifies it afresh.
-      await this.cache.get('feed-wiring', 900000, async () => {
-        const block = await this.rpc.block(8453);
-        return verifyStonks(this.rpc, this.live.profile, block, false);
-      });
-      const coins = stonksCoins(await this.upstream.json('stonks', 'https://www.thestonks.exchange/api/coins', {}, 4 * 1024 * 1024));
-      return { status: 'ready', fetched_at: new Date(this.now()).toISOString(), pools: stonksFeedRows(coins, this.live.profile) };
-    }));
   }
   async catalog() {
     if (!this.live || !this.live.launchesEnabled || !this.config.readsEnabled) return { status: 'unavailable', pairs: [] };

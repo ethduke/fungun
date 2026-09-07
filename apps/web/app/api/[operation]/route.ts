@@ -1,7 +1,6 @@
 const operations = new Set([
   'o1-token-image',
   'fomo',
-  'stonks-feed',
   'catalog',
   'ticker',
   'fees',

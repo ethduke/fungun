@@ -32,7 +32,7 @@ Stablecoin quote assets remain valid for otherwise eligible nonstable tokens.
 Robinhood Chain supports Long, O1 and Longbow in the webview. Base offers O1 and
 Stonks Exchange. Stonks uses the same composer with 13 reviewed stock pairings,
 complete Base gas estimates, live creator-share checks and permanently locked liquidity.
-Its launches appear through a separately cached `/api/stonks-feed` read. Long has 64 static market choices; Longbow has 194 stock/RWA registry
+The Market feed tracks Robinhood Chain only; Base is available for launching. Long has 64 static market choices; Longbow has 194 stock/RWA registry
 choices, including the corrected SKHY ticker. O1 includes ETH and all 194 Robinhood
 RWA choices, with live availability through the read service and a dated saved
 catalog when offline. Selecting multiple launchpads represents separate deployments.

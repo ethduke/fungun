@@ -12,15 +12,3 @@ export function stonksCoins(body) {
     return c;
   });
 }
-export function stonksFeedRows(coins, profile) {
-  const quotes = new Map(profile.quotes.map(q => [q.token.toLowerCase(), q]));
-  return coins.filter(c => c.fee_locker.toLowerCase() === profile.locker.address.toLowerCase() && quotes.has(c.quote.toLowerCase()))
-    .filter(c => typeof c.name === 'string' && c.name.length <= 200 && typeof c.symbol === 'string' && c.symbol.length <= 24
-      && /^\d{1,12}$/.test(c.created_at))
-    .sort((a, b) => Number(b.created_at) - Number(a.created_at)).slice(0, 30).map(c => ({
-      chain_id: 8453, launchpad: 'Stonks', version: 'v3', quote_kind: 'shares',
-      pool: c.pool.toLowerCase(), meme: c.token.toLowerCase(), name: c.name, sym: c.symbol,
-      quote_symbol: quotes.get(c.quote.toLowerCase()).symbol.replace(/c$/, ''), created_at: Number(c.created_at),
-      total_in: null, swaps: null, trail: null,
-    }));
-}

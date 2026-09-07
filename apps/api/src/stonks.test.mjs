@@ -6,7 +6,7 @@ import { decodeFunctionData, encodeAbiParameters, encodeEventTopics, encodeFunct
 import { STONKS_ABI, STONKS_ROLES, STONKS_SUPPLY, buildUnsignedStonksLaunch, readStonksProfile, stonksPairId } from '../../web/lib/long-encoding/stonks-launch.mjs';
 import { StonksLive, readStonksConfig } from './stonks-live.mjs';
 import { StonksFees, stonksRecipientAmount } from './stonks-fees.mjs';
-import { stonksCoins, stonksFeedRows } from './stonks-index.mjs';
+import { stonksCoins } from './stonks-index.mjs';
 import { ipfsContentId } from './ipfs-content.mjs';
 import { ServiceError } from './errors.mjs';
 import { ReadCache } from './upstream.mjs';
@@ -241,18 +241,16 @@ test('Stonks claim calldata and receipts bind the collection token and only coun
     positions: [{ ...position, id: 'a'.repeat(64) }] }, f.wallet, 8453, 'stonks').positions.length, 1);
 });
 
-test('Stonks feed maps only configured stock launches and leaves unavailable trading metrics unknown', () => {
+test('Stonks creator-fee index rejects malformed and duplicate token records', () => {
   const profile = profileFixture(), coin = { token: addr(500), creator: addr(400), quote: profile.quotes[0].token,
     pool: addr(600), token_id: '77', fee_locker: profile.locker.address, name: 'Sample', symbol: 'SAMPLE', created_at: '1800000000' };
-  const rows = stonksFeedRows(stonksCoins({ coins: [coin] }), profile);
-  assert.equal(rows[0].chain_id, 8453); assert.equal(rows[0].quote_symbol, 'NVDA');
-  assert.equal(rows[0].total_in, null); assert.equal(rows[0].swaps, null);
-  assert.equal(stonksFeedRows([{ ...coin, fee_locker: addr(99) }], profile).length, 0);
+  assert.deepEqual(stonksCoins({ coins: [coin] }), [coin]);
+  assert.throws(() => stonksCoins({ coins: [coin, coin] }));
   assert.throws(() => stonksCoins({ coins: [{ ...coin, pool: 'https://evil.invalid' }] }));
 });
 
-test('Stonks catalog and feed polling fit the daily read allowance across a full active day', async t => {
-  const f = await fixture(t); let now = f.now, rpcUnits = 0, indexReads = 0;
+test('Stonks catalog polling fits the daily read allowance across a full active day', async t => {
+  const f = await fixture(t); let now = f.now, rpcUnits = 0;
   f.live.now = () => now; f.live.cache = new ReadCache(() => now);
   f.rpc.block = async () => { rpcUnits++; return '0x64'; };
   const calls = f.rpc.calls; f.rpc.calls = (...args) => { rpcUnits += args[1].length; return calls(...args); };
@@ -262,15 +260,12 @@ test('Stonks catalog and feed polling fit the daily read allowance across a full
   };
   const q = f.profile.quotes[0];
   f.live.live = { ...f.live.live, profile: { ...f.profile, quotes: Array.from({ length: 13 }, (_, i) => ({ ...q, id: stonksPairId(addr(900+i)), token: addr(900+i) })) } };
-  f.live.upstream = { json: async () => { indexReads++; return { coins: [] }; } };
   for (let minute = 0; minute < 1440; minute++) {
     now = f.now + minute * 60000;
     const catalog = await f.live.catalog();
     assert.equal(parseCatalog({ chainId: 8453, expiresAt: catalog.expiresAt, pads: { o1: { status: 'unavailable', pairs: [] }, stonks: catalog } }, 8453).pads.stonks.pairs.length, 13);
-    await f.live.feed();
   }
   assert.ok(rpcUnits < 9000, `Browsing used ${rpcUnits} RPC units`);
-  assert.equal(indexReads, 720);
   f.change.code = true;
   await assert.rejects(f.live.prepare(f.input), { code: 'contract_unverified' });
 });
