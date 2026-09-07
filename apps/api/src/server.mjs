@@ -10,6 +10,7 @@ import { createCatalogRefresher } from "./catalog-refresher.mjs";
 import { createHandler } from "./service.mjs";
 import { verifyProductionStorage } from "./storage.mjs";
 import { Fees } from "./fees.mjs";
+import { createFomoRelayHandler } from "./fomo-relay.mjs";
 import { createFomoService } from "./fomo-service.mjs";
 import { TrackedPrices } from "./tracked-prices.mjs";
 import { O1TokenImages } from "./o1-token-image.mjs";
@@ -32,7 +33,8 @@ try {
   const tokenImages = new O1TokenImages(config, upstream);
   const server = createServer(
     { maxHeaderSize: 8192 },
-    createHandler(config, budget, adapters, fees, trackedPrices, launches, fomo, tokenImages),
+    createFomoRelayHandler(fomo, process.env.FOMO_RELAY_TOKEN,
+      createHandler(config, budget, adapters, fees, trackedPrices, launches, fomo, tokenImages)),
   );
   server.requestTimeout = 10_000;
   server.headersTimeout = 5000;

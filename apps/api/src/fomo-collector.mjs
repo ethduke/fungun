@@ -1,4 +1,5 @@
 import WebSocket from "ws";
+import { createHash } from "node:crypto";
 
 // Never log arbitrary provider text, URLs, error messages/stacks or close reasons.
 const errorCodes = new Set([
@@ -18,6 +19,16 @@ const errorCodes = new Set([
 ]);
 const safeErrorCode = (error) => (errorCodes.has(error?.code) ? error.code : "UNKNOWN");
 
+export function retryAfterMs(value, now) {
+  if (typeof value !== "string") return 0;
+  if (/^\d+$/.test(value.trim())) {
+    const seconds = Number(value.trim());
+    return Number.isSafeInteger(seconds) && seconds <= 31_536_000 ? seconds * 1000 : 0;
+  }
+  const date = Date.parse(value);
+  return Number.isFinite(date) ? Math.max(0, date - now) : 0;
+}
+
 // One instance owned by the single-machine read service, never by an HTTP request.
 export class FomoCollector {
   constructor(
@@ -26,13 +37,14 @@ export class FomoCollector {
       key = "",
       enabled = false,
       now = Date.now,
+      random = Math.random,
       socketFactory = (url, options) => new WebSocket(url, options),
       schedule = setTimeout,
       cancel = clearTimeout,
       logger = (entry) => console.info(JSON.stringify(entry)),
     } = {},
   ) {
-    Object.assign(this, { store, key, enabled, now, socketFactory, schedule, cancel, logger });
+    Object.assign(this, { store, key, enabled, now, random, socketFactory, schedule, cancel, logger });
     this.status = {
       connected: false,
       delay_seconds: null,
@@ -42,7 +54,9 @@ export class FomoCollector {
       state: enabled ? (key ? "connecting" : "not_configured") : "disabled",
     };
     this.running = false;
-    this.backoff = 60_000;
+    this.keyFingerprint = createHash("sha256").update(key).digest("hex");
+    const savedBackoff = Number(store.metadata("backoff_ms"));
+    this.backoff = Number.isFinite(savedBackoff) ? Math.min(60_000, Math.max(3000, savedBackoff)) : 3000;
   }
 
   log(event, fields = {}) {
@@ -60,12 +74,19 @@ export class FomoCollector {
   }
 
   later(ms) {
-    this.timer = this.schedule(() => this.connect(), Math.max(1000, ms));
+    this.timer = this.schedule(() => this.connect(), Math.min(3_600_000, Math.max(1000, ms)));
     this.timer?.unref?.();
   }
 
   connect() {
     if (!this.running || this.socket) return;
+    const blocked = this.store.blocked(this.keyFingerprint);
+    if (blocked) {
+      this.status.state = blocked;
+      this.status.retry_at = null;
+      this.running = false;
+      return;
+    }
     const reservation = this.store.reserveConnection();
     if (!reservation.allowed) {
       this.status.state = reservation.reason;
@@ -74,7 +95,8 @@ export class FomoCollector {
         reason: reservation.reason,
         retry_at: this.status.retry_at,
         connections_24h: this.store.attempts(),
-        max_connections_24h: this.store.maxConnections24h,
+        connections_5m: this.store.attempts(300_000),
+        max_connections_5m: this.store.maxConnections5m,
       });
       this.later(reservation.retryAt - this.now());
       return;
@@ -83,7 +105,8 @@ export class FomoCollector {
     this.status.retry_at = null;
     this.log("connection_attempt", {
       connections_24h: this.store.attempts(),
-      max_connections_24h: this.store.maxConnections24h,
+      connections_5m: this.store.attempts(300_000),
+      max_connections_5m: this.store.maxConnections5m,
     });
     this.status.delay_seconds = null;
     this.status.realtime = null;
@@ -103,12 +126,14 @@ export class FomoCollector {
         error_code: safeErrorCode(error),
         duration_ms: 0,
       });
-      this.retry(0);
+      this.retry();
       return;
     }
     this.socket = socket;
     let openedAt = null,
       welcomed = false,
+      pongReceived = false,
+      retryMinimum = 0,
       pong = true,
       disconnectReason = "remote_close",
       errorCode = null,
@@ -135,6 +160,7 @@ export class FomoCollector {
     });
     socket.on("pong", () => {
       pong = true;
+      pongReceived = true;
     });
     socket.on("message", (raw) => {
       this.status.last_message_at = this.now() / 1000;
@@ -170,11 +196,12 @@ export class FomoCollector {
           ? response.statusCode
           : null;
       disconnectReason = "http_error";
-      if ([401, 403, 429].includes(httpStatus)) {
-        this.status.state = "access_denied";
-        this.store.defer(this.now() + 86_400_000);
-        this.running = false;
-      }
+      const blockedState = {
+        401: "invalid_credentials", 402: "credits_exhausted", 403: "access_denied",
+      }[httpStatus];
+      if (blockedState) this.pause(blockedState);
+      retryMinimum = retryAfterMs(response.headers?.["retry-after"], this.now());
+      if (httpStatus === 429 && !retryMinimum) retryMinimum = 60_000;
       response.resume();
       request.destroy();
       socket.terminate();
@@ -204,27 +231,38 @@ export class FomoCollector {
       });
       if (!this.running) return;
       if (code === 1008) {
-        this.status.state = "access_denied";
-        this.store.defer(this.now() + 86_400_000);
-        this.running = false;
+        this.pause("policy_denied");
         return;
       }
-      this.retry(duration, welcomed);
+      this.retry(
+        duration >= 60_000 && welcomed && pongReceived,
+        retryMinimum,
+        httpStatus === 429 ? "rate_limited" : "reconnecting",
+      );
     });
   }
 
-  retry(duration, welcomed = false) {
+  pause(state) {
+    this.store.block(state, this.keyFingerprint);
+    this.status.state = state;
+    this.status.retry_at = null;
+    this.running = false;
+  }
+
+  retry(healthy = false, minimum = 0, state = "reconnecting") {
     this.status.connected = false;
-    this.status.state = "reconnecting";
-    if (duration >= 300_000) this.backoff = 60_000;
-    // A working app feed that flaps is different from a failed handshake.
-    // Keep recovery bounded after a welcome; the durable daily cap still applies.
-    const delay = Math.min(this.backoff, welcomed ? 300_000 : 3_600_000);
-    this.backoff = Math.min(3_600_000, this.backoff * 2);
+    this.status.state = state;
+    if (healthy) this.backoff = 3000;
+    const jittered = Math.round(this.backoff * (0.8 + 0.4 * this.random()));
+    const delay = Math.max(minimum, Math.min(60_000, jittered));
+    this.backoff = Math.min(60_000, this.backoff * 2);
     const retryAt = this.now() + delay;
-    this.store.defer(retryAt);
+    this.store.transaction(() => {
+      this.store.setMetadata("backoff_ms", this.backoff);
+      this.store.defer(retryAt, state);
+    });
     this.status.retry_at = retryAt / 1000;
-    this.log("retry_scheduled", { delay_ms: delay, retry_at: this.status.retry_at });
+    this.log("retry_scheduled", { state, delay_ms: delay, retry_at: this.status.retry_at });
     if (this.running) this.later(delay);
   }
 
@@ -232,7 +270,8 @@ export class FomoCollector {
     return {
       ...this.status,
       connections_24h: this.store.attempts(),
-      max_connections_24h: this.store.maxConnections24h,
+      connections_5m: this.store.attempts(300_000),
+      max_connections_5m: this.store.maxConnections5m,
       stream_tokens_checked: this.store.tokenCount(),
       history_complete: false,
       stream_highlights: this.store.highlights(),

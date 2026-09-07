@@ -27,7 +27,7 @@ const buy = (extra = {}) => ({
   ...extra,
 });
 const rows = [{ token, sym: "EXAMPLE", chain_id: 4663, quote_kind: "eth" }];
-function fixture(t, limit = 48) {
+function fixture(t, limit = 10) {
   const dir = mkdtempSync(join(tmpdir(), "fungun-fomo-"));
   const path = join(dir, "cache.sqlite");
   let db = new DatabaseSync(path);
@@ -145,21 +145,23 @@ test("sell-only and unrelated contracts never highlight; token identity includes
   assert.deepEqual(f.store.highlights(), []);
 });
 
-test("daily attempt reservations and retry deadlines survive restarts", (t) => {
-  const f = fixture(t, 12);
-  for (let i = 0; i < 12; i++) {
+test("rolling reservations and retry deadlines survive restarts", (t) => {
+  const f = fixture(t, 2);
+  for (let i = 0; i < 2; i++) {
     assert.equal(f.store.reserveConnection().allowed, true);
     assert.equal(f.store.reserveConnection().allowed, false);
-    f.advance(60_000);
+    f.advance(3000);
     f.reopen();
   }
-  assert.equal(f.store.attempts(), 12);
-  assert.equal(f.store.reserveConnection().allowed, false);
-  f.advance(86_400_000);
+  assert.equal(f.store.attempts(), 2);
+  assert.equal(f.store.reserveConnection().reason, "cooldown");
+  f.advance(294_000);
   assert.equal(f.store.reserveConnection().allowed, true);
-  f.store.defer(now + 3 * 86_400_000);
+  f.store.defer(now + 600_000, "rate_limited");
   f.reopen();
-  assert.equal(f.store.reserveConnection().allowed, false);
+  f.advance(3000);
+  assert.equal(f.store.reserveConnection().reason, "rate_limited");
+  assert.equal(f.store.reserveConnection().retryAt, now + 600_000);
 });
 
 test("default mapping contains all ten canonical profiles and normalizes handles", () => {
@@ -175,20 +177,16 @@ test("default mapping contains all ten canonical profiles and normalizes handles
   assert.throws(() => fomoUsers({ "../bad": "bad" }));
 });
 
-test("default budget tolerates routine restarts beyond the former 12-attempt cap", (t) => {
+test("daily accounting never causes a day-long shutdown", (t) => {
   const f = fixture(t);
-  assert.equal(f.store.maxConnections24h, 48);
-  for (let i = 0; i < 48; i++) {
+  assert.equal(f.store.maxConnections5m, 10);
+  for (let i = 0; i < 96; i++) {
     assert.equal(f.store.reserveConnection().allowed, true);
     f.advance(60_000);
     f.reopen();
   }
-  const denied = f.store.reserveConnection();
-  assert.equal(denied.reason, "budget_exhausted");
-  assert.equal(denied.retryAt, now + 86_400_000);
-  f.advance(86_400_000 - 48 * 60_000);
+  assert.equal(f.store.attempts(), 96);
   assert.equal(f.store.reserveConnection().allowed, true);
-  assert.equal(f.store.attempts(), 48);
 });
 
 test("raising a persisted budget recovers without deleting attempts; lowering waits for enough expiry", (t) => {
@@ -197,26 +195,26 @@ test("raising a persisted budget recovers without deleting attempts; lowering wa
   f.advance(60_000);
   assert.equal(f.store.reserveConnection().allowed, true);
   f.advance(60_000);
-  assert.equal(f.store.reserveConnection().reason, "budget_exhausted");
+  assert.equal(f.store.reserveConnection().reason, "cooldown");
   f.reopen(4);
   assert.equal(f.store.attempts(), 2);
   assert.equal(f.store.reserveConnection().allowed, true);
   f.reopen(1);
   const denied = f.store.reserveConnection();
-  assert.equal(denied.retryAt, now + 120_000 + 86_400_000);
-  f.advance(86_400_000 - 1);
+  assert.equal(denied.retryAt, now + 120_000 + 300_000);
+  f.advance(300_000 - 1);
   assert.equal(f.store.reserveConnection().allowed, false);
   f.advance(1);
   assert.equal(f.store.reserveConnection().allowed, true);
 });
 
 test("connection budget rejects invalid configuration without echoing its value", () => {
-  assert.equal(fomoConnectionLimit(), 48);
+  assert.equal(fomoConnectionLimit(), 10);
   assert.equal(fomoConnectionLimit("72"), 72);
   for (const value of [
     0,
     -1,
-    1441,
+    101,
     1.5,
     NaN,
     Infinity,
@@ -229,9 +227,63 @@ test("connection budget rejects invalid configuration without echoing its value"
     assert.throws(
       () => fomoConnectionLimit(value),
       (error) => {
-        assert.equal(error.message, "FOMO_MAX_CONNECTIONS_24H must be an integer from 1 to 1440");
+        assert.equal(error.message, "FOMO_MAX_CONNECTIONS_5M must be an integer from 1 to 100");
         return true;
       },
     );
   }
+});
+
+test("journal is atomic, paginated by ingestion order, and deduplicates replay", (t) => {
+  const { store } = fixture(t);
+  for (let i = 0; i < 205; i++) store.ingest(buy({ id: String(i), ts: now - 1000 - i }));
+  store.ingest(buy({ id: "0", ts: now - 1000 }));
+  const first = store.journal();
+  assert.equal(first.events.length, 200);
+  assert.equal(first.has_more, true);
+  assert.equal(first.next_cursor, 200);
+  assert.equal(first.head, 205);
+  const second = store.journal(first.next_cursor);
+  assert.equal(second.events.length, 5);
+  assert.equal(second.has_more, false);
+  assert.equal(second.events[4].payload.id, "204", "late provider time does not get skipped by cursor");
+  const append = store.appendJournal;
+  store.appendJournal = () => { throw new Error("disk failure"); };
+  assert.throws(() => store.ingest(buy({ id: "rollback" })));
+  assert.equal(store.db.prepare("SELECT COUNT(*) AS n FROM fomo_events").get().n, 205);
+  store.appendJournal = append;
+  assert.equal(store.ingest(buy({ id: "rollback" })), true);
+  assert.equal(store.journal(205).events.length, 1);
+});
+
+test("journal retention never rewinds its head, including expiry and restart", (t) => {
+  const f = fixture(t);
+  f.store.ingest(buy({ usdValue: 12.34, tradeId: 123, txHash: "0xtest" }));
+  const first = f.store.journal();
+  assert.equal(first.events[0].payload.usdValue, 12.34);
+  assert.equal(first.events[0].payload.tradeId, 123);
+  f.advance(86_400_000);
+  f.reopen();
+  const empty = f.store.journal();
+  assert.equal(empty.journal_id, first.journal_id);
+  assert.equal(empty.head, first.head);
+  assert.equal(empty.next_cursor, first.head);
+  assert.deepEqual(empty.events, []);
+  f.store.ingest(buy({ id: "next", ts: now + 86_400_000 }));
+  assert.equal(f.store.journal(first.head).events[0].sequence, first.head + 1);
+});
+
+test("pre-journal cached buys migrate once, only within 24 hours", (t) => {
+  const f = fixture(t);
+  f.store.ingest(buy());
+  f.store.ingest(buy({ id: "expired", ts: now - 86_400_000 + 1 }));
+  f.store.db.exec("DROP TABLE fomo_journal");
+  f.advance(1);
+  f.reopen();
+  const page = f.store.journal();
+  assert.equal(page.events.length, 1);
+  assert.equal(page.events[0].payload.migrated, true);
+  assert.equal(page.events[0].payload.id, "fixture-1");
+  f.reopen();
+  assert.deepEqual(f.store.journal(), page);
 });
