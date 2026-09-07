@@ -95,9 +95,13 @@ const rowKey = (row) => `${chain(row)}:${row.pool || token(row)}`;
 
 export function trackedTokenDraft(row) {
   const ticker = typeof row.sym === 'string' ? row.sym : '';
+  const address = token(row).toLowerCase();
+  const supportsImage = chain(row) === 4663 && /^0x[\da-f]{40}$/.test(address)
+    && ['O1', 'O1 RWA', 'O1 Mig.'].includes(feedLaunchpad(row).label);
   return {
     name: typeof row.name === 'string' && row.name.trim() ? row.name : ticker,
     ticker,
+    ...(supportsImage ? { imageSource: { chainId: 4663, address } } : {}),
   };
 }
 

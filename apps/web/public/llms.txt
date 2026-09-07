@@ -1,6 +1,6 @@
 # Fungun
 
-> Noncustodial launchpad composer for Long, O1 and Longbow on Robinhood Chain and O1 on Base, with optional guarded fee reads and wallet claims. Wallet launches require configured, verified server profiles; USDG/x402 image generation requires runtime configuration.
+> Noncustodial launchpad composer for Long, O1 and Longbow on Robinhood Chain and O1/Stonks on Base, with optional guarded fee reads and wallet claims. Wallet launches require configured, verified server profiles; USDG/x402 image generation requires runtime configuration.
 
 Agents can help prepare a coin draft and explain its validation. Configured
 backends can load RWA catalogs and check the shared Long/Longbow ticker registry
@@ -8,8 +8,8 @@ after typing, on focus, or on Enter. External reads default to disabled. O1 allo
 any ticker within the form's input rules and needs no reservation check. Fees supports paginated
 Long/Longbow beneficiary-pool discovery and O1 wallet-index positions, with claims for
 reviewed contracts. Each launchpad's Claim all queues its eligible discovered positions with
-separate review, wallet confirmation and receipt proof for every claim. Base fee lookups are
-paused. Longbow uses a separate reviewed pool profile.
+separate review, wallet confirmation and receipt proof for every claim. Stonks creator-fee
+discovery on Base is partial and uses verified on-chain recipients; O1 Base fee lookups remain paused. Longbow uses a separate reviewed pool profile.
 Base launch quotes include execution, L1 data and operator fees after transaction simulation. Configured image generation uses USDG/x402; drafts and pictures are cached for reloads.
 An unavailable balance is unknown, not zero. A reservation check is not proof
 of global ticker uniqueness or launch readiness.
@@ -20,16 +20,19 @@ with shared server caching, request coalescing and failure backoff. It uses no
 configured RPC calls and is independent of the optional read service.
 Popularity counts similarly named distinct token
 contracts in the source's selected tracked cohort, not social trends.
-COPY fills the launch form with the selected token's name and ticker. The feed
-does not supply artwork; choose an image separately.
+COPY fills the launch form with the selected token's name and ticker. This test
+branch also retrieves artwork for recognized Robinhood O1 tokens when available.
+Other launchpads need a separate image.
 Compact venue labels include O1 RWA, UniV3 and UniV4. O1 hooks are recognized
 using a daily server cache of the official current and historical suite registry,
 with no RPC enrichment. Migration labels require explicit upstream provenance.
 Canonical stablecoins are excluded as tracked tokens before counts/popularity.
 Stablecoin quote assets remain valid for otherwise eligible nonstable tokens.
 
-Robinhood Chain supports Long, O1 and Longbow in the webview. Base is temporarily
-paused. Long has 64 static market choices; Longbow has 194 stock/RWA registry
+Robinhood Chain supports Long, O1 and Longbow in the webview. Base offers O1 and
+Stonks Exchange. Stonks uses the same composer with 13 reviewed stock pairings,
+complete Base gas estimates, live creator-share checks and permanently locked liquidity.
+Its launches appear through a separately cached `/api/stonks-feed` read. Long has 64 static market choices; Longbow has 194 stock/RWA registry
 choices, including the corrected SKHY ticker. O1 includes ETH and all 194 Robinhood
 RWA choices, with live availability through the read service and a dated saved
 catalog when offline. Selecting multiple launchpads represents separate deployments.

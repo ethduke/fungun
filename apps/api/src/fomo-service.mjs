@@ -10,7 +10,12 @@ export function createFomoService(db, env = process.env) {
       readFileSync(env.FOMO_USERS_PATH || new URL("./fomo-users.json", import.meta.url), "utf8"),
     ),
   );
-  const store = new FomoStore(db, users, Date.now, env.FOMO_MAX_CONNECTIONS_24H);
+  const relayUsers = fomoUsers(
+    JSON.parse(readFileSync(new URL("./fomo-relay-users.json", import.meta.url), "utf8")),
+  );
+  const store = new FomoStore(
+    db, new Map([...relayUsers, ...users]), Date.now, env.FOMO_MAX_CONNECTIONS_5M,
+  );
   const enabled = env.FOMO_ENABLED === "1";
   const collector = new FomoCollector(store, { enabled, key: env.FOMO_API_KEY || "" });
   const handleFeed = createTrackedFeedHandler({
@@ -50,10 +55,19 @@ export function createFomoService(db, env = process.env) {
       kick();
     },
     snapshot() {
+      const snapshot = collector.snapshot();
       return {
-        ...collector.snapshot(),
+        ...snapshot,
+        stream_highlights: snapshot.stream_highlights.filter((row) => users.has(row.handle)),
         stream_status: streamStatus,
         stream_last_seen_at: streamLastSeenAt,
+      };
+    },
+    journal(after) {
+      const { connected, state, delay_seconds, realtime, retry_at, last_message_at } = collector.status;
+      return {
+        ...store.journal(after),
+        collector: { connected, state, delay_seconds, realtime, retry_at, last_message_at },
       };
     },
     async stop() {

@@ -18,6 +18,7 @@ function fixture(t, options = {}) {
     key: "synthetic-private-key",
     enabled: true,
     now: () => time,
+    random: () => 0.5,
     schedule(fn, ms) {
       const timer = { fn, ms };
       timers.push(timer);
@@ -82,13 +83,13 @@ test("missed pong disconnects and backs off; access denial stops reconnecting", 
   f.timers.at(-1).fn();
   f.timers.at(-1).fn();
   assert.equal(f.collector.snapshot().state, "reconnecting");
-  assert.equal(f.timers.at(-1).ms, 60_000);
-  f.advance(60_000);
+  assert.equal(f.timers.at(-1).ms, 3000);
+  f.advance(3000);
   f.timers.at(-1).fn();
   assert.equal(f.sockets.length, 2);
   f.sockets[1].emit("error", new Error("synthetic-private-key"));
   f.sockets[1].emit("close", 1008);
-  assert.equal(f.collector.snapshot().state, "access_denied");
+  assert.equal(f.collector.snapshot().state, "policy_denied");
   assert.equal(f.collector.running, false);
   await f.collector.stop();
 });
@@ -102,8 +103,8 @@ test("disabled or missing key never connects", (t) => {
   }
 });
 
-test("HTTP credential and quota failures stop automatic reconnects", async (t) => {
-  for (const statusCode of [401, 403, 429]) {
+test("HTTP credential, payment and access failures pause automatic reconnects", async (t) => {
+  for (const statusCode of [401, 402, 403]) {
     const f = fixture(t);
     f.collector.start();
     let destroyed = false;
@@ -117,7 +118,7 @@ test("HTTP credential and quota failures stop automatic reconnects", async (t) =
       { statusCode, resume() {} },
     );
     assert.equal(destroyed, true);
-    assert.equal(f.collector.snapshot().state, "access_denied");
+    assert.equal(f.collector.snapshot().state, {401: "invalid_credentials", 402: "credits_exhausted", 403: "access_denied"}[statusCode]);
     assert.equal(f.collector.running, false);
     assert.equal(f.timers.length, 0);
     await f.collector.stop();
@@ -140,7 +141,7 @@ test("disconnect diagnostics retain useful codes but never provider text or cred
   assert.equal(entry.duration_ms, 1234);
   assert.equal(f.logs.at(-1).event, "retry_scheduled");
   assert.equal(f.collector.snapshot().retry_at, f.logs.at(-1).retry_at);
-  f.advance(60_000);
+  f.advance(3000);
   f.timers.at(-1).fn();
   error.code = "synthetic-private-key";
   f.sockets[1].emit("error", error);
@@ -157,7 +158,7 @@ test("pong timeout and HTTP rejection diagnostics identify the disconnect cause"
   f.timers.at(-1).fn();
   f.timers.at(-1).fn();
   assert.equal(f.logs.find((row) => row.event === "disconnected").reason, "pong_timeout");
-  f.advance(60_000);
+  f.advance(3000);
   f.timers.at(-1).fn();
   f.sockets[1].emit(
     "unexpected-response",
@@ -178,19 +179,19 @@ test("pong timeout and HTTP rejection diagnostics identify the disconnect cause"
 
 test("collector uses the configured budget and resumes precisely at its rolling deadline", async (t) => {
   const f = fixture(t);
-  f.store.maxConnections24h = 2;
+  f.store.maxConnections5m = 2;
   f.collector.start();
   f.sockets[0].emit("close", 1006);
-  f.advance(60_000);
+  f.advance(3000);
   f.timers.at(-1).fn();
   f.sockets[1].emit("close", 1006);
-  f.advance(120_000);
+  f.advance(6000);
   f.timers.at(-1).fn();
   assert.equal(f.sockets.length, 2);
-  assert.equal(f.collector.snapshot().state, "budget_exhausted");
-  assert.equal(f.collector.snapshot().max_connections_24h, 2);
-  assert.equal(f.timers.at(-1).ms, 86_400_000 - 180_000);
-  assert.equal(f.logs.at(-1).reason, "budget_exhausted");
+  assert.equal(f.collector.snapshot().state, "cooldown");
+  assert.equal(f.collector.snapshot().max_connections_5m, 2);
+  assert.equal(f.timers.at(-1).ms, 300_000 - 9000);
+  assert.equal(f.logs.at(-1).reason, "cooldown");
   // Only two attempts remain in the rolling window after the first expires.
   f.collector.socketFactory = () => {
     const socket = new EventEmitter();
@@ -215,14 +216,14 @@ test("socket creation failure is sanitized and a broken logger cannot prevent re
   f.collector.start();
   assert.equal(f.logs.find((row) => row.event === "disconnected").reason, "socket_creation_failed");
   assert.doesNotMatch(JSON.stringify(f.logs), /synthetic-private-key/);
-  assert.equal(f.timers.at(-1).ms, 60_000);
+  assert.equal(f.timers.at(-1).ms, 3000);
   f.collector.logger = () => {
     throw new Error("broken sink");
   };
-  f.advance(60_000);
+  f.advance(3000);
   f.timers.at(-1).fn();
   assert.equal(f.collector.snapshot().connections_24h, 2);
-  assert.equal(f.timers.at(-1).ms, 120_000);
+  assert.equal(f.timers.at(-1).ms, 6000);
 });
 
 test("welcomed connections that flap never grow into an hour-long retry; failures still back off", async (t) => {
@@ -243,6 +244,83 @@ test("welcomed connections that flap never grow into an hour-long retry; failure
     f.timers.at(-1).fn();
   }
   f.sockets.at(-1).emit("close", 1006);
-  assert.equal(f.timers.at(-1).ms, 3_600_000, "failed handshakes retain exponential backoff");
+  assert.equal(f.timers.at(-1).ms, 60_000, "failed handshakes retain bounded exponential backoff");
   await f.collector.stop();
+});
+
+test("429 retries honor Retry-After and remain scheduled after process restart", async (t) => {
+  for (const retryAfter of ["120", new Date(1_788_600_120_000).toUTCString(), undefined, "bad"]) {
+    const f = fixture(t);
+    f.collector.start();
+    f.sockets[0].emit("unexpected-response", { destroy() {} }, {
+      statusCode: 429, headers: { "retry-after": retryAfter }, resume() {},
+    });
+    const wait = retryAfter === undefined || retryAfter === "bad" ? 60_000 : 120_000;
+    assert.equal(f.collector.running, true);
+    assert.equal(f.collector.snapshot().state, "rate_limited");
+    assert.equal(f.timers.at(-1).ms, wait);
+    await f.collector.stop();
+    let attempts = 0;
+    const restarted = new FomoCollector(f.store, { enabled: true, key: "synthetic-private-key",
+      now: () => 1_788_600_000_000, socketFactory() { attempts++; }, schedule() {}, logger() {} });
+    restarted.start();
+    assert.equal(attempts, 0);
+    assert.equal(restarted.snapshot().state, "rate_limited");
+    assert.equal(restarted.snapshot().retry_at, (1_788_600_000_000 + wait) / 1000);
+    await restarted.stop();
+    f.advance(wait);
+    f.collector.start();
+    assert.equal(f.sockets.length, 2);
+    await f.collector.stop();
+  }
+});
+
+test("5xx retries; policy and credentials remain paused until key rotation", async (t) => {
+  const f = fixture(t);
+  f.collector.start();
+  f.sockets[0].emit("unexpected-response", { destroy() {} }, {
+    statusCode: 503, headers: { "retry-after": "30" }, resume() {},
+  });
+  assert.equal(f.timers.at(-1).ms, 30_000);
+  f.advance(30_000);
+  f.timers.at(-1).fn();
+  f.sockets[1].emit("close", 1008);
+  const make = (key) => new FomoCollector(f.store, { enabled: true, key,
+    now: () => 1_788_600_030_000, schedule() {}, logger() {},
+    socketFactory() { throw new Error("fixture no network"); } });
+  const same = make("synthetic-private-key");
+  same.start();
+  assert.equal(same.snapshot().state, "policy_denied");
+  assert.equal(f.store.attempts(), 2);
+  const rotated = make("synthetic-rotated-key");
+  rotated.start();
+  assert.equal(rotated.snapshot().state, "reconnecting");
+  assert.equal(f.store.attempts(), 3);
+  await rotated.stop();
+});
+
+test("welcome alone does not reset backoff; sustained welcome plus pong does", async (t) => {
+  const f = fixture(t);
+  f.collector.start();
+  for (const [duration, pong, expected] of [[10_000, true, 3000], [61_000, false, 6000], [61_000, true, 3000]]) {
+    const socket = f.sockets.at(-1);
+    socket.emit("open");
+    socket.emit("message", '{"type":"welcome"}');
+    f.advance(duration);
+    if (pong) socket.emit("pong");
+    socket.emit("close", 1006);
+    assert.equal(f.timers.at(-1).ms, expected);
+    f.advance(expected);
+    f.timers.at(-1).fn();
+  }
+  await f.collector.stop();
+});
+
+test("initial retry uses jitter", (t) => {
+  for (const [random, expected] of [[0, 2400], [1, 3600]]) {
+    const f = fixture(t, { random: () => random });
+    f.collector.start();
+    f.sockets[0].emit("close", 1006);
+    assert.equal(f.timers.at(-1).ms, expected);
+  }
 });

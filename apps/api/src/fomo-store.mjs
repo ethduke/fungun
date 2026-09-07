@@ -1,11 +1,11 @@
-import { createHash } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 
 const DAY = 86_400_000;
 
-export function fomoConnectionLimit(value = 48) {
+export function fomoConnectionLimit(value = 10) {
   const limit = typeof value === "string" && /^\d+$/.test(value) ? Number(value) : value;
-  if (!Number.isInteger(limit) || limit < 1 || limit > 1440)
-    throw new Error("FOMO_MAX_CONNECTIONS_24H must be an integer from 1 to 1440");
+  if (!Number.isInteger(limit) || limit < 1 || limit > 100)
+    throw new Error("FOMO_MAX_CONNECTIONS_5M must be an integer from 1 to 100");
   return limit;
 }
 const addressPattern = /^0x[0-9a-f]{40}$/i;
@@ -75,8 +75,8 @@ export function normalizeFomoEvent(row, users, now = Date.now()) {
 }
 
 export class FomoStore {
-  constructor(db, users, now = Date.now, maxConnections24h = 48) {
-    this.maxConnections24h = fomoConnectionLimit(maxConnections24h);
+  constructor(db, users, now = Date.now, maxConnections5m = 10) {
+    this.maxConnections5m = fomoConnectionLimit(maxConnections5m);
     Object.assign(this, { db, users, now });
     db.exec(`
       CREATE TABLE IF NOT EXISTS fomo_events (
@@ -92,12 +92,50 @@ export class FomoStore {
       );
       CREATE TABLE IF NOT EXISTS fomo_connections (ts INTEGER NOT NULL);
       CREATE TABLE IF NOT EXISTS fomo_metadata (name TEXT PRIMARY KEY, value TEXT NOT NULL);
+      CREATE TABLE IF NOT EXISTS fomo_journal (
+        sequence INTEGER PRIMARY KEY AUTOINCREMENT, event_id TEXT NOT NULL UNIQUE,
+        payload TEXT NOT NULL
+      );
     `);
     this.prune();
+    this.db.prepare("INSERT OR IGNORE INTO fomo_metadata VALUES ('journal_id',?)").run(randomUUID());
+    this.transaction(() => {
+      const missing = this.db.prepare(`SELECT e.* FROM fomo_events e
+        LEFT JOIN fomo_journal j ON j.event_id=e.id WHERE j.event_id IS NULL
+        ORDER BY e.observed_at,e.id`).all();
+      for (const row of missing) this.appendJournal(row.id, {
+        type: "alert", id: row.provider_id || undefined, trader: row.handle,
+        tokenAddress: row.token, token: row.symbol, chainId: 4663,
+        alertType: row.side, ts: row.ts, source: row.source.slice("ws_alert:".length),
+      }, true);
+    });
   }
 
   prune() {
-    this.db.prepare("DELETE FROM fomo_events WHERE ts<=?").run(this.now() - DAY);
+    this.transaction(() => {
+      this.db.prepare(`DELETE FROM fomo_journal WHERE event_id IN
+        (SELECT id FROM fomo_events WHERE ts<=?)`).run(this.now() - DAY);
+      this.db.prepare("DELETE FROM fomo_events WHERE ts<=?").run(this.now() - DAY);
+    });
+  }
+
+  appendJournal(id, payload, migrated = false) {
+    this.db.prepare("INSERT INTO fomo_journal(event_id,payload) VALUES (?,?)")
+      .run(id, JSON.stringify({ ...payload, migrated }));
+  }
+
+  journal(after = 0) {
+    this.prune();
+    const head = this.db.prepare("SELECT seq FROM sqlite_sequence WHERE name='fomo_journal'").get()?.seq ?? 0;
+    const rows = this.db.prepare(`SELECT sequence,event_id,payload FROM fomo_journal
+      WHERE sequence>? ORDER BY sequence LIMIT 200`).all(after);
+    return {
+      journal_id: this.db.prepare("SELECT value FROM fomo_metadata WHERE name='journal_id'").get().value,
+      events: rows.map(({ sequence, event_id, payload }) => ({ sequence, event_id, payload: JSON.parse(payload) })),
+      next_cursor: rows.at(-1)?.sequence ?? head,
+      head, has_more: (rows.at(-1)?.sequence ?? head) < head,
+      retention_seconds: DAY / 1000,
+    };
   }
 
   transaction(fn) {
@@ -128,8 +166,8 @@ export class FomoStore {
   ingest(row) {
     const event = normalizeFomoEvent(row, this.users, this.now());
     if (!event || event.ts <= this.now() - DAY) return false;
-    return Boolean(
-      this.db
+    return this.transaction(() => {
+      const inserted = Boolean(this.db
         .prepare("INSERT OR IGNORE INTO fomo_events VALUES (?,?,4663,?,?,?,?,?,?,?)")
         .run(
           event.id,
@@ -141,8 +179,19 @@ export class FomoStore {
           this.now(),
           event.source,
           event.providerId,
-        ).changes,
-    );
+        ).changes);
+      const usd = row.usdValue ?? row.sizeUsd;
+      if (inserted) this.appendJournal(event.id, {
+        type: "alert", id: typeof row.id === "number" ? row.id : event.providerId || undefined,
+        trader: event.handle, tokenAddress: event.token, token: event.symbol,
+        chainId: 4663, alertType: event.side, ts: typeof row.ts === "string" ? row.ts.slice(0, 100) : row.ts,
+        source: text(row.source) || "feed",
+        usdValue: Number.isFinite(Number(usd)) && usd != null && Number(usd) >= 0
+          ? Number(usd) : null,
+        tradeId: typeof row.tradeId === "number" ? row.tradeId : text(row.tradeId) || undefined, txHash: text(row.txHash) || undefined,
+      });
+      return inserted;
+    });
   }
 
   highlights() {
@@ -160,10 +209,10 @@ export class FomoStore {
       .map((row) => ({ ...row, label: this.users.get(row.handle) }));
   }
 
-  attempts() {
+  attempts(window = DAY) {
     return this.db
       .prepare("SELECT COUNT(*) AS n FROM fomo_connections WHERE ts>?")
-      .get(this.now() - DAY).n;
+      .get(this.now() - window).n;
   }
 
   reserveConnection() {
@@ -174,32 +223,57 @@ export class FomoStore {
         this.db.prepare("SELECT value FROM fomo_metadata WHERE name='retry_at'").get()?.value ?? 0,
       );
       this.db.prepare("DELETE FROM fomo_connections WHERE ts<=?").run(now - DAY);
-      if (this.attempts() >= this.maxConnections24h)
+      if (this.attempts(300_000) >= this.maxConnections5m)
         return {
           allowed: false,
-          reason: "budget_exhausted",
+          reason: "cooldown",
           // If the configured limit was lowered, enough attempts must expire first.
           retryAt: Math.max(
             retry,
             this.db
               .prepare("SELECT ts FROM fomo_connections ORDER BY ts DESC LIMIT 1 OFFSET ?")
-              .get(this.maxConnections24h - 1).ts + DAY,
+              .get(this.maxConnections5m - 1).ts + 300_000,
           ),
         };
       if (latest > now || retry > now)
-        return { allowed: false, reason: "reconnecting", retryAt: Math.max(latest, retry) };
+        return { allowed: false, reason: this.metadata("retry_state") || "reconnecting", retryAt: Math.max(latest, retry) };
       this.db.prepare("INSERT INTO fomo_connections VALUES (?)").run(now);
-      this.defer(now + 60_000);
+      this.defer(now + 3000);
       return { allowed: true };
     });
   }
 
-  defer(ts) {
+  metadata(name) {
+    return this.db.prepare("SELECT value FROM fomo_metadata WHERE name=?").get(name)?.value;
+  }
+
+  setMetadata(name, value) {
     this.db
       .prepare(
-        "INSERT INTO fomo_metadata VALUES ('retry_at',?) ON CONFLICT(name) DO UPDATE SET value=excluded.value",
+        "INSERT INTO fomo_metadata VALUES (?,?) ON CONFLICT(name) DO UPDATE SET value=excluded.value",
       )
-      .run(String(ts));
+      .run(name, String(value));
+  }
+
+  defer(ts, state = "reconnecting") {
+    this.setMetadata("retry_at", ts);
+    this.setMetadata("retry_state", state);
+  }
+
+  blocked(keyFingerprint) {
+    const reason = this.metadata("blocked_reason");
+    if (!reason) return null;
+    if (this.metadata("blocked_key") === keyFingerprint) return reason;
+    this.db.prepare("DELETE FROM fomo_metadata WHERE name IN ('blocked_reason','blocked_key')").run();
+    this.defer(0);
+    return null;
+  }
+
+  block(reason, keyFingerprint) {
+    this.transaction(() => {
+      this.setMetadata("blocked_reason", reason);
+      this.setMetadata("blocked_key", keyFingerprint);
+    });
   }
 
   tokenCount() {
