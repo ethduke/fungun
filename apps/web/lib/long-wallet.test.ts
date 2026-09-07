@@ -144,13 +144,23 @@ void test('existing submitted intent resumes without wallet dispatch after a los
 });
 
 
-void test('TSLA wallet launch reconstructs the selected pairing; other unsupported routes remain disabled', () => {
+void test('TSLA wallet launch reconstructs the selected pairing; all Long tickers can check server availability', () => {
   assert.ok(isLongLaunchPair('long-TSLA')); assert.ok(isLongLaunchPair('long-NVDA'));
-  for (const pair of ['long-MU','longbow-TSLA',undefined]) assert.equal(isLongLaunchPair(pair), false);
+  assert.ok(isLongLaunchPair('long-NET'));
+  for (const pair of ['long-','longbow-TSLA',undefined]) assert.equal(isLongLaunchPair(pair), false);
   const f = response('long-TSLA');
   const checked = validateLongPlan(f.raw, f.input, f.published, performance.now());
   assert.equal(checked.transaction.data, f.plan.transaction.data);
   assert.throws(() => validateLongPlan(f.raw, {...f.input,pairId:'long-NVDA'}, f.published, performance.now()));
+});
+
+void test('unsupported pairing errors display only validated server-configured alternatives', async t => {
+  t.mock.method(globalThis, 'fetch', async () => Response.json({ error: 'unsupported_pair', supportedPairs: ['long-NVDA', 'long-TSLA'] }, { status: 400 }));
+  await assert.rejects(launchRequest('launch-estimate', { chainId: 4663, pairId: 'long-NET' }), error => {
+    assert.equal(launchMessage(error), 'This pairing is no longer available on the launchpad. Refresh its pairing list.'); return true;
+  });
+  assert.equal(new LaunchError('unsupported_pair', 0, undefined, ['secret-url']).supportedPairs, undefined);
+  assert.doesNotMatch(launchMessage(new Error('private details')), /private details|Reconnecting/);
 });
 
 void test('insufficient funds retains exact balance, required budget and shortfall through the HTTP client', async t => {

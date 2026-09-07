@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import { runLaunchFlow } from './launch-flow.ts';
 import { LaunchError, LaunchPreflightError } from './long-wallet.ts';
 import { AssetError } from './asset-protocol.ts';
+import { launchMessage } from './long-wallet.ts';
 
 function fixture() {
   let clock = 0,
@@ -28,6 +29,33 @@ function fixture() {
     },
   };
 }
+void test('removed deployment chunks stop preparation immediately and ask for a reload', async () => {
+  for (const error of [
+    new TypeError('Failed to fetch dynamically imported module: https://example.com/old-ipfs.js'),
+    new TypeError('Importing a module script failed.'),
+    Object.assign(new Error('Loading chunk 42 failed.'), { name: 'ChunkLoadError' }),
+  ]) {
+    const f = fixture(); let reads = 0, sends = 0;
+    await assert.rejects(runLaunchFlow({ ...f.options,
+      artwork: async () => { reads++; throw error; },
+      quote: async () => { throw new Error('must not quote'); },
+      wallet: async () => { sends++; },
+    }), e => e === error);
+    assert.equal(reads, 1); assert.equal(sends, 0); assert.equal(f.clock, 0);
+    assert.match(launchMessage(error), /Reload the page/);
+    assert.doesNotMatch(launchMessage(error), /https:/);
+  }
+});
+void test('unsupported pairing is rejected before artwork publication or wallet dispatch', async () => {
+  const f = fixture(); let uploads = 0, sends = 0;
+  await assert.rejects(runLaunchFlow({ ...f.options,
+    availability: async () => { throw new LaunchError('unsupported_pair'); },
+    artwork: async () => ++uploads,
+    quote: async () => 1,
+    wallet: async () => { sends++; },
+  }), /unsupported_pair/);
+  assert.equal(uploads, 0); assert.equal(sends, 0); assert.equal(f.clock, 0);
+});
 void test('one action resumes throttled preparation and opens the wallet after artwork completes', async () => {
   const f = fixture();
   let checks = 0,
@@ -173,4 +201,34 @@ void test('temporary read throttling counts down and continues without a second 
   assert.ok(progress.includes('Retrying launch preparation in 2s…'));
   assert.ok(progress.includes('Retrying launch preparation in 1s…'));
   assert.equal(sends, 1); assert.equal(f.clock, 2000);
+});
+
+void test('address checkpoints continue beyond network retry count without republishing or repeating wallet dispatch', async () => {
+  const f = fixture(); let quotes = 0, publications = 0, sends = 0;
+  await runLaunchFlow({ ...f.options,
+    artwork: async () => ++publications,
+    quote: async () => {
+      if (++quotes <= 8) throw new LaunchError('long_address_pending', 1);
+      return 'verified quote';
+    },
+    wallet: async value => { assert.equal(value, 'verified quote'); sends++; },
+  });
+  assert.equal(quotes, 9); assert.equal(publications, 1); assert.equal(sends, 1);
+  assert.ok(f.events.includes('Preparing token address… Continuing in 1s…'));
+});
+
+void test('address continuation remains bounded by the overall deadline and never sends after cancellation', async () => {
+  for (const cancel of [false, true]) {
+    const f = fixture(); let sends = 0;
+    await assert.rejects(runLaunchFlow({ ...f.options,
+      artwork: async () => 1,
+      quote: async () => {
+        if (cancel) f.change();
+        throw new LaunchError('long_address_pending', 1);
+      },
+      wallet: async () => { sends++; },
+    }), cancel ? /launch_context_locked/ : /timeout/);
+    assert.equal(sends, 0);
+    assert.ok(f.clock <= 180000);
+  }
 });

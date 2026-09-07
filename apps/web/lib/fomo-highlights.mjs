@@ -7,7 +7,7 @@ const esc = (value) =>
       ],
   );
 
-export function fomoHighlightsHTML(payload) {
+export function fomoHighlightsHTML(payload, now = Date.now()) {
   const rows = Array.isArray(payload?.stream_highlights)
     ? payload.stream_highlights
     : [];
@@ -21,6 +21,7 @@ export function fomoHighlightsHTML(payload) {
       row.buy_alerts <= 0 ||
       !Number.isFinite(row.last_bought_at) ||
       row.last_bought_at <= 0 ||
+      row.last_bought_at * 1000 <= now - 86_400_000 ||
       !Number.isFinite(new Date(row.last_bought_at * 1000).getTime())
     )
       return false;
@@ -30,7 +31,7 @@ export function fomoHighlightsHTML(payload) {
     return true;
   });
   if (!valid.length)
-    return '<span class="fomo-empty">No confirmed buys recorded yet</span>';
+    return '<span class="fomo-empty">No confirmed buys in the last 24 hours</span>';
   return valid
     .map((row) => {
       const date = new Date(row.last_bought_at * 1000);
@@ -45,8 +46,8 @@ export function fomoHighlightsHTML(payload) {
     .join('<span class="fomo-separator" aria-hidden="true">,</span>');
 }
 
-export function fomoStatus(payload, unavailable = false) {
-  if (unavailable) return 'Feed unavailable · showing saved buys';
+export function fomoStatus(payload, unavailable = false, now = Date.now()) {
+  if (unavailable) return 'Feed unavailable · showing buys from the last 24 hours';
   if (!payload) return 'Checking FOMO…';
   const states = {
     disabled: 'Tracking disabled',
@@ -54,18 +55,23 @@ export function fomoStatus(payload, unavailable = false) {
     access_denied: 'Feed access denied',
     budget_exhausted: 'Reconnect limit reached',
     storage_error: 'Cache unavailable',
+    connecting: 'Connecting to FOMO…',
+    reconnecting: 'Feed reconnecting',
   };
   const connection =
     states[payload.state] ||
     (payload.connected
       ? 'Live feed connected'
-      : 'Feed disconnected · saved buys retained');
-  const delay = Number.isFinite(payload.delay_seconds)
+      : 'Feed disconnected · buys retained for 24 hours');
+  const retry = !payload.connected && Number.isFinite(payload.retry_at)
+    ? ` · retry in ${Math.max(0, Math.ceil((payload.retry_at * 1000 - now) / 60_000))}m`
+    : '';
+  const delay = payload.connected && Number.isFinite(payload.delay_seconds)
     ? ` · ${payload.delay_seconds}s delay`
     : '';
   const stream =
     payload.stream_status === 'unavailable'
       ? ' · Stream observer unavailable'
       : '';
-  return `${connection}${delay}${stream} · History incomplete`;
+  return `${connection}${retry}${delay}${stream}`;
 }

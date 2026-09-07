@@ -207,7 +207,7 @@ export function createAssetHandler(config, store, processor) {
         return send(result.status === "processing" ? 202 : 200, result);
       }
       validateImageInput(input.image);
-      store.budget.debit([
+      store.budget.debit(kind === "launch-prepare" ? [["launch-image-decodes", 60, 60000]] : [
         ["image-decodes", 60, 86400000],
         ["image-decodes", 6, 60000],
       ]);

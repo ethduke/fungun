@@ -1,9 +1,12 @@
-import type { ChainId, PadId } from './launch-model';
+import type { ChainId, PadId, PairId } from './launch-model';
 import { AppError, retrySeconds } from './user-error.ts';
 
 const CATALOG_MAX_AGE = 6 * 60 * 60 * 1000;
 
-export type CatalogPair = { id: `rwa-${string}`; symbol: string };
+export type CatalogPair = {
+  id: Extract<PairId, `rwa-${string}` | `long-${string}`>;
+  symbol: string;
+};
 export type CatalogPad = {
   status: 'ready' | 'unavailable';
   pairs: CatalogPair[];
@@ -181,7 +184,9 @@ export function parseCatalog(value: unknown, chainId: ChainId): Catalog {
         (pair) =>
           !pair ||
           typeof pair.id !== 'string' ||
-          !/^rwa-[a-f0-9]{24}$/.test(pair.id) ||
+          !(pad === 'long'
+            ? /^long-[A-Z0-9._-]{1,24}$/.test(pair.id)
+            : /^rwa-[a-f0-9]{24}$/.test(pair.id)) ||
           typeof pair.symbol !== 'string' ||
           !/^[A-Za-z0-9._-]{1,24}$/.test(pair.symbol),
       )

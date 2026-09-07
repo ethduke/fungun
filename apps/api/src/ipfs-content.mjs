@@ -47,6 +47,7 @@ export async function prepareLongIpfsAssets(processedImage, input) {
   const metadataBytes = Buffer.from(JSON.stringify({
     name: draft.name, symbol: draft.ticker, description: draft.description,
     image: imageUri, image_hash: imageUri,
+    ...(draft.launchpad === "longbow" ? { categories: ["longbow"] } : {}),
   }));
   if (metadataBytes.length > METADATA_BYTE_LIMIT) throw new ServiceError("metadata_size", 400);
   const metadataCid = await ipfsContentId(metadataBytes);

@@ -11,8 +11,10 @@ function fixture(t, options = {}) {
   let time = 1_788_600_000_000;
   const store = new FomoStore(db, fomoUsers({ runn3rrr: "runn3rrr" }), () => time);
   const sockets = [],
-    timers = [];
+    timers = [],
+    logs = [];
   const collector = new FomoCollector(store, {
+    logger: (entry) => logs.push(entry),
     key: "synthetic-private-key",
     enabled: true,
     now: () => time,
@@ -41,6 +43,8 @@ function fixture(t, options = {}) {
   });
   return {
     collector,
+    store,
+    logs,
     sockets,
     timers,
     advance(ms) {
@@ -118,4 +122,127 @@ test("HTTP credential and quota failures stop automatic reconnects", async (t) =
     assert.equal(f.timers.length, 0);
     await f.collector.stop();
   }
+});
+
+test("disconnect diagnostics retain useful codes but never provider text or credentials", async (t) => {
+  const f = fixture(t);
+  f.collector.start();
+  f.sockets[0].emit("open");
+  f.advance(1234);
+  const error = new Error("wss://example.invalid?key=synthetic-private-key");
+  error.code = "ECONNRESET";
+  f.sockets[0].emit("error", error);
+  f.sockets[0].emit("close", 1006, Buffer.from("synthetic-private-key"));
+  const entry = f.logs.find((row) => row.event === "disconnected");
+  assert.equal(entry.reason, "socket_error");
+  assert.equal(entry.error_code, "ECONNRESET");
+  assert.equal(entry.close_code, 1006);
+  assert.equal(entry.duration_ms, 1234);
+  assert.equal(f.logs.at(-1).event, "retry_scheduled");
+  assert.equal(f.collector.snapshot().retry_at, f.logs.at(-1).retry_at);
+  f.advance(60_000);
+  f.timers.at(-1).fn();
+  error.code = "synthetic-private-key";
+  f.sockets[1].emit("error", error);
+  f.sockets[1].emit("close", 1006);
+  assert.equal(f.logs.filter((row) => row.event === "disconnected").at(-1).error_code, "UNKNOWN");
+  assert.doesNotMatch(JSON.stringify(f.logs), /synthetic-private-key|wss:|example.invalid|stack/);
+  await f.collector.stop();
+});
+
+test("pong timeout and HTTP rejection diagnostics identify the disconnect cause", async (t) => {
+  const f = fixture(t);
+  f.collector.start();
+  f.sockets[0].emit("open");
+  f.timers.at(-1).fn();
+  f.timers.at(-1).fn();
+  assert.equal(f.logs.find((row) => row.event === "disconnected").reason, "pong_timeout");
+  f.advance(60_000);
+  f.timers.at(-1).fn();
+  f.sockets[1].emit(
+    "unexpected-response",
+    { destroy() {} },
+    {
+      statusCode: 403,
+      statusMessage: "synthetic-private-key",
+      resume() {},
+    },
+  );
+  const entry = f.logs.filter((row) => row.event === "disconnected").at(-1);
+  assert.equal(entry.reason, "http_error");
+  assert.equal(entry.http_status, 403);
+  assert.equal(f.collector.running, false);
+  assert.doesNotMatch(JSON.stringify(f.logs), /synthetic-private-key/);
+  await f.collector.stop();
+});
+
+test("collector uses the configured budget and resumes precisely at its rolling deadline", async (t) => {
+  const f = fixture(t);
+  f.store.maxConnections24h = 2;
+  f.collector.start();
+  f.sockets[0].emit("close", 1006);
+  f.advance(60_000);
+  f.timers.at(-1).fn();
+  f.sockets[1].emit("close", 1006);
+  f.advance(120_000);
+  f.timers.at(-1).fn();
+  assert.equal(f.sockets.length, 2);
+  assert.equal(f.collector.snapshot().state, "budget_exhausted");
+  assert.equal(f.collector.snapshot().max_connections_24h, 2);
+  assert.equal(f.timers.at(-1).ms, 86_400_000 - 180_000);
+  assert.equal(f.logs.at(-1).reason, "budget_exhausted");
+  // Only two attempts remain in the rolling window after the first expires.
+  f.collector.socketFactory = () => {
+    const socket = new EventEmitter();
+    socket.terminate = () => socket.emit("close", 1006);
+    f.sockets.push(socket);
+    return socket;
+  };
+  f.advance(f.timers.at(-1).ms);
+  f.timers.at(-1).fn();
+  assert.equal(f.sockets.length, 3);
+  assert.equal(f.collector.snapshot().state, "connecting");
+  assert.equal(f.collector.snapshot().retry_at, null);
+  await f.collector.stop();
+});
+
+test("socket creation failure is sanitized and a broken logger cannot prevent retries", (t) => {
+  const f = fixture(t, {
+    socketFactory() {
+      throw new Error("synthetic-private-key");
+    },
+  });
+  f.collector.start();
+  assert.equal(f.logs.find((row) => row.event === "disconnected").reason, "socket_creation_failed");
+  assert.doesNotMatch(JSON.stringify(f.logs), /synthetic-private-key/);
+  assert.equal(f.timers.at(-1).ms, 60_000);
+  f.collector.logger = () => {
+    throw new Error("broken sink");
+  };
+  f.advance(60_000);
+  f.timers.at(-1).fn();
+  assert.equal(f.collector.snapshot().connections_24h, 2);
+  assert.equal(f.timers.at(-1).ms, 120_000);
+});
+
+test("welcomed connections that flap never grow into an hour-long retry; failures still back off", async (t) => {
+  const f = fixture(t);
+  f.collector.start();
+  for (let i = 0; i < 9; i++) {
+    const socket = f.sockets.at(-1);
+    socket.emit("open");
+    socket.emit("message", JSON.stringify({ type: "welcome", delaySeconds: 0, realtime: true }));
+    f.advance(23_000);
+    socket.emit("close", 1006);
+    const snapshot = f.collector.snapshot();
+    assert.equal(snapshot.delay_seconds, null);
+    assert.equal(snapshot.realtime, null);
+    assert.equal(snapshot.state, "reconnecting");
+    assert.ok(f.timers.at(-1).ms <= 300_000);
+    f.advance(f.timers.at(-1).ms);
+    f.timers.at(-1).fn();
+  }
+  f.sockets.at(-1).emit("close", 1006);
+  assert.equal(f.timers.at(-1).ms, 3_600_000, "failed handshakes retain exponential backoff");
+  await f.collector.stop();
 });

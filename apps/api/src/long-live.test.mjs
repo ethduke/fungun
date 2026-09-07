@@ -13,7 +13,7 @@ import { InsufficientFundsError, ServiceError, serviceErrorBody } from "./errors
 const addr = (n) => toHex(BigInt(n), { size: 20 });
 const hash = (n) => toHex(BigInt(n), { size: 32 });
 const contract = (n) => ({ address: addr(n), codeHash: hash(n) });
-async function fixture(t) {
+async function fixture(t, pad = 'long') {
   let now = 1800000000000;
   const root = mkdtempSync(join(tmpdir(), 'long-live-'));
   const path = join(root, 'budget.sqlite');
@@ -22,15 +22,21 @@ async function fixture(t) {
   const p = { chainId: 4663, launcher: contract(1), airlock: contract(2), tokenFactory: { ...contract(3), initCodeHash: hash(103) },
     governanceFactory: contract(4), poolInitializer: contract(5), liquidityMigrator: contract(6), dopplerHook: contract(7),
     integrator: addr(8), protocolBeneficiary: addr(9), quotes: [{ id: 'long-NVDA', token: { ...contract(10), address: addr(2n ** 160n - 1n) }, oracle: contract(11), decimals: 18, oracleDecimals: 8 }] };
+  if (pad === 'longbow') {
+    p.launchpad = 'longbow';
+    p.platformAllocation = addr(15);
+    p.quotes[0].id = 'longbow-NVDA';
+  }
+  const pairId = p.quotes[0].id;
   const g = { tokenBeacon: contract(12), tokenImplementation: contract(13), oracleAggregator: contract(14), heartbeatSeconds: 86400 };
-  const config = { readsEnabled: true, origin: 'https://example.com', longLaunch: { profile: p, guards: { 'long-NVDA': g }, assetOrigin: 'https://assets.example.com' } };
-  const draft = { name: 'Sample', ticker: 'SAMPLE', description: 'Test metadata' };
+  const config = { readsEnabled: true, origin: 'https://example.com', longLaunch: { profile: p, guards: { [pairId]: g }, assetOrigin: 'https://assets.example.com' } };
+  const draft = { name: 'Sample', ticker: 'SAMPLE', description: 'Test metadata', ...(pad === 'longbow' ? { launchpad: 'longbow' } : {}) };
   const imageCid = await ipfsContentId(Buffer.from('synthetic'));
   const imageUri = `ipfs://${imageCid}`;
-  const metadata = Buffer.from(JSON.stringify({ name: draft.name, symbol: draft.ticker, description: draft.description, image: imageUri, image_hash: imageUri }));
+  const metadata = Buffer.from(JSON.stringify({ name: draft.name, symbol: draft.ticker, description: draft.description, image: imageUri, image_hash: imageUri, ...(pad === 'longbow' ? { categories: ['longbow'] } : {}) }));
   const publication = { id: 'a'.repeat(48), imageHash: 'b'.repeat(64), metadataHash: createHash('sha256').update(metadata).digest('hex') };
   const published = { ...publication, status: 'published', ipfs: { profile: 'pinata-v1-256k', schema: 'long-ipfs-v1', imageCid, metadataCid: await ipfsContentId(metadata) } };
-  const input = { chainId: 4663, wallet: addr(1001), pairId: 'long-NVDA', draft, publication };
+  const input = { chainId: 4663, wallet: addr(1001), pairId, draft, publication };
   const changes = {}, seen = [], requests = [];
   const rpc = {
     block: async () => '0x64',
@@ -53,7 +59,8 @@ async function fixture(t) {
         case 'tokenURI': return imageUri.replace(imageCid, published.ipfs.metadataCid);
         case 'totalSupply': return changes.supply ?? 10n ** 27n;
         case 'getTickerRecord': return [changes.plan.predictedAsset, 100, 86500];
-        case 'getAssetData': return [p.quotes[0].token.address, addr(20), addr(21), p.liquidityMigrator.address, p.poolInitializer.address, addr(200), addr(22), 10n ** 27n, 10n ** 27n, p.integrator];
+        case 'getAssetData': return [p.quotes[0].token.address, addr(20), addr(21), p.liquidityMigrator.address, p.poolInitializer.address, addr(200), addr(22),
+          changes.saleSupply ?? BigInt(changes.plan.review.tokensForSale), changes.initialSupply ?? 10n ** 27n, p.integrator];
         default: throw new Error('unexpected call');
       }
     }),
@@ -83,7 +90,9 @@ async function fixture(t) {
     }),
   };
   const upstream = { json: async () => ({ data: { base: 'ETH', currency: 'USD', amount: '2500.12' } }) };
-  const options = { now: () => now, rpc, fetcher: async (_url, request) => {
+  // Ordinary fixtures test transaction rules independently of host CPU load.
+  // The continuation test below supplies an advancing mining clock explicitly.
+  const options = { now: () => now, miningNow: () => 0, rpc, fetcher: async (_url, request) => {
     assert.equal(request.headers['x-fungun-intent'], 'asset-status');
     assert.equal(JSON.parse(request.body).wallet, input.wallet);
     return Response.json(published);
@@ -103,6 +112,33 @@ test('preparation binds metadata, verifies dependencies at one block and returns
   assert.deepEqual(await f.service.run('launch-prepare', f.input), plan);
   assert.equal(f.requests.length, reads);
   assert.ok(!f.requests.some((m) => /send|sign/i.test(m)));
+});
+
+test('address preparation returns checkpoints before simulation and resumes into a freshly verified quote', async (t) => {
+  const f = await fixture(t);
+  f.budget.key = 'checkpoint-test-key';
+  let clock = 0;
+  f.service.miningNow = () => { clock += 2000; return clock; };
+  let plan;
+  let continuations = 0;
+  for (let attempt = 0; !plan && attempt < 740; attempt++) {
+    try { plan = await f.service.run('launch-prepare', f.input); }
+    catch (error) {
+      assert.equal(error.code, 'long_address_pending');
+      assert.equal(error.retryAfter, 1);
+      assert.deepEqual(serviceErrorBody(error), { error: 'long_address_pending' });
+      assert.equal(f.budget.db.prepare('SELECT COUNT(*) AS n FROM long_launches').get().n, 0);
+      assert.ok(!f.requests.includes('eth_estimateGas'));
+      continuations++;
+      f.advance(60000); // model separate requests without exhausting fixture burst limits
+    }
+  }
+  assert.ok(continuations > 0);
+  assert.ok(plan);
+  assert.equal(plan.quotedAt, 1800000000000 + continuations * 60000);
+  assert.ok(f.seen.length >= 2 * (continuations + 1), 'contracts are reverified on every continuation');
+  assert.equal(f.requests.filter(method => method === 'eth_estimateGas').length, 1);
+  assert.ok(!f.requests.some(method => /send|sign/i.test(method)));
 });
 
 test('unsent legacy plans are refreshed with a canonical address rather than offered to the wallet', async (t) => {
@@ -200,6 +236,43 @@ test('terminal launch results remain bound to the journaled transaction hash', a
       /launch_transaction_changed/,
     );
   }
+});
+
+test('Longbow confirms its 99% sale / 1% allocation and rejects swapped or incorrect Airlock supply fields', async t => {
+  const f = await fixture(t, 'longbow');
+  const plan = await f.service.run('launch-prepare', f.input);
+  f.changes.plan = plan;
+  assert.equal(plan.review.totalSupply, String(10n ** 27n));
+  assert.equal(plan.review.tokensForSale, String(99n * 10n ** 25n));
+  f.service.reserve(plan);
+  const txHash = hash(650), blockHash = hash(500);
+  f.changes.tx = { ...plan.transaction, input: plan.transaction.data, hash: txHash, blockHash, blockNumber: '0x64' };
+  const topics = encodeEventTopics({ abi: LONG_STATE_ABI, eventName: 'LaunchCreated', args: {
+    poolOrHook: addr(200), asset: plan.predictedAsset, numeraire: f.p.quotes[0].token.address,
+  } });
+  const event = LONG_STATE_ABI.find(e => e.type === 'event');
+  const { keccak256, toBytes } = await import('viem');
+  const data = encodeAbiParameters(event.inputs.filter(i => !i.indexed), [f.p.poolInitializer.address, f.input.wallet,
+    keccak256(toBytes(f.input.draft.ticker)), 100, 86500, f.input.draft.ticker]);
+  f.changes.receipt = { transactionHash: txHash, from: plan.transaction.from, to: plan.transaction.to,
+    blockHash, blockNumber: '0x64', gasUsed: '0x100', effectiveGasPrice: plan.transaction.gasPrice, status: '0x1',
+    logs: [{ address: f.p.launcher.address, topics, data }] };
+  for (const invalid of [
+    { saleSupply: 10n ** 27n, initialSupply: 99n * 10n ** 25n },
+    { saleSupply: 10n ** 27n },
+    { initialSupply: 99n * 10n ** 25n },
+    { supply: 99n * 10n ** 25n },
+  ]) {
+    Object.assign(f.changes, invalid);
+    await assert.rejects(f.service.run('launch-status', { id: plan.id, hash: txHash }), /launch_receipt_unverified/);
+    for (const key of Object.keys(invalid)) delete f.changes[key];
+    f.advance(31000);
+  }
+  const result = await f.service.run('launch-status', { id: plan.id, hash: txHash });
+  assert.equal(result.status, 'confirmed');
+  assert.equal(result.asset, plan.predictedAsset);
+  assert.equal(f.service.row(plan.id).state, 'confirmed');
+  assert.deepEqual(await f.service.run('launch-status', { id: plan.id, hash: null }), result);
 });
 
 test('wallet gas changes and EIP-1559 conversion preserve a verified launch, including old journal entries', async (t) => {
@@ -327,8 +400,25 @@ test('background estimate uses recent comparable simulations and cached live gas
   f.advance(301000); f.changes.price = 1000000000;
   assert.equal((await f.service.run('launch-estimate', input)).gasPriceWei, '1000000000');
   assert.equal(f.requests.length, reads + 4);
-  for (const change of [{wallet:f.input.wallet}, {pairId:'long-MU'}, {chainId:8453}, {transaction:{}}])
+  for (const change of [{wallet:f.input.wallet}, {chainId:8453}, {transaction:{}}])
     await assert.rejects(f.service.run('launch-estimate', {...input,...change}), /invalid_request/);
+  await assert.rejects(f.service.run('launch-estimate', {...input,pairId:'longbow-MU'}), /unsupported_pair/);
+});
+
+test('unconfigured pairings return available pairs before publication reads or preparation budgets', async t => {
+  const f = await fixture(t);
+  f.service.metadata = async () => { throw new Error('must not read artwork'); };
+  for (const kind of ['launch-estimate', 'launch-prepare']) {
+    const input = kind === 'launch-estimate' ? { chainId: 4663, pairId: 'long-NET' } : { ...f.input, pairId: 'long-NET' };
+    await assert.rejects(f.service.run(kind, input), error => {
+      assert.deepEqual(serviceErrorBody(error), { error: 'unsupported_pair', supportedPairs: ['long-NVDA'] });
+      return true;
+    });
+  }
+  assert.equal(f.requests.length, 0);
+  assert.equal(f.budget.db.prepare('SELECT COUNT(*) AS n FROM counters').get().n, 0);
+  f.p.quotes.push({ ...f.p.quotes[0], id: 'long-NET' });
+  assert.equal((await f.service.run('launch-estimate', { chainId: 4663, pairId: 'long-NET' })).pairId, 'long-NET');
 });
 
 test('no simulation history uses a disclosed gas limit, and invalid gas prices never become estimates', async t => {

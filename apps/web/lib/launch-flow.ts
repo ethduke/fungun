@@ -1,7 +1,9 @@
 import { AssetError } from './asset-protocol.ts';
 import { LaunchError, LaunchPreflightError } from './long-wallet.ts';
+import { isOutdatedPage } from './page-version.ts';
 
 const transientRead = (e: unknown) => {
+  if (isOutdatedPage(e)) return false;
   if (e instanceof Error && ['TypeError', 'TimeoutError', 'AbortError'].includes(e.name)) return true;
   return e instanceof LaunchError
     ? [
@@ -20,6 +22,7 @@ const transientRead = (e: unknown) => {
 /** One user action through publication, fresh quote and wallet dispatch.
  * Retry only preparation or errors proven to precede eth_sendTransaction. */
 export async function runLaunchFlow<A, Q>({
+  availability,
   artwork,
   quote,
   wallet,
@@ -29,6 +32,7 @@ export async function runLaunchFlow<A, Q>({
     new Promise<void>((resolve) => setTimeout(resolve, ms)),
   now = () => performance.now(),
 }: {
+  availability?: () => Promise<unknown>;
   artwork: () => Promise<A>;
   quote: (artwork: A) => Promise<Q>;
   wallet: (quote: Q) => Promise<void>;
@@ -55,7 +59,9 @@ export async function runLaunchFlow<A, Q>({
       guard();
       const second = Math.ceil(remaining / 1000);
       if (second !== lastSecond) {
-        onProgress(`Retrying launch preparation in ${second}s…`);
+        onProgress(original instanceof LaunchError && original.message === 'long_address_pending'
+          ? `Preparing token address… Continuing in ${second}s…`
+          : `Retrying launch preparation in ${second}s…`);
         lastSecond = second;
       }
       await pause(Math.min(remaining, 250));
@@ -63,21 +69,32 @@ export async function runLaunchFlow<A, Q>({
     guard();
   }
   async function read<T>(operation: () => Promise<T>): Promise<T> {
-    for (let attempt = 0; ; attempt++) {
+    for (let failures = 0; ;) {
       guard();
+      if (now() >= deadline) throw new LaunchError('timeout');
       try {
         const result = await operation();
         guard();
         return result;
       } catch (e) {
-        if (!transientRead(e) || attempt >= 5) throw e;
+        // Address checkpoints are progress, not failed network attempts. They
+        // still share the overall deadline and can never retry wallet dispatch.
+        if (!(e instanceof LaunchError && e.message === 'long_address_pending')) {
+          if (!transientRead(e) || failures++ >= 5) throw e;
+        }
         await wait(e);
+        if (e instanceof LaunchError && e.message === 'long_address_pending')
+          onProgress('Preparing token address…');
       }
     }
   }
+  if (availability) {
+    onProgress('Checking launch availability…');
+    await read(availability);
+  }
   const published = await read(artwork);
   for (let attempt = 0; ; attempt++) {
-    onProgress('Estimating launch fees…');
+    onProgress('Preparing launch and estimating fees…');
     const prepared = await read(() => quote(published));
     guard();
     try {

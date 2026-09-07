@@ -44,7 +44,7 @@ export function LaunchSuccessDialog({ name, ticker, imageUrl, tokenUrl, transact
         <DialogTitle className="launch-success-title">{name} {longCompatible ? 'is deployed' : 'was deployed'}</DialogTitle>
         <DialogDescription className="launch-success-description">
           {longCompatible
-            ? `Deployment confirmed on Robinhood Chain through ${padName}.`
+            ? `Deployment confirmed on Robinhood Chain through ${padName}.${padName === 'Longbow' ? ' Longbow’s 1% allocation differs from Long.xyz’s launch format, so Long.xyz may flag this token.' : ''}`
             : 'This token was deployed, but its address does not meet Long’s requirements. Its address cannot be changed; a new deployment is required.'}
         </DialogDescription>
         <a className="launch-success-link" href={tokenUrl} target="_blank" rel="noopener noreferrer">

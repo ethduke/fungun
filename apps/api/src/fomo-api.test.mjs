@@ -3,6 +3,8 @@ import assert from "node:assert/strict";
 import { createServer } from "node:http";
 import { once } from "node:events";
 import { createHandler } from "./service.mjs";
+import { DatabaseSync } from "node:sqlite";
+import { createFomoService } from "./fomo-service.mjs";
 import { apiEnvironment } from "./runtime-env.mjs";
 
 test("FOMO API is a cached read with existing origin and exact-input protection", async (t) => {
@@ -40,9 +42,26 @@ test("FOMO API is a cached read with existing origin and exact-input protection"
 test("FOMO key and watchlist configuration are forwarded only through API runtime allowlist", () => {
   const result = apiEnvironment(
     {},
-    { FOMO_API_KEY: "EXAMPLE", FOMO_ENABLED: "1", FOMO_USERS_PATH: "/data/users.json" },
+    {
+      FOMO_API_KEY: "EXAMPLE",
+      FOMO_ENABLED: "1",
+      FOMO_USERS_PATH: "/data/users.json",
+      FOMO_MAX_CONNECTIONS_24H: "72",
+    },
   );
   assert.equal(result.FOMO_API_KEY, "EXAMPLE");
   assert.equal(result.FOMO_ENABLED, "1");
+  assert.equal(result.FOMO_MAX_CONNECTIONS_24H, "72");
   assert.equal(result.FOMO_USERS_PATH, "/data/users.json");
+});
+
+test("service applies the configured connection limit without opening a socket when disabled", async (t) => {
+  const db = new DatabaseSync(":memory:");
+  t.after(() => db.close());
+  const service = createFomoService(db, { FOMO_MAX_CONNECTIONS_24H: "72" });
+  service.start();
+  assert.equal(service.snapshot().max_connections_24h, 72);
+  assert.equal(service.snapshot().connections_24h, 0);
+  assert.equal(service.snapshot().history_complete, false);
+  await service.stop();
 });

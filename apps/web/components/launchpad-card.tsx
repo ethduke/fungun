@@ -80,12 +80,12 @@ export function LaunchpadCard({
           }}
           onValueChange={(value) => {
             if (
-              (o1 && value === 'native') ||
+              (o1 && (value === 'native' || (pad.chainId === 4663 && value === 'crypto-USDG'))) ||
               pairs.some((pair) => pair.id === value)
             )
               onChange({
                 ...pad,
-                route: value === 'native' ? 'standard' : 'rwa',
+                route: value === 'native' || value === 'crypto-USDG' ? 'standard' : 'rwa',
                 pairId: value as PairId,
               });
           }}
@@ -97,6 +97,7 @@ export function LaunchpadCard({
             <SelectValue>
               {pad.pairId === 'native'
                 ? 'ETH'
+                : pad.pairId === 'crypto-USDG' ? 'USDG'
                 : selectedPair
                   ? selectedPair.symbol
                   : 'Choose pairing'}
@@ -104,6 +105,7 @@ export function LaunchpadCard({
           </SelectTrigger>
           <SelectContent>
             {o1 && <SelectItem value="native">ETH</SelectItem>}
+            {o1 && pad.chainId === 4663 && <SelectItem value="crypto-USDG">USDG</SelectItem>}
             {pairs.map((pair) => (
               <SelectItem key={pair.id} value={pair.id}>
                 {pair.symbol}

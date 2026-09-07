@@ -10,7 +10,7 @@ export function createFomoService(db, env = process.env) {
       readFileSync(env.FOMO_USERS_PATH || new URL("./fomo-users.json", import.meta.url), "utf8"),
     ),
   );
-  const store = new FomoStore(db, users);
+  const store = new FomoStore(db, users, Date.now, env.FOMO_MAX_CONNECTIONS_24H);
   const enabled = env.FOMO_ENABLED === "1";
   const collector = new FomoCollector(store, { enabled, key: env.FOMO_API_KEY || "" });
   const handleFeed = createTrackedFeedHandler({
@@ -26,6 +26,7 @@ export function createFomoService(db, env = process.env) {
   let streamLastSeenAt = null;
   async function observe() {
     try {
+      store.prune();
       const response = await handleFeed(new Request("http://localhost/api/tracked-feed"));
       if (response.ok) {
         streamStatus = "connected";

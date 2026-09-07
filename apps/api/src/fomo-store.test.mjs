@@ -4,7 +4,13 @@ import { DatabaseSync } from "node:sqlite";
 import { mkdtempSync, rmSync, readFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { FomoStore, fomoUsers, normalizeFomoEvent, eventTime } from "./fomo-store.mjs";
+import {
+  FomoStore,
+  fomoUsers,
+  normalizeFomoEvent,
+  eventTime,
+  fomoConnectionLimit,
+} from "./fomo-store.mjs";
 
 const now = 1_788_600_000_000;
 const token = `0x${"ab".repeat(20)}`;
@@ -21,12 +27,12 @@ const buy = (extra = {}) => ({
   ...extra,
 });
 const rows = [{ token, sym: "EXAMPLE", chain_id: 4663, quote_kind: "eth" }];
-function fixture(t) {
+function fixture(t, limit = 48) {
   const dir = mkdtempSync(join(tmpdir(), "fungun-fomo-"));
   const path = join(dir, "cache.sqlite");
   let db = new DatabaseSync(path);
   let time = now;
-  const build = () => new FomoStore(db, users, () => time);
+  const build = () => new FomoStore(db, users, () => time, limit);
   let store = build();
   t.after(() => {
     db.close();
@@ -39,7 +45,8 @@ function fixture(t) {
     advance(ms) {
       time += ms;
     },
-    reopen() {
+    reopen(nextLimit = limit) {
+      limit = nextLimit;
       db.close();
       db = new DatabaseSync(path);
       store = build();
@@ -84,7 +91,7 @@ test("strict buy evidence excludes positions, thesis, unknown/wrong chains, inva
   assert.equal(nested.token, token);
 });
 
-test("buys in both arrival orders survive replays, sells, removal, ten days and restart", (t) => {
+test("buys in both arrival orders survive replays, sells, removal and restart within a day", (t) => {
   const f = fixture(t);
   assert.equal(f.store.ingest(buy()), true);
   assert.deepEqual(f.store.highlights(), []);
@@ -96,13 +103,31 @@ test("buys in both arrival orders survive replays, sells, removal, ten days and 
   f.store.register([]);
   assert.equal(f.store.highlights().length, 2);
   assert.equal(f.store.highlights()[1].buy_alerts, 1);
-  f.advance(11 * 86_400_000);
+  f.advance(60_000);
   f.reopen();
   assert.equal(f.store.highlights().length, 2);
   assert.equal(f.store.tokenCount(), 1);
   const unipcs = f.store.highlights().find((row) => row.handle === "unipcs");
   assert.equal(unipcs.label, "theunipcs");
   assert.equal(unipcs.last_bought_at, (now - 1000) / 1000);
+});
+
+test("buys expire by provider time at 24 hours, including persisted history and old replays", (t) => {
+  const f = fixture(t);
+  f.store.register(rows);
+  f.store.ingest(buy({ id: "older", ts: now - 86_400_000 + 1 }));
+  f.store.ingest(buy());
+  assert.equal(f.store.highlights()[0].buy_alerts, 2);
+  f.advance(1);
+  assert.equal(f.store.highlights()[0].buy_alerts, 1);
+  assert.equal(f.store.highlights()[0].first_bought_at, (now - 1000) / 1000);
+  f.advance(86_400_000 - 1001);
+  f.reopen();
+  assert.deepEqual(f.store.highlights(), []);
+  assert.equal(f.store.db.prepare("SELECT COUNT(*) AS n FROM fomo_events").get().n, 0);
+  assert.equal(f.store.ingest(buy()), false, "expired replay cannot restore old history");
+  assert.equal(f.store.ingest(buy({ id: "new", ts: now + 86_400_000 - 1000 })), true);
+  assert.equal(f.store.highlights().length, 1, "a new buy still matches an older Stream token");
 });
 
 test("sell-only and unrelated contracts never highlight; token identity includes chain", (t) => {
@@ -121,7 +146,7 @@ test("sell-only and unrelated contracts never highlight; token identity includes
 });
 
 test("daily attempt reservations and retry deadlines survive restarts", (t) => {
-  const f = fixture(t);
+  const f = fixture(t, 12);
   for (let i = 0; i < 12; i++) {
     assert.equal(f.store.reserveConnection().allowed, true);
     assert.equal(f.store.reserveConnection().allowed, false);
@@ -137,14 +162,76 @@ test("daily attempt reservations and retry deadlines survive restarts", (t) => {
   assert.equal(f.store.reserveConnection().allowed, false);
 });
 
-test("default mapping contains all nine canonical profiles and normalizes handles", () => {
+test("default mapping contains all ten canonical profiles and normalizes handles", () => {
   const mapping = fomoUsers(
     JSON.parse(readFileSync(new URL("./fomo-users.json", import.meta.url), "utf8")),
   );
-  assert.equal(mapping.size, 9);
+  assert.equal(mapping.size, 10);
   assert.equal(mapping.get("runn3rrr"), "runn3rrr");
+  assert.equal(mapping.get("kyle"), "kyle");
   assert.equal(mapping.get("change"), "changefomo");
   assert.equal(fomoUsers({ "@Unipcs": "theunipcs" }).get("unipcs"), "theunipcs");
   assert.throws(() => fomoUsers({}));
   assert.throws(() => fomoUsers({ "../bad": "bad" }));
+});
+
+test("default budget tolerates routine restarts beyond the former 12-attempt cap", (t) => {
+  const f = fixture(t);
+  assert.equal(f.store.maxConnections24h, 48);
+  for (let i = 0; i < 48; i++) {
+    assert.equal(f.store.reserveConnection().allowed, true);
+    f.advance(60_000);
+    f.reopen();
+  }
+  const denied = f.store.reserveConnection();
+  assert.equal(denied.reason, "budget_exhausted");
+  assert.equal(denied.retryAt, now + 86_400_000);
+  f.advance(86_400_000 - 48 * 60_000);
+  assert.equal(f.store.reserveConnection().allowed, true);
+  assert.equal(f.store.attempts(), 48);
+});
+
+test("raising a persisted budget recovers without deleting attempts; lowering waits for enough expiry", (t) => {
+  const f = fixture(t, 2);
+  assert.equal(f.store.reserveConnection().allowed, true);
+  f.advance(60_000);
+  assert.equal(f.store.reserveConnection().allowed, true);
+  f.advance(60_000);
+  assert.equal(f.store.reserveConnection().reason, "budget_exhausted");
+  f.reopen(4);
+  assert.equal(f.store.attempts(), 2);
+  assert.equal(f.store.reserveConnection().allowed, true);
+  f.reopen(1);
+  const denied = f.store.reserveConnection();
+  assert.equal(denied.retryAt, now + 120_000 + 86_400_000);
+  f.advance(86_400_000 - 1);
+  assert.equal(f.store.reserveConnection().allowed, false);
+  f.advance(1);
+  assert.equal(f.store.reserveConnection().allowed, true);
+});
+
+test("connection budget rejects invalid configuration without echoing its value", () => {
+  assert.equal(fomoConnectionLimit(), 48);
+  assert.equal(fomoConnectionLimit("72"), 72);
+  for (const value of [
+    0,
+    -1,
+    1441,
+    1.5,
+    NaN,
+    Infinity,
+    null,
+    true,
+    "",
+    "1e2",
+    "synthetic-secret",
+  ]) {
+    assert.throws(
+      () => fomoConnectionLimit(value),
+      (error) => {
+        assert.equal(error.message, "FOMO_MAX_CONNECTIONS_24H must be an integer from 1 to 1440");
+        return true;
+      },
+    );
+  }
 });

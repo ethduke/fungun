@@ -15,6 +15,6 @@ export class Launches {
   run(kind, input) {
     const saved = input?.id && this.db.prepare('SELECT context FROM long_launches WHERE id=?').get(input.id);
     const pair = saved ? JSON.parse(saved.context).pairId : input?.pairId;
-    return this.handlers[launchpadForPair(pair)].run(kind, input);
+    return this.budget.withLaunch(() => this.handlers[launchpadForPair(pair)].run(kind, input));
   }
 }

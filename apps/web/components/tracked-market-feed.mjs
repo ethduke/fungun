@@ -421,6 +421,7 @@ if (
     }
 
     connectedCallback() {
+      this.fomoExpiryTimer = setInterval(() => this.renderFomo(), 15_000);
       this.pageHidden = false;
       this.inView = false;
       document.addEventListener('visibilitychange', this.syncActivity);
@@ -441,6 +442,7 @@ if (
     }
 
     disconnectedCallback() {
+      clearInterval(this.fomoExpiryTimer);
       this.observer?.disconnect();
       this.observer = null;
       document.removeEventListener('visibilitychange', this.syncActivity);

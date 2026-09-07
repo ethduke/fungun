@@ -4,6 +4,7 @@ import { LONG_SALT_ATTEMPTS, isCanonicalLongAsset } from './long-encoding/long-s
 import { assetDraft, assetWallet, type AssetDraft, type PublishedAsset } from './asset-protocol.ts';
 import { parseLaunchFunding, fundingMessage, type LaunchFunding } from './launch-funding.ts';
 import { parseLaunchFeeSource, type LaunchFeeSource } from './launch-fee-source.ts';
+import { isOutdatedPage } from './page-version.ts';
 import { buildUnsignedO1Launch, readO1LaunchProfile } from './long-encoding/o1-launch.mjs';
 import { o1Metadata } from './long-encoding/o1-metadata.mjs';
 
@@ -25,8 +26,9 @@ export type LongPlan = {
   launchFeeSource: LaunchFeeSource;
   usd: { microUsdPerEth: string; sourceLabel: string; quotedAt: number };
 };
-export const isLongLaunchPair = (pairId: string | undefined): pairId is 'long-NVDA' | 'long-TSLA' =>
-  pairId === 'long-NVDA' || pairId === 'long-TSLA';
+// Syntax only; the server's verified profile decides which pairs are enabled.
+export const isLongLaunchPair = (pairId: string | undefined): pairId is `long-${string}` =>
+  typeof pairId === 'string' && /^long-[A-Z0-9._-]{1,24}$/.test(pairId);
 
 export class LaunchError extends Error {
   retryAfter: number;
@@ -46,6 +48,7 @@ export class LaunchPreflightError extends Error {
 }
 export function launchMessage(error: unknown) {
   if (error instanceof LaunchPreflightError) return launchMessage(error.cause);
+  if (isOutdatedPage(error)) return 'The site was updated while this tab was open. Reload the page to continue with your saved draft.';
   if (error instanceof LaunchError && error.funding) return fundingMessage(error.funding);
   if (error instanceof LaunchError && error.supportedPairs)
     return 'This pairing is no longer available on the launchpad. Refresh its pairing list.';
@@ -65,6 +68,7 @@ export function launchMessage(error: unknown) {
   }
   const code = error instanceof Error ? error.message : '';
   const messages: Record<string, string> = {
+    long_address_pending: 'Token address preparation is taking longer than usual. Your draft is saved. Try Launch coin again to continue.',
     long_salt_unavailable: 'A Long-compatible token address could not be prepared in time. No transaction was sent. Try preparing again.',
     invalid_long_salt: 'The prepared token address does not meet Long’s requirements. Refresh the launch estimate.',
     long_launch_disabled: 'The launch service is currently unavailable.',

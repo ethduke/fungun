@@ -1,3 +1,4 @@
+import { ipfsMetadata } from './ipfs-content.ts';
 import { assetDraft, assetHash, assetWallet, AssetError, type AssetDraft, type PublishedAsset } from './asset-protocol.ts';
 import { prepareAsset, publishLaunchAsset, recoveryFor, readAssetRecovery, checkAssetStatus, clearAssetRecovery, type AssetRecovery, type AssetStorage } from './asset-client.ts';
 import { artworkHistory, rememberArtwork, forgetArtwork } from './artwork-cache.ts';
@@ -108,7 +109,7 @@ export async function ensureLaunchArtwork({ bytes, wallet, draft, origin, storag
     // Pending means the server has not reserved or uploaded anything. Prepare
     // the current bytes again to obtain the same content-bound capability and
     // resume acceptance; reserved/uncertain uploads above remain read-only.
-  } else if (cached?.ipfs) {
+  } else if (cached?.ipfs && cached.metadataHash === await assetHash(ipfsMetadata(details, cached.ipfs.imageCid))) {
     const ticket: AssetRecovery = { id: cached.id, imageHash: cached.imageHash, metadataHash: cached.metadataHash,
       imageUrl: cached.imageUrl, metadataUrl: cached.metadataUrl, appOrigin: origin,
       assetOrigin: new URL(cached.imageUrl).origin, walletHash,

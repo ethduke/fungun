@@ -1,14 +1,18 @@
 import {
   LONGBOW_PAIRS,
-  type LONGBOW_MARKET_TICKERS,
+  LONGBOW_MARKET_TICKERS,
 } from './longbow-markets.ts';
 import { O1_ROBINHOOD_PAIRS, selectableO1Pairs } from './o1-markets.ts';
+import { LONG_MARKET_TICKERS } from './long-encoding/long-markets.mjs';
+
+export { LONG_MARKET_TICKERS };
 
 export type PadId = 'long' | 'o1';
 export type LaunchpadId = PadId | 'longbow';
 export type ChainId = 4663 | 8453;
 export type PairId =
   | 'native'
+  | 'crypto-USDG'
   | 'sample-nvda'
   | 'sample-aapl'
   | 'sample-tsla'
@@ -84,67 +88,20 @@ export function launchpadName(id: LaunchpadId) {
 }
 
 export function readablePads(pads: LaunchpadId[]): PadId[] {
-  return pads.filter((pad): pad is PadId => pad === 'long' || pad === 'o1');
+  // Long and Longbow use the same on-chain ticker reservation registry.
+  return [...new Set(pads.map((pad) => pad === 'longbow' ? 'long' : pad))];
 }
-// User-supplied Long market snapshot, 2026-09-04.
-export const LONG_MARKET_TICKERS = [
-  'AAPL',
-  'AI',
-  'AMC',
-  'AMD',
-  'AMZN',
-  'ASML',
-  'BA',
-  'BB',
-  'BE',
-  'CCL',
-  'COIN',
-  'COST',
-  'CRWV',
-  'DELL',
-  'DJT',
-  'ETH',
-  'FIG',
-  'GLD',
-  'GME',
-  'GOOGL',
-  'HIMS',
-  'IBM',
-  'INTC',
-  'LLY',
-  'LULU',
-  'META',
-  'MRNA',
-  'MSFT',
-  'MSTR',
-  'MU',
-  'NET',
-  'NFLX',
-  'NU',
-  'NVDA',
-  'ORCL',
-  'PLTR',
-  'QQQ',
-  'QUBT',
-  'RBLX',
-  'RDDT',
-  'SGOV',
-  'SKHY',
-  'SLV',
-  'SNAP',
-  'SNDK',
-  'SOFI',
-  'SPCX',
-  'SPY',
-  'TSLA',
-  'TSM',
-  'TTWO',
-  'UPS',
-  'USAR',
-  'USDG',
-  'USO',
-  'XLK',
-] as const;
+export function hasSharedTickerConflict(destinations: Destination[]) {
+  return destinations.some(pad => pad.selected && pad.id === 'long')
+    && destinations.some(pad => pad.selected && pad.id === 'longbow');
+}
+
+export function selectDestination(destinations: Destination[], destination: Destination) {
+  const sharesTicker = destination.id === 'long' || destination.id === 'longbow';
+  return destinations.map(pad => pad.id === destination.id ? destination
+    : destination.selected && sharesTicker && (pad.id === 'long' || pad.id === 'longbow')
+      ? { ...pad, selected: false } : pad);
+}
 export const LONG_PAIRS = LONG_MARKET_TICKERS.map((symbol) => ({
   id: `long-${symbol}` as const,
   symbol,
@@ -204,6 +161,7 @@ export function selectChain(destinations: Destination[], chainId: ChainId) {
 }
 
 export function pairingName(id: PairId) {
+  if (id === 'crypto-USDG') return 'USDG';
   return id === 'native'
     ? 'ETH'
     : ([...LONG_PAIRS, ...LONGBOW_PAIRS, ...O1_ROBINHOOD_PAIRS].find(
@@ -228,6 +186,8 @@ export function validateDraft(
     errors.description = 'Description must be at most 2,000 UTF-8 bytes.';
   if (!draft.hasImage) errors.image = 'Add a coin image to continue.';
   if (!active.length) errors.destinations = 'Select at least one launchpad.';
+  if (hasSharedTickerConflict(destinations))
+    errors.destinations = 'Choose Long or Longbow. They share a 24-hour ticker reservation.';
   if (new Set(active.map((pad) => pad.chainId)).size > 1)
     errors.destinations = 'Select launchpads on one chain at a time.';
   if (
@@ -257,8 +217,8 @@ export function validateDraft(
             ).some((pair) => pair.id === pad.pairId))
     )
       errors.destinations = 'Choose an available RWA pairing.';
-    if (pad.route === 'standard' && pad.pairId !== 'native')
-      errors.destinations = 'Standard launches require native pairing.';
+    if (pad.route === 'standard' && pad.pairId !== 'native' && !(pad.id === 'o1' && pad.chainId === 4663 && pad.pairId === 'crypto-USDG'))
+      errors.destinations = 'Choose an available crypto pairing.';
   }
   if (
     (chainId !== undefined && !isWebviewChain(chainId)) ||

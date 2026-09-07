@@ -1,6 +1,13 @@
 import { createHash } from "node:crypto";
 
 const DAY = 86_400_000;
+
+export function fomoConnectionLimit(value = 48) {
+  const limit = typeof value === "string" && /^\d+$/.test(value) ? Number(value) : value;
+  if (!Number.isInteger(limit) || limit < 1 || limit > 1440)
+    throw new Error("FOMO_MAX_CONNECTIONS_24H must be an integer from 1 to 1440");
+  return limit;
+}
 const addressPattern = /^0x[0-9a-f]{40}$/i;
 export const normalizeHandle = (value) =>
   typeof value === "string" ? value.trim().replace(/^@/, "").toLowerCase() : "";
@@ -68,7 +75,8 @@ export function normalizeFomoEvent(row, users, now = Date.now()) {
 }
 
 export class FomoStore {
-  constructor(db, users, now = Date.now) {
+  constructor(db, users, now = Date.now, maxConnections24h = 48) {
+    this.maxConnections24h = fomoConnectionLimit(maxConnections24h);
     Object.assign(this, { db, users, now });
     db.exec(`
       CREATE TABLE IF NOT EXISTS fomo_events (
@@ -77,6 +85,7 @@ export class FomoStore {
         ts INTEGER NOT NULL, observed_at INTEGER NOT NULL, source TEXT NOT NULL, provider_id TEXT NOT NULL
       );
       CREATE INDEX IF NOT EXISTS fomo_events_match ON fomo_events(chain_id,token,handle,side,ts);
+      CREATE INDEX IF NOT EXISTS fomo_events_expiry ON fomo_events(ts);
       CREATE TABLE IF NOT EXISTS fomo_stream_tokens (
         chain_id INTEGER NOT NULL, token TEXT NOT NULL, symbol TEXT NOT NULL,
         first_seen INTEGER NOT NULL, PRIMARY KEY(chain_id,token)
@@ -84,6 +93,11 @@ export class FomoStore {
       CREATE TABLE IF NOT EXISTS fomo_connections (ts INTEGER NOT NULL);
       CREATE TABLE IF NOT EXISTS fomo_metadata (name TEXT PRIMARY KEY, value TEXT NOT NULL);
     `);
+    this.prune();
+  }
+
+  prune() {
+    this.db.prepare("DELETE FROM fomo_events WHERE ts<=?").run(this.now() - DAY);
   }
 
   transaction(fn) {
@@ -113,7 +127,7 @@ export class FomoStore {
 
   ingest(row) {
     const event = normalizeFomoEvent(row, this.users, this.now());
-    if (!event) return false;
+    if (!event || event.ts <= this.now() - DAY) return false;
     return Boolean(
       this.db
         .prepare("INSERT OR IGNORE INTO fomo_events VALUES (?,?,4663,?,?,?,?,?,?,?)")
@@ -132,6 +146,7 @@ export class FomoStore {
   }
 
   highlights() {
+    this.prune();
     return this.db
       .prepare(`SELECT e.handle,e.token,
       COALESCE(NULLIF(s.symbol,''),NULLIF(MAX(e.symbol),''),e.token) AS symbol,
@@ -158,13 +173,21 @@ export class FomoStore {
       const retry = Number(
         this.db.prepare("SELECT value FROM fomo_metadata WHERE name='retry_at'").get()?.value ?? 0,
       );
-      if (latest > now || retry > now) return { allowed: false, retryAt: Math.max(latest, retry) };
       this.db.prepare("DELETE FROM fomo_connections WHERE ts<=?").run(now - DAY);
-      if (this.attempts() >= 12)
+      if (this.attempts() >= this.maxConnections24h)
         return {
           allowed: false,
-          retryAt: this.db.prepare("SELECT MIN(ts) AS ts FROM fomo_connections").get().ts + DAY,
+          reason: "budget_exhausted",
+          // If the configured limit was lowered, enough attempts must expire first.
+          retryAt: Math.max(
+            retry,
+            this.db
+              .prepare("SELECT ts FROM fomo_connections ORDER BY ts DESC LIMIT 1 OFFSET ?")
+              .get(this.maxConnections24h - 1).ts + DAY,
+          ),
         };
+      if (latest > now || retry > now)
+        return { allowed: false, reason: "reconnecting", retryAt: Math.max(latest, retry) };
       this.db.prepare("INSERT INTO fomo_connections VALUES (?)").run(now);
       this.defer(now + 60_000);
       return { allowed: true };

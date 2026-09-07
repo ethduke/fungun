@@ -20,7 +20,7 @@ working controls, deliberate limitations, tests and the Fly backend boundary.
 
 This milestone is a local webview with a guarded read-service backend. Configured
 O1 catalogs load through the read service; Long and Longbow use bundled ticker
-lists (56 and 194 choices). Long ticker reservations can be checked; O1 stays
+lists (64 and 194 choices). Long ticker reservations can be checked; O1 stays
 unverified and Longbow ticker checking is not connected. Configured fee adapters support bounded live reads
 and explicit wallet claims. The Fees tab discovers the connected wallet's beneficiary positions with
 resumable pages and queues all eligible claims for individual wallet confirmation;

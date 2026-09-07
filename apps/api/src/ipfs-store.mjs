@@ -97,7 +97,8 @@ export class IpfsStore {
     }
     if (this.db.prepare("SELECT COUNT(*) AS n FROM ipfs_publications").get().n >= 4096)
       throw new ServiceError("asset_history_full", 507);
-    this.budget.debit([["ipfs-challenges", 60, day], ["ipfs-challenges", 6, 60000]]);
+    this.budget.debit(launch ? [["launch-ipfs-challenges", 60, 60000]]
+      : [["ipfs-challenges", 60, day], ["ipfs-challenges", 6, 60000]]);
     const row = { id: randomBytes(24).toString("hex"), owner, draft: JSON.stringify(bundle.draft),
       profile: bundle.profile, schema_name: bundle.schema, image_cid: bundle.image.cid, metadata_cid: bundle.metadata.cid,
       image_hash: bundle.image.sha256, metadata_hash: bundle.metadata.sha256,
@@ -159,8 +160,11 @@ export class IpfsStore {
       const disk = statfsSync(this.root);
       if (disk.bavail * disk.bsize < maximumBytes + bundle.totalBytes * 2) throw new ServiceError("asset_storage_full", 507);
       try {
-        this.budget.debit([["ipfs-publications", 30, day], [`ipfs-owner:${row.owner}`, 20, day]]);
+        this.budget.debit(launch
+          ? [["launch-ipfs-publications", 60, 60000], [`launch-ipfs-owner:${row.owner}`, 10, 60000]]
+          : [["ipfs-publications", 30, day], [`ipfs-owner:${row.owner}`, 20, day]]);
       } catch (error) {
+        if (launch) throw error;
         if (error?.code !== "rate_limited") throw error;
         const scope = `ipfs-owner:${row.owner}:${day}:${Math.floor(this.clock() / day)}`;
         const used = this.db.prepare("SELECT used FROM counters WHERE scope=?").get(scope)?.used ?? 0;

@@ -3,9 +3,9 @@
 > Noncustodial launchpad composer for Long, O1 and Longbow on Robinhood Chain, with optional guarded fee reads and wallet claims. Base is paused. Launches remain disabled; USDG/x402 image generation requires runtime configuration.
 
 Agents can help prepare a coin draft and explain its validation. Configured
-backends can load RWA catalogs and check Long ticker reservations on explicit
-request. External reads default to disabled; O1 ticker availability remains
-unverified; Longbow ticker checking is not connected. Fees supports paginated
+backends can load RWA catalogs and check the shared Long/Longbow ticker registry
+after typing, on focus, or on Enter. External reads default to disabled. O1 allows
+any ticker within the form's input rules and needs no reservation check. Fees supports paginated
 Long/Longbow beneficiary-pool discovery and O1 wallet-index positions, with claims for
 reviewed contracts. Each launchpad's Claim all queues its eligible discovered positions with
 separate review, wallet confirmation and receipt proof for every claim. Base fee lookups are
@@ -29,7 +29,7 @@ Canonical stablecoins are excluded as tracked tokens before counts/popularity.
 Stablecoin quote assets remain valid for otherwise eligible nonstable tokens.
 
 Robinhood Chain supports Long, O1 and Longbow in the webview. Base is temporarily
-paused. Long has 56 static market choices; Longbow has 194 stock/RWA registry
+paused. Long has 64 static market choices; Longbow has 194 stock/RWA registry
 choices, including the corrected SKHY ticker. O1 includes ETH and all 194 Robinhood
 RWA choices, with live availability through the read service and a dated saved
 catalog when offline. Selecting multiple launchpads represents separate deployments.

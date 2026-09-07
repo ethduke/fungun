@@ -15,7 +15,7 @@ Start with [llms.txt](/llms.txt) for the site overview.
    Drafts and picture bytes are saved in this browser. The Grok tab offers a USDG
    quote, a one-time wallet authorization, and a recoverable image job when configured.
    Never sign another authorization to recover an unresolved image request.
-4. Select Long, O1 and/or Longbow on Robinhood. Long uses a static list of 56
+4. Select Long, O1 and/or Longbow on Robinhood. Long uses a static list of 64
    market tickers; Longbow uses its 194-entry stock/RWA dropdown registry,
    with the SKYHY label corrected to SKHY. Both use permanent metadata.
    O1 offers ETH and 194 Robinhood RWA pairings, plus optional metadata updates.
@@ -23,9 +23,10 @@ Start with [llms.txt](/llms.txt) for the site overview.
    for draft selection even when the catalog is unavailable or expired. The saved
    list is dated 4 September 2026; transaction preparation still checks the server configuration.
 5. Read the inline launch section. Draft validation does not confirm ticker
-   availability, token eligibility, costs or launch readiness. Check ticker is an
-   explicit read: Long reports only its reservation state; O1 stays unverified.
-   Longbow ticker checking is not connected; it is excluded from read requests.
+   availability, token eligibility, costs or launch readiness. Long and Longbow
+   check their shared reservation registry after a typing pause; focus or Enter
+   checks again. O1 allows any ticker within the form's input rules and makes no
+   reservation request. Mixed selections retain each platform's status.
    Results expire and edits invalidate them. Launch stays disabled.
 
 The launch cost panel separates launchpad fees and complete network fees in ETH,

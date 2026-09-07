@@ -21,7 +21,8 @@ import {
   CollapsibleTrigger,
 } from '@/components/ui/collapsible';
 import { LaunchpadCard } from '@/components/launchpad-card';
-import { LongLaunch, type LongCosts } from '@/components/long-launch';
+import { type LongCosts } from '@/components/long-launch';
+import { LaunchQueue } from '@/components/launch-queue';
 import { LaunchSection } from '@/components/launch-section';
 import { BulletProgress } from '@/components/launch-motion';
 import { ImageGeneration } from '@/components/image-generation';
@@ -34,6 +35,7 @@ import {
   normalizeTicker,
   readablePads,
   selectChain,
+  selectDestination,
   supportsChain,
   validateDraft,
   type ChainId,
@@ -48,7 +50,7 @@ import { useConnectedAccount } from '@/lib/account-context';
 
 export default function Home() {
   const account = useConnectedAccount();
-  const [longCosts, setLongCosts] = useState<LongCosts>(null);
+  const [padCosts, setPadCosts] = useState<Record<string, LongCosts>>({});
   const { hydrated, cacheState, cacheError, retryCache } = useDraftCache();
   const [selection, setSelection] = useDraftField('selection');
   const { chainId, destinations } = selection;
@@ -64,6 +66,12 @@ export default function Home() {
   const fileInput = useRef<HTMLInputElement>(null);
   const imageSequence = useRef(0);
   const active = destinations.filter((pad) => pad.selected);
+  const offered = active.map(pad => padCosts[pad.id]).filter((cost): cost is NonNullable<LongCosts> => !!cost);
+  const longCosts = offered.length === active.length && offered.length ? {
+    quote: { ...offered[0].quote, quotedAt: Math.max(...offered.map(c => c.quote.quotedAt)),
+      expiresAt: Math.min(...offered.map(c => c.quote.expiresAt)), pads: offered.flatMap(c => c.quote.pads) },
+    usd: offered[0].usd,
+  } : null;
   const readPads = readablePads(active.map((pad) => pad.id));
   const reads = useReadService(
     chainId,
@@ -72,6 +80,10 @@ export default function Home() {
   );
   const availability = tickerAvailability(reads.check, chainId, ticker, readPads);
   const tickerReserved = availability === 'reserved';
+  const reservationLabel = active
+    .filter((pad) => pad.id === 'long' || pad.id === 'longbow')
+    .map((pad) => pad.id === 'longbow' ? 'Longbow' : 'Long')
+    .join(' / ');
   const errors = validateDraft(
     { name, ticker, description, hasImage: !!image },
     destinations,
@@ -181,9 +193,7 @@ export default function Home() {
         return current;
       return {
         ...current,
-        destinations: current.destinations.map((pad) =>
-          pad.id === destination.id ? destination : pad,
-        ),
+        destinations: selectDestination(current.destinations, destination),
       };
     });
   }
@@ -429,8 +439,13 @@ export default function Home() {
                     </p>
                   )}
                   {ticker && !errors.ticker && (
-                    <output id="ticker-availability" className="ticker-availability" data-state={availability} aria-live="polite">
-                      {tickerReserved ? 'RESERVED' : reads.checking ? 'Checking…' : availability === 'unreserved' ? 'UNRESERVED' : 'Availability unavailable'}
+                    <output id="ticker-availability" className="ticker-availability" aria-live="polite">
+                      {reservationLabel && (
+                        <span data-state={availability}>
+                          {reservationLabel}: {tickerReserved ? 'Reserved' : reads.checking ? 'Checking…' : availability === 'unreserved' ? 'Available' : 'Couldn’t check availability. Focus the ticker to retry.'}
+                        </span>
+                      )}
+                      {readPads.includes('o1') && <span>O1: Any ticker is allowed.</span>}
                     </output>
                   )}
                 </div>
@@ -502,6 +517,9 @@ export default function Home() {
                       onPairingOpen={reads.ensureCatalog}
                     />
                   ))}
+                <p className="launch-disclosure">
+                  Long and Longbow share a 24-hour ticker reservation. Choose one; selecting the other switches your choice.
+                </p>
                 {errors.destinations && (
                   <p role="alert" className="field-error">
                     {errors.destinations}
@@ -536,10 +554,13 @@ export default function Home() {
                 catalog={reads.catalog}
                 now={reads.now}
               >
-                <LongLaunch
-                  enabled={chainId === 4663 && active.some((pad) => pad.id === 'long')}
-                  ready={!tickerReserved && active.length === 1 && active[0]?.id === 'long' && !imagePending && !Object.keys(errors).length}
-                  pairId={active.find((pad) => pad.id === 'long')?.pairId}
+                <LaunchQueue
+                  key={JSON.stringify([chainId, account.address?.toLowerCase(), name, ticker, description, image?.url,
+                    active.map(pad => [pad.id, pad.pairId, pad.editableMetadata])])}
+                  destinations={active}
+                  enabled={chainId === 4663}
+                  ready={!imagePending && !Object.keys(errors).length}
+                  tickerReserved={tickerReserved}
                   name={name} ticker={ticker} description={description} image={image}
                   contextKey={launchCostKey({
                   name,
@@ -550,7 +571,7 @@ export default function Home() {
                   walletChainId: account.chainId,
                   destinations,
                 })}
-                  onCosts={setLongCosts}
+                  onCosts={(padId, costs) => setPadCosts(previous => ({ ...previous, [padId]: costs }))}
                 />
               </LaunchSection>
             </div>

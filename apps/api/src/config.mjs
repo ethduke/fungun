@@ -1,4 +1,4 @@
-import { readO1LiveConfig } from './o1-live.mjs';
+import { readO1LiveConfig } from "./o1-live.mjs";
 import { readLongLiveConfig } from "./long-live.mjs";
 import { resolve } from "node:path";
 import { isAddress, isHex, size } from "viem";
@@ -51,13 +51,14 @@ export function readConfig(env = process.env) {
   if (
     (registry && !isAddress(registry)) ||
     (codeHash && (!isHex(codeHash) || size(codeHash) !== 32)) ||
-    longQuotes.length > 100 ||
+    longQuotes.length > 512 ||
     longQuotes.some((value) => !isAddress(value))
   )
     throw new ServiceError("invalid_long_configuration");
   const longLaunch = readLongLiveConfig(env);
   return {
     longLaunch,
+    longbowLaunch: readLongLiveConfig(env, "longbow"),
     o1Launch: readO1LiveConfig(env, longLaunch),
     production,
     origin,
@@ -74,6 +75,6 @@ export function readConfig(env = process.env) {
     feeContracts: readFeeContracts(env.FEE_CONTRACTS_JSON || undefined),
     registry,
     codeHash,
-    longQuotes: new Set(longQuotes.map((value) => value.toLowerCase())),
+    longQuotes: new Set(longLaunch ? longLaunch.profile.quotes.map(q => q.token.address) : longQuotes.map((value) => value.toLowerCase())),
   };
 }

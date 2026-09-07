@@ -42,7 +42,8 @@ import {
 import {
   launchRequest,
   LaunchError,
-  isLongLaunchPair,
+  isEnabledLaunchPair,
+  launchMessage,
 } from '@/lib/long-wallet';
 import './launch-cost.css';
 import './launch-section.css';
@@ -78,18 +79,18 @@ export function LaunchSection({
   usdRate?: UsdRate | null;
   children?: ReactNode;
 }) {
-  const selectedPair = destinations.find((pad) => pad.id === 'long')?.pairId;
-  const estimatePair =
-    chainId === 4663 && isLongLaunchPair(selectedPair) ? selectedPair : null;
-  const supportsEstimate = !!estimatePair;
-  const [approximate, setApproximate] = useState<ApproximateLaunchCost | null>(
-    null,
-  );
+  const estimatePairsKey = JSON.stringify(chainId === 4663 ? destinations.map(pad => pad.pairId).filter(isEnabledLaunchPair) : []);
+  const estimatePairs: string[] = JSON.parse(estimatePairsKey);
+  const selectedPair = estimatePairs[0];
+  const supportsEstimate = estimatePairs.length > 0;
+  const [approximate, setApproximate] = useState<ApproximateLaunchCost[] | null>(null);
   const [estimateFailed, setEstimateFailed] = useState(false);
+  const [unavailablePair, setUnavailablePair] = useState<{ pairId: string; message: string } | null>(null);
   const [costTick, setCostTick] = useState(0);
   useEffect(() => {
-    if (!estimatePair) return;
-    const pairId = estimatePair;
+    const pairs: string[] = JSON.parse(estimatePairsKey);
+    if (!pairs.length) return;
+    let pairId = pairs[0];
     let stopped = false;
     let timer: ReturnType<typeof setTimeout>;
     async function refresh() {
@@ -99,23 +100,29 @@ export function LaunchSection({
       }
       let delay = 30000;
       try {
-        const started = performance.now();
-        const raw = await launchRequest('launch-estimate', {
-          chainId: 4663,
-          pairId,
-        });
-        const estimate = parseApproximateLaunchCost(raw, started, pairId);
-        if (estimate.expiresAt <= performance.now())
-          throw new Error('Estimate expired');
-        if (stopped) return;
-        setApproximate(estimate);
+        const estimates: ApproximateLaunchCost[] = [];
+        for (const pair of pairs) {
+          pairId = pair;
+          const started = performance.now();
+          const raw = await launchRequest('launch-estimate', { chainId: 4663, pairId });
+          if (stopped) return;
+          const estimate = parseApproximateLaunchCost(raw, started, pairId);
+          if (estimate.expiresAt <= performance.now()) throw new Error('Estimate expired');
+          estimates.push(estimate);
+        }
+        setApproximate(estimates);
         setEstimateFailed(false);
+        setUnavailablePair(null);
         setCostTick(performance.now());
-        delay = Math.max(1000, estimate.expiresAt - performance.now() + 50);
+        delay = Math.max(1000, Math.min(...estimates.map(e => e.expiresAt)) - performance.now() + 50);
       } catch (error) {
         if (stopped) return;
         setEstimateFailed(true);
         setCostTick(performance.now());
+        if (error instanceof LaunchError && error.message === 'unsupported_pair') {
+          setUnavailablePair({ pairId, message: launchMessage(error) });
+          return;
+        }
         if (error instanceof LaunchError)
           delay = Math.max(delay, error.retryAfter * 1000);
       }
@@ -126,13 +133,13 @@ export function LaunchSection({
       stopped = true;
       clearTimeout(timer);
     };
-  }, [estimatePair]);
+  }, [estimatePairsKey]);
   const costNow = Math.max(now, costTick);
   useEffect(() => {
     if (!approximate) return;
     const timer = setTimeout(
       () => setCostTick(performance.now()),
-      Math.max(0, approximate.expiresAt - performance.now() + 1),
+      Math.max(0, Math.min(...approximate.map(e => e.expiresAt)) - performance.now() + 1),
     );
     return () => clearTimeout(timer);
   }, [approximate]);
@@ -159,10 +166,12 @@ export function LaunchSection({
     },
     costNow,
   );
+  const approximateQuotes = approximate?.length === estimatePairs.length && approximate.every(e => estimatePairs.includes(e.pairId))
+    ? approximate.map(e => approximateLaunchQuote(e, costContextKey, costNow)) : [];
+  const allApproximate = approximateQuotes.length > 0 && approximateQuotes.every(q => q !== null);
   const fallbackCosts = calculateLaunchCosts(
-    supportsEstimate && approximate?.pairId === estimatePair
-      ? approximateLaunchQuote(approximate, costContextKey, costNow)
-      : null,
+    allApproximate ? { ...approximateQuotes[0]!, pads: approximateQuotes.flatMap(q => q!.pads),
+      expiresAt: Math.min(...approximateQuotes.map(q => q!.expiresAt)) } : null,
     {
       contextKey: costContextKey,
       chainId,
@@ -170,10 +179,10 @@ export function LaunchSection({
     },
     costNow,
   );
-  const useApproximate = !exactCosts.total && !!fallbackCosts.pads.long;
+  const useApproximate = !exactCosts.total && Object.keys(fallbackCosts.pads).length > 0;
   const costs = useApproximate ? fallbackCosts : exactCosts;
   const prefix = useApproximate
-    ? approximate?.basis === 'gas-limit'
+    ? approximate?.some(e => e.basis === 'gas-limit')
       ? 'Up to '
       : '≈ '
     : costs.total ? 'Up to ' : '';
@@ -194,10 +203,12 @@ export function LaunchSection({
   const hasUsd = usdTotal !== 'USD unavailable';
   const costMessage = !destinations.length
     ? 'Select a launchpad to see its fees.'
+    : unavailablePair && unavailablePair.pairId === selectedPair
+      ? unavailablePair.message
     : useApproximate && !costs.total
-      ? 'Long gas is shown below. Estimates for other launchpads are unavailable.'
+      ? 'Available launch estimates are shown below.'
       : useApproximate
-        ? approximate?.basis === 'gas-limit'
+        ? approximate?.some(e => e.basis === 'gas-limit')
           ? 'Gas limit at the current gas price. Checked again before wallet approval.'
           : 'Approximate gas budget, including a 20% buffer. Checked again before wallet approval.'
         : !costs.total && supportsEstimate
@@ -353,7 +364,7 @@ export function LaunchSection({
               <CollapsibleContent className="launch-fee-panel">
                 {destinations.map((pad) => {
                   const amount = costs.pads[pad.id];
-                  const feeSource = useApproximate && pad.id === 'long' ? approximate?.launchFeeSource
+                  const feeSource = useApproximate ? approximate?.find(estimate => estimate.pairId === pad.pairId)?.launchFeeSource
                     : costQuote?.pads.find(item => item.id === pad.id)?.launchFeeSource;
                   return (
                     <div key={pad.id} className="launch-fee-pad">

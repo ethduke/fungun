@@ -95,11 +95,41 @@ void test('only the selected ticker and launchpad results control red/green stat
       'long',
       'o1',
     ]),
-    'unknown',
+    'unreserved',
   );
   assert.equal(tickerAvailability(null, 4663, 'FREE', ['long']), 'unknown');
   for (const ticker of ['', 'LONGERTICKER', 'BAD TICKER'])
     assert.equal(canCheckTicker(4663, ticker, ['long']), false);
+});
+void test('O1 needs no reservation request; mixed selections only check the shared Long registry', async () => {
+  const clock = timers();
+  const requestedPads: string[][] = [];
+  let pending = 0;
+  const create = (pads: ('long' | 'o1')[]) => watchTicker({
+    chainId: 4663,
+    ticker: 'MOON',
+    pads,
+    onPending: () => { pending++; },
+    onResult: () => {},
+    onError: () => assert.fail('Unexpected error'),
+    request: async (_chain, ticker, selected) => {
+      requestedPads.push(selected);
+      return answer(ticker, 'unreserved');
+    },
+    ...clock,
+  });
+  const o1 = create(['o1']);
+  await o1.flush();
+  assert.equal(clock.jobs.size, 0);
+  assert.equal(pending, 0);
+  assert.deepEqual(requestedPads, []);
+  o1.stop();
+  const mixed = create(['long', 'o1']);
+  await mixed.flush();
+  assert.deepEqual(requestedPads, [['long']]);
+  mixed.stop();
+  assert.equal(canCheckTicker(8453, 'MOON', ['long']), false);
+  assert.equal(canCheckTicker(4663, 'MOON', []), false);
 });
 void test('unavailable and throttled checks never become green; retries honor the server delay', async () => {
   const clock = timers();

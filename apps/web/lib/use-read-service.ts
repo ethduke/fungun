@@ -18,9 +18,10 @@ export function useReadService(
   ticker: string,
   pads: PadId[],
 ) {
-  const key = tickerKey(chainId, ticker, pads);
+  const tickerPads: PadId[] = pads.includes('long') ? ['long'] : [];
+  const key = tickerKey(chainId, ticker, tickerPads);
   const checker = useRef<ReturnType<typeof watchTicker> | null>(null);
-  const padsKey = [...pads].sort().join(',');
+  const padsKey = tickerPads.join(',');
   const catalogSequence = useRef(0);
   const [catalog, setCatalog] = useState<Catalog | null>(null);
   const [catalogSettled, setCatalogSettled] = useState('');

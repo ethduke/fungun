@@ -233,7 +233,7 @@ test("unreviewed chains, pairs, module profiles, mutable options and invalid cur
     { airlock: contract(1) },
     { quotes: [] },
     { quotes: [...profile().quotes, ...profile().quotes] },
-    { quotes: [{ ...profile().quotes[0], decimals: 6 }] },
+    { quotes: [{ ...profile().quotes[0], decimals: 8 }] },
   ])
     assert.throws(() => readLongLaunchProfile({ ...profile(), ...change }));
 });

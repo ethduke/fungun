@@ -10,7 +10,7 @@ import { createIpfsWorker } from './ipfs-worker.mjs';
 import { validateAssetInput } from './asset-service.mjs';
 import { createAssetProxy } from '../../web/lib/asset-proxy.ts';
 import { ensureLaunchArtwork } from '../../web/lib/launch-artwork.ts';
-import { assetHash, assetWallet, assetErrorText } from '../../web/lib/asset-protocol.ts';
+import { assetHash, assetWallet } from '../../web/lib/asset-protocol.ts';
 import { runLaunchFlow } from '../../web/lib/launch-flow.ts';
 import { artworkHistory, rememberArtwork, ARTWORK_CACHE_TTL } from '../../web/lib/artwork-cache.ts';
 
@@ -138,24 +138,27 @@ test('upload capability binds bytes and wallet, expires, and cannot bypass legac
  assert.equal(f.writes.length,0);
 });
 
-test('signature-free publication still honors the shared daily spending limit',async t=>{
- const f=await fixture(t);const approval=await f.store.launchChallenge(f.wallet,f.image,f.draft);
+test('launch artwork ignores exhausted legacy daily quotas through publication and verification',async t=>{
+ const f=await fixture(t);
  f.store.budget.debit([['ipfs-publications',30,86400000]],30);
- await assert.rejects(f.store.acceptLaunch({id:approval.id,wallet:f.wallet,image:f.image,draft:f.draft,uploadToken:approval.uploadToken}),{code:'artwork_service_limit'});
- assert.equal(f.store.get(approval.id).state,'pending');assert.equal(f.writes.length,0);
+ f.store.budget.debit([[`ipfs-owner:${f.store.owner(f.wallet)}`,20,86400000]],20);
+ for(let i=0;i<2;i++)f.store.budget.debit([['ipfs-challenges',60,86400000]],30);
+ for(let i=0;i<16;i++)f.store.budget.debit([['pinata-requests',500,86400000]],30);
+ f.store.budget.debit([['pinata-requests',500,86400000]],20);
+ assert.equal((await f.run()).status,'published');assert.equal(f.writes.length,2);
 });
 
-test('publication quota rejection returns immediately instead of polling unsubmitted artwork',async t=>{
+test('launch artwork burst refusal retains the same publication and permits retry within a minute',async t=>{
  const f=await fixture(t);
- f.store.budget.debit([[`ipfs-owner:${f.store.owner(f.wallet)}`,20,86400000]],20);
- await assert.rejects(runLaunchFlow({artwork:()=>f.run({pause:async()=>assert.fail('Do not poll an unsubmitted upload')}),quote:async()=>assert.fail('Quota must stop before the quote'),wallet:async()=>assert.fail('Quota must stop before the wallet'),isCurrent:()=>true,onProgress:()=>{},pause:async()=>assert.fail('Daily cap must not retry')}),e=>{
-  assert.equal(e.code,'artwork_daily_limit');assert.ok(e.retryAfter>0);
-  assert.equal(assetErrorText(e),'Daily artwork limit reached: 20 per wallet. Try again after the daily reset.');return true;
+ let now=Date.now();f.store.now=f.store.budget.now=()=>now;
+ f.store.budget.debit([[`launch-ipfs-owner:${f.store.owner(f.wallet)}`,10,60000]],10);
+ await assert.rejects(f.run({pause:async()=>assert.fail('Do not poll an unsubmitted upload')}),e=>{
+  assert.equal(e.code,'rate_limited');assert.ok(e.retryAfter>0&&e.retryAfter<=60);return true;
  });
  assert.equal(f.requests.filter(x=>x==='status').length,1);assert.equal(f.writes.length,0);
  const id=JSON.parse(f.records.get((await keys(f.wallet)).recovery)).id;
  assert.equal(f.store.get(id).state,'pending');
- f.store.db.prepare('DELETE FROM counters WHERE scope LIKE ?').run(`ipfs-owner:${f.store.owner(f.wallet)}:%`);
+ now+=60000;
  const resumed=await f.run({pause:async()=>assert.fail('Pending recovery should resume immediately')});
  assert.equal(resumed.id,id);assert.equal(resumed.status,'published');assert.equal(f.writes.length,2);
 });

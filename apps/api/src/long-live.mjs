@@ -1,14 +1,16 @@
+import { readLaunchTokens, launchPairId } from "./launch-catalog.mjs";
 import { LongRecovery } from "./long-recovery.mjs";
 import { LongRpc } from "./long-rpc.mjs";
 import { createHash, createHmac } from "node:crypto";
 import { decodeEventLog, decodeFunctionResult, isAddress, keccak256, parseAbi, toBytes, toHex, zeroAddress } from "viem";
 import { buildUnsignedLongLaunchAsync, LONG_CREATE_ABI, readLongLaunchProfile } from "./long-launch.mjs";
 import { isCanonicalLongAsset } from '../../web/lib/long-encoding/long-salt.mjs';
+import { LONG_MARKET_TICKERS } from '../../web/lib/long-encoding/long-markets.mjs';
 import { normalizeLaunchDetails } from "./launch-metadata.mjs";
 import { ipfsContentId, ipfsUri, IPFS_IMPORT_PROFILE, LONG_IPFS_SCHEMA } from "./ipfs-content.mjs";
 import { rpcNumber } from "./fee-rpc.mjs";
 import { ReadCache, readJson, withinReadDeadline, checkReadDeadline } from "./upstream.mjs";
-import { ServiceError, InsufficientFundsError } from "./errors.mjs";
+import { ServiceError, InsufficientFundsError, UnsupportedPairError } from "./errors.mjs";
 
 export const LONG_STATE_ABI = parseAbi([
   "function AIRLOCK() view returns (address)",
@@ -23,11 +25,12 @@ export const LONG_STATE_ABI = parseAbi([
   "function aggregator() view returns (address)",
   "function implementation() view returns (address)",
   "function oraclePaused() view returns (bool)",
+  "function uiMultiplier() view returns (uint256)",
   "function name() view returns (string)",
   "function symbol() view returns (string)",
   "function tokenURI() view returns (string)",
   "function totalSupply() view returns (uint256)",
-  "function getAssetData(address) view returns (address,address,address,address,address,address,address,uint256,uint256,address)",
+  "function getAssetData(address) view returns (address numeraire,address timelock,address governance,address liquidityMigrator,address poolInitializer,address pool,address migrationPool,uint256 numTokensToSell,uint256 totalSupply,address integrator)",
   "event LaunchCreated(address indexed poolOrHook,address indexed asset,address indexed numeraire,address poolInitializer,address launcher,bytes32 tickerKey,uint48 deployedAt,uint48 reservedUntil,string normalizedTicker)",
 ]);
 const roles = ["launcher", "airlock", "tokenFactory", "governanceFactory", "poolInitializer", "liquidityMigrator", "dopplerHook"];
@@ -42,7 +45,7 @@ const call = (address, functionName, args = []) => ({ address, abi: LONG_STATE_A
 export function validateLongInput(kind, value) {
   if (kind === "launch-estimate") {
     if (!exact(value, ["chainId", "pairId"]) || value.chainId !== 4663
-      || typeof value.pairId !== "string" || !/^(?:long-(?:NVDA|TSLA)|rwa-[a-f0-9]{24}|native|crypto-USDG)$/.test(value.pairId)) fail("invalid_request", 400);
+      || typeof value.pairId !== "string" || !/^(?:(?:long|longbow)-[A-Z0-9._-]{1,24}|rwa-[a-f0-9]{24}|native|crypto-USDG)$/.test(value.pairId)) fail("invalid_request", 400);
     return value;
   }
   if (kind === "launch-prepare") {
@@ -65,32 +68,55 @@ export function validateLongInput(kind, value) {
   return value;
 }
 
-export function readLongLiveConfig(env) {
+export function readLongLiveConfig(env, pad = "long") {
   if (env.LONG_WALLET_LAUNCH !== "true") return null;
   try {
-    const profile = readLongLaunchProfile(JSON.parse(env.LONG_LAUNCH_PROFILE_JSON));
+    let profile = readLongLaunchProfile(JSON.parse(env.LONG_LAUNCH_PROFILE_JSON));
     const guards = JSON.parse(env.LONG_LAUNCH_GUARDS_JSON);
     for (const q of profile.quotes) {
       const g = guards[q.id];
       if (!exact(g, ["tokenBeacon", "tokenImplementation", "oracleAggregator", "heartbeatSeconds"]) || !Number.isInteger(g.heartbeatSeconds) || g.heartbeatSeconds < 1 || g.heartbeatSeconds > 86400) fail("long_configuration");
-      for (const c of [g.tokenBeacon, g.tokenImplementation, g.oracleAggregator]) if (!exact(c, ["address", "codeHash"]) || !isAddress(c.address)
+      for (const c of [g.tokenBeacon, g.tokenImplementation, g.oracle, g.oracleAggregator].filter(Boolean)) if (!exact(c, ["address", "codeHash"]) || !isAddress(c.address)
         || same(c.address, zeroAddress) || !/^0x[a-f0-9]{64}$/i.test(c.codeHash)) fail("long_configuration");
     }
     const assetOrigin = env.LAUNCH_ASSET_SERVICE_ORIGIN;
     const url = new URL(assetOrigin);
     if (url.origin !== assetOrigin || url.username || url.password || !(url.protocol === "https:"
       || (url.protocol === "http:" && /^[a-z][a-z0-9-]{0,62}\.internal$/.test(url.hostname) && url.port === "8790"))) fail("long_configuration");
+    const tokens = readLaunchTokens(env);
+    if (tokens.length) {
+      const template = profile.quotes[0], guard = guards[template.id];
+      profile = readLongLaunchProfile({ ...profile,
+        ...(pad === "longbow" ? { launchpad: "longbow", platformAllocation: env.LONGBOW_ALLOCATION_RECIPIENT } : {}),
+        quotes: tokens.map(token => ({ id: launchPairId(pad, token), token: { address: token.address, codeHash: template.token.codeHash },
+          decimals: 18, symbol: token.symbol, priceSource: "robinhood" })) });
+      for (const q of profile.quotes) guards[q.id] = { tokenBeacon: guard.tokenBeacon, tokenImplementation: guard.tokenImplementation };
+    } else if (pad === "longbow") return null;
+    if (env.LONG_EXTRA_QUOTES_JSON) {
+      const extra = JSON.parse(env.LONG_EXTRA_QUOTES_JSON);
+      if (!Array.isArray(extra) || extra.length > 16) fail("long_configuration");
+      profile = readLongLaunchProfile({ ...profile, quotes: [...profile.quotes, ...extra.map(({ quote }) => ({
+        id: `${pad}-${quote.symbol}`, token: quote.token, decimals: quote.decimals, symbol: quote.symbol, priceSource: "market",
+      }))] });
+      for (const { quote, guards: additional } of extra) guards[`${pad}-${quote.symbol}`] = { ...additional, symbol: quote.onchainSymbol };
+    }
+    if (pad === "long") {
+      const configured = new Map(profile.quotes.map(quote => [quote.id, quote]));
+      profile = readLongLaunchProfile({ ...profile, quotes: LONG_MARKET_TICKERS
+        .map(symbol => configured.get(`long-${symbol}`)).filter(Boolean) });
+    }
     return { profile, guards, assetOrigin };
   } catch { fail("long_configuration", 503); }
 }
 
 export class LongLive {
-  constructor(config, upstream, budget, { now = Date.now, fetcher = fetch, rpc } = {}) {
+  constructor(config, upstream, budget, { now = Date.now, fetcher = fetch, rpc, miningNow = () => performance.now() } = {}) {
     this.config = config; this.live = config.longLaunch; this.upstream = upstream; this.budget = budget;
     this.db = budget.db; this.now = now; this.fetcher = fetcher;
     this.rpc = rpc ?? new LongRpc(config, upstream, now, { queue: true, parallel: true });
     this.recovery = new LongRecovery(this.rpc);
     this.cache = new ReadCache(now, 32); this.active = false;
+    this.miningNow = miningNow;
     // Additive table on the existing durable volume; never prune an attempted launch.
     this.db.exec(`CREATE TABLE IF NOT EXISTS long_launches (
       id TEXT PRIMARY KEY, context TEXT NOT NULL, state TEXT NOT NULL,
@@ -112,7 +138,8 @@ export class LongLive {
     finally { this.active = false; }
   }
   async estimate(input) {
-    if (!this.live.profile.quotes.some(q => q.id === input.pairId)) fail("unsupported_pair", 400);
+    if (!this.live.profile.quotes.some(q => q.id === input.pairId))
+      throw new UnsupportedPairError(this.live.profile.quotes.map(q => q.id));
     // Shared across visitors, independent of artwork, wallet, reservations and quote budgets.
     const samples = this.db.prepare("SELECT plan,context FROM long_launches WHERE expires>? ORDER BY expires DESC LIMIT 20")
       .all(this.now() - 7 * 86400000).flatMap(row => {
@@ -131,7 +158,7 @@ export class LongLive {
       if (price <= 0n || price > 10n ** 12n) fail("launch_gas_limit");
       const block = await this.rpc.block(4663);
       await this.rpc.verify(4663, [this.live.profile.launcher], true, block);
-      return { price, fee: this.launchFee(block), quotedAt: this.now() };
+      return { price, fee: await this.launchFee(block), quotedAt: this.now() };
     });
     const { price, quotedAt } = market;
     // With no comparable simulation, disclose the configured gas-unit ceiling.
@@ -150,7 +177,7 @@ export class LongLive {
   row(key) { return this.db.prepare("SELECT * FROM long_launches WHERE id=?").get(key); }
   async metadata(input) {
     return this.cache.get(`publication:${input.wallet}:${JSON.stringify(input.publication)}`, 30000, async () => {
-      this.budget.debit([["launch-assets", 6, 60000], ["launch-assets", 60, 86400000]]);
+      this.budget.launch("assets");
       const response = await this.fetcher(`${this.live.assetOrigin}/v1/asset-status`, {
         method: "POST", redirect: "error", signal: AbortSignal.timeout(5000),
         headers: { origin: this.config.origin, "content-type": "application/json", "x-fungun-intent": "asset-status" },
@@ -164,6 +191,8 @@ export class LongLive {
     });
   }
   async prepare(input) {
+    const selected = this.live.profile.quotes.find(q => q.id === input.pairId);
+    const p = { ...this.live.profile, quotes: selected ? [selected] : [] }, q = selected;
     // Keep legacy NVDA IDs recoverable; other pairings have distinct transaction intents.
     const key = createHmac("sha256", this.budget.key).update(`${input.wallet}:${input.publication.metadataHash}${input.pairId === "long-NVDA" ? "" : `:${input.pairId}`}`).digest("hex");
     const context = JSON.stringify(input), prior = this.row(key);
@@ -186,19 +215,19 @@ export class LongLive {
       const cached = JSON.parse(prior.plan);
       if (isCanonicalLongAsset(cached.predictedAsset) && Number.isInteger(cached.saltAttempt)) return cached;
     }
-    this.budget.debit([["launch-prepare", 3, 60000], ["launch-prepare", 30, 86400000]]);
+    if (!q) throw new UnsupportedPairError(this.live.profile.quotes.map(q => q.id));
+    this.budget.launch("prepare", input.pairId.startsWith("longbow-") ? "longbow" : "long");
     if (!prior && this.db.prepare("SELECT COUNT(*) AS n FROM long_launches").get().n >= 4096) fail("launch_history_full");
     const publication = await this.metadata(input);
     const imageUri = ipfsUri(publication.ipfs.imageCid);
     const bytes = Buffer.from(JSON.stringify({ name: input.draft.name, symbol: input.draft.ticker,
-      description: input.draft.description, image: imageUri, image_hash: imageUri }));
+      description: input.draft.description, image: imageUri, image_hash: imageUri,
+      ...(input.draft.launchpad === "longbow" ? { categories: ["longbow"] } : {}) }));
     if (digest(bytes) !== input.publication.metadataHash || await ipfsContentId(bytes) !== publication.ipfs.metadataCid) fail("launch_assets_unverified");
-    const p = this.live.profile, q = p.quotes.find((q) => q.id === input.pairId);
-    if (!q) fail("unsupported_pair", 400);
     const block = await this.rpc.block(4663);
     const g = this.live.guards[q.id];
-    await this.rpc.verify(4663, [...roles.map((r) => p[r]), q.token, q.oracle], true, block);
-    await this.rpc.verify(4663, [g.tokenBeacon, g.tokenImplementation, g.oracleAggregator], true, block);
+    await this.rpc.verify(4663, [...roles.map((r) => p[r]), q.token, ...(q.oracle ? [q.oracle] : [])], true, block);
+    await this.rpc.verify(4663, [g.tokenBeacon, g.tokenImplementation, g.oracle, g.oracleAggregator].filter(Boolean), true, block);
     const [airlock, factory, duration, paused, ...moduleStates] = await this.rpc.calls(4663, [
       call(p.launcher.address, "AIRLOCK"), call(p.launcher.address, "TRUSTED_TOKEN_FACTORY"),
       call(p.launcher.address, "RESERVATION_DURATION"), call(p.launcher.address, "paused"),
@@ -206,30 +235,22 @@ export class LongLive {
     ], block);
     if (!same(airlock, p.airlock.address) || !same(factory, p.tokenFactory.address) || Number(duration) !== 86400
       || paused || moduleStates.some((v, i) => v !== i + 1)) fail("contract_unverified");
-    const [tokenDecimals, feedDecimals, round, available, implementation, aggregator, oraclePaused] = await this.rpc.calls(4663, [
-      call(q.token.address, "decimals"), call(q.oracle.address, "decimals"), call(q.oracle.address, "latestRoundData"),
-      call(p.launcher.address, "isTickerAvailable", [input.draft.ticker]), call(g.tokenBeacon.address, "implementation"),
-      call(q.oracle.address, "aggregator"), call(q.token.address, "oraclePaused"),
-    ], block);
-    const [beacon, header] = await this.rpc.batch(4663, [
-      { method: "eth_getStorageAt", params: [q.token.address, beaconSlot, block] },
-      { method: "eth_getBlockByNumber", params: [block, false] },
-    ]);
-    const timestamp = Number(rpcNumber(header?.timestamp));
-    if (Math.abs(this.now() / 1000 - timestamp) > 30 || tokenDecimals !== 18 || feedDecimals !== 8
-      || !/^0x0{24}[a-f0-9]{40}$/i.test(beacon) || !same(`0x${beacon.slice(-40)}`, g.tokenBeacon.address)
-      || !same(implementation, g.tokenImplementation.address) || !same(aggregator, g.oracleAggregator.address)) fail("contract_unverified");
-    if (!available) fail("ticker_reserved");
-    // Fail closed outside a fresh trading observation, including corporate-action pauses.
-    const [roundId, answer, started, updated, answered] = round;
-    if (oraclePaused || answer <= 0n || answer > 10n ** 20n || started === 0n || started > updated
-      || answered < roundId || updated > BigInt(timestamp) || BigInt(timestamp) - updated > BigInt(g.heartbeatSeconds)) fail("oracle_stale");
-    const tick = 8 * Math.round((-108202 - Math.log(Number(answer) / 1e8) / Math.log(1.0001)) / 8);
+    const tick = q.priceSource === "robinhood"
+      ? await this.robinhoodTick(input, p, q, g, block)
+      : q.priceSource === "market" ? await this.marketTick(input, p, q, g, block)
+      : await this.oracleTick(input, p, q, g, block);
     // Requotes retain the original nonce. Journal every offered envelope so a
     // delayed original submission can still be verified after fees/prices change.
     const intentId = `${key.slice(0,8)}-${key.slice(8,12)}-${key.slice(12,16)}-${key.slice(16,20)}-${key.slice(20,32)}`;
+    const miningStarted = this.miningNow();
     const plan = await buildUnsignedLongLaunchAsync({ chainId: 4663, wallet: input.wallet, draft: input.draft, pairId: q.id,
-      metadataUri: ipfsUri(publication.ipfs.metadataCid), startingTick: tick, intentId }, p, undefined, checkReadDeadline);
+      metadataUri: ipfsUri(publication.ipfs.metadataCid), startingTick: tick, intentId }, p, undefined, () => {
+        checkReadDeadline();
+        // Yield a recoverable response before the request deadline. The encoder
+        // keeps its exact-context checkpoint; the next request rechecks all inputs.
+        if (this.miningNow() - miningStarted >= 4000)
+          throw new ServiceError("long_address_pending", 503, 1);
+      });
     const [vacancy, accountCode] = await this.rpc.batch(4663, [
       { method: "eth_getCode", params: [plan.predictedAsset, block] },
       { method: "eth_getCode", params: [input.wallet, block] },
@@ -286,6 +307,97 @@ export class LongLive {
       this.db.exec("COMMIT");
     } catch (error) { this.db.exec("ROLLBACK"); throw error; }
     return result;
+  }
+  async oracleTick(input, p, q, g, block) {
+    const [tokenDecimals, feedDecimals, round, available, implementation, aggregator, oraclePaused] = await this.rpc.calls(4663, [
+      call(q.token.address, "decimals"), call(q.oracle.address, "decimals"), call(q.oracle.address, "latestRoundData"),
+      call(p.launcher.address, "isTickerAvailable", [input.draft.ticker]), call(g.tokenBeacon.address, "implementation"),
+      call(q.oracle.address, "aggregator"), call(q.token.address, "oraclePaused"),
+    ], block);
+    const [beacon, header] = await this.rpc.batch(4663, [
+      { method: "eth_getStorageAt", params: [q.token.address, beaconSlot, block] },
+      { method: "eth_getBlockByNumber", params: [block, false] },
+    ]);
+    const timestamp = Number(rpcNumber(header?.timestamp));
+    if (Math.abs(this.now() / 1000 - timestamp) > 30 || tokenDecimals !== 18 || feedDecimals !== 8
+      || !/^0x0{24}[a-f0-9]{40}$/i.test(beacon) || !same(`0x${beacon.slice(-40)}`, g.tokenBeacon.address)
+      || !same(implementation, g.tokenImplementation.address) || !same(aggregator, g.oracleAggregator.address)) fail("contract_unverified");
+    if (!available) fail("ticker_reserved");
+    // Fail closed outside a fresh trading observation, including corporate-action pauses.
+    const [roundId, answer, started, updated, answered] = round;
+    if (oraclePaused || answer <= 0n || answer > 10n ** 20n || started === 0n || started > updated
+      || answered < roundId || updated > BigInt(timestamp) || BigInt(timestamp) - updated > BigInt(g.heartbeatSeconds)) fail("oracle_stale");
+    return 8 * Math.round((-108202 - Math.log(Number(answer) / 1e8) / Math.log(1.0001)) / 8);
+  }
+  async robinhoodTick(input, p, q, g, block) {
+    const [decimals, symbol, implementation, paused, multiplier, available] = await this.rpc.calls(4663, [
+      call(q.token.address, "decimals"), call(q.token.address, "symbol"), call(g.tokenBeacon.address, "implementation"),
+      call(q.token.address, "oraclePaused"), call(q.token.address, "uiMultiplier"),
+      call(p.launcher.address, "isTickerAvailable", [input.draft.ticker]),
+    ], block);
+    const [beacon] = await this.rpc.batch(4663, [{ method: "eth_getStorageAt", params: [q.token.address, beaconSlot, block] }]);
+    if (decimals !== 18 || symbol !== q.symbol || !same(implementation, g.tokenImplementation.address)
+      || !/^0x0{24}[a-f0-9]{40}$/i.test(beacon) || !same(`0x${beacon.slice(-40)}`, g.tokenBeacon.address)) fail("contract_unverified");
+    if (!available) fail("ticker_reserved");
+    if (paused || multiplier <= 0n || multiplier > 10n ** 36n) fail("oracle_stale");
+    let quote;
+    try { quote = await this.cache.get(`stock-price:${q.symbol}`, 15000, async () => {
+      const data = await this.upstream.json("robinhood", `https://api.robinhood.com/rhj/prices/${encodeURIComponent(q.symbol)}`, {}, 32768);
+      const observations = data?.quotes?.filter(v => v.tokenSymbol === q.symbol && v.currency === "USD"
+        && v.deployments?.some(d => String(d.chainId) === "4663" && same(d.contractAddress, q.token.address)));
+      if (observations?.length !== 1) fail("oracle_stale");
+      return observations[0];
+    });
+    } catch (error) {
+      if (!["upstream_unavailable", "oracle_stale"].includes(error?.code)) throw error;
+      const price = await this.dexPrice(q.token.address);
+      return 8 * Math.round(Math.log(20000 / (1e9 * price)) / Math.log(1.0001) / 8);
+    }
+    const observed = Date.parse(quote.generatedAt), bid = Number(quote.bid), ask = Number(quote.ask);
+    // Stock markets close on weekends/holidays. A recent closing quote remains
+    // usable; stale data, halted assets and changed multipliers never get a guessed price.
+    if (!Number.isFinite(observed) || observed > this.now() + 30000 || this.now() - observed > 4 * 86400000
+      || quote.isTradingHalt !== false || !Number.isFinite(bid) || !Number.isFinite(ask) || bid <= 0 || ask < bid
+      || ask > 1e9 || (ask - bid) / bid > 0.2) fail("oracle_stale");
+    const price = (bid + ask) / 2 * Number(multiplier) / 1e18;
+    return 8 * Math.round(Math.log(20000 / (1e9 * price)) / Math.log(1.0001) / 8);
+  }
+  async dexPrice(address) {
+    return this.cache.get(`market-price:${address}`, 15000, async () => {
+      const data = await this.upstream.json("dexscreener", `https://api.dexscreener.com/latest/dex/tokens/${address}`, {}, 512 * 1024);
+      const pairs = data?.pairs?.filter(pair => pair.chainId === "robinhood" && same(pair.baseToken?.address, address)
+        && Number.isFinite(Number(pair.priceUsd)) && Number(pair.priceUsd) > 0 && Number(pair.priceUsd) < 1e9
+        && Number.isFinite(Number(pair.liquidity?.usd)) && Number(pair.liquidity.usd) >= 1000)
+        .sort((a, b) => Number(b.liquidity.usd) - Number(a.liquidity.usd));
+      if (!pairs?.length) fail("oracle_stale");
+      return Number(pairs[0].priceUsd);
+    });
+  }
+  async marketTick(input, p, q, g, block) {
+    const [decimals, symbol, available] = await this.rpc.calls(4663, [
+      call(q.token.address, "decimals"), call(q.token.address, "symbol"), call(p.launcher.address, "isTickerAvailable", [input.draft.ticker]),
+    ], block);
+    if (decimals !== q.decimals || symbol !== g.symbol) fail("contract_unverified");
+    if (!available) fail("ticker_reserved");
+    if (g.storageSlot) {
+      const [word] = await this.rpc.batch(4663, [{ method: "eth_getStorageAt", params: [q.token.address, g.storageSlot, block] }]);
+      if (!/^0x0{24}[a-f0-9]{40}$/i.test(word) || !same(`0x${word.slice(-40)}`, g.tokenImplementation.address)) fail("contract_unverified");
+    }
+    let price;
+    if (q.symbol === "ETH") {
+      const value = await this.cache.get("eth-market-price", 30000, () => this.upstream.json("coinbase", "https://api.coinbase.com/v2/prices/ETH-USD/spot", {}, 8192));
+      if (value?.data?.base !== "ETH" || value.data.currency !== "USD") fail("oracle_stale");
+      price = Number(value.data.amount);
+    } else if (g.oracle) {
+      const [decimals, round, aggregator] = await this.rpc.calls(4663, [call(g.oracle.address, "decimals"),
+        call(g.oracle.address, "latestRoundData"), call(g.oracle.address, "aggregator")], block);
+      const [roundId, answer, started, updated, answered] = round;
+      if (decimals !== 8 || !same(aggregator, g.oracleAggregator.address) || started === 0n || started > updated || answered < roundId
+        || Number(updated) > this.now() / 1000 + 30 || this.now() / 1000 - Number(updated) > g.heartbeatSeconds) fail("oracle_stale");
+      price = Number(answer) / 1e8;
+    } else price = await this.dexPrice(q.token.address);
+    if (!Number.isFinite(price) || price <= 0 || price > 1e9) fail("oracle_stale");
+    return 8 * Math.round(Math.log(20000 / (1e9 * price * 10 ** (18 - q.decimals))) / Math.log(1.0001) / 8);
   }
   remember(key, plan) {
     const envelope = digest(JSON.stringify(plan.transaction));

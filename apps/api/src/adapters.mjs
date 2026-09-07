@@ -111,15 +111,19 @@ export class Adapters {
 
   async catalog(chainId) {
     const unavailable = { status: "unavailable", pairs: [] };
+    const long = this.config.readsEnabled && this.config.longLaunch
+      ? { status: "ready", pairs: this.config.longLaunch.profile.quotes.map(({ id }) => ({ id, symbol: id.slice(5) })) }
+      : unavailable;
     if (!this.config.readsEnabled || !this.config.o1Key || !this.catalogs) {
       this.catalogs?.prune(chainId);
       return {
         chainId,
         expiresAt: this.now() + 300_000,
-        pads: chainId === 4663 ? { long: unavailable, o1: unavailable } : { o1: unavailable },
+        pads: chainId === 4663 ? { long, o1: unavailable } : { o1: unavailable },
       };
     }
-    return this.catalogs.catalog(chainId, this.config.longQuotes);
+    const catalog = this.catalogs.catalog(chainId);
+    return chainId === 4663 ? { ...catalog, pads: { ...catalog.pads, long } } : catalog;
   }
 
   async refreshCatalog(chainId) {
