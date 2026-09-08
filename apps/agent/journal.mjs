@@ -1,4 +1,5 @@
 import { open, readFile, rename, unlink, mkdir, lstat } from 'node:fs/promises';
+import { constants } from 'node:fs';
 import { randomUUID } from 'node:crypto';
 import { dirname } from 'node:path';
 export class Journal {
@@ -28,7 +29,8 @@ export class Journal {
         if(info.isSymbolicLink()||!info.isFile())throw new Error('journal_symlink');
         if(info.size>67108864)throw new Error('journal_size');
         if (info.mode & 0o077) throw new Error('journal_permissions');
-        this.data = JSON.parse(await readFile(this.path, 'utf8'));
+        const source=await open(this.path,constants.O_RDONLY|constants.O_NOFOLLOW);
+        try {const opened=await source.stat();if(opened.size>67108864||!opened.isFile()||(opened.mode&0o077))throw new Error('journal_size_or_permissions');const bytes=await source.readFile();if(bytes.length>67108864)throw new Error('journal_size');this.data=JSON.parse(bytes.toString('utf8'));}finally{await source.close();}
       } catch (e) { if (e.code !== 'ENOENT') throw e; this.data = { version: 1, intents: {}, cursor: null }; }
       if (this.data.version !== 1) throw new Error('journal_version');
       if(this.identity){if(this.data.identity&&this.data.identity!==this.identity)throw new Error('journal_identity_changed');if(!this.data.identity){if(Object.keys(this.data.intents).length)throw new Error('journal_identity_missing');this.data.identity=this.identity;await this.save();}}
@@ -38,7 +40,7 @@ export class Journal {
   async save() {
     const tmp = `${this.path}.${process.pid}.${randomUUID()}.tmp`;
     const file = await open(tmp, 'wx', 0o600);
-    try { await file.writeFile(JSON.stringify(this.data)); await file.sync(); } finally { await file.close(); }
+    try { const serialized=JSON.stringify(this.data);if(Buffer.byteLength(serialized)>67108864)throw new Error('journal_size');await file.writeFile(serialized); await file.sync(); } finally { await file.close(); }
     await rename(tmp, this.path);
     const dir = await open(dirname(this.path), 'r'); try { await dir.sync(); } finally { await dir.close(); }
   }
