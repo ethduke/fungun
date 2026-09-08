@@ -56,3 +56,21 @@ duration. Unexpected-error logs contain only the event, route label, and fixed
 stacks and error causes must not be added to these records, including on HTTP 401.
 Any reverse-proxy or hosting access logs need their own equivalent configuration;
 the application logger cannot redact another service's logs.
+
+## Generated web-server secrets
+
+Vinext generates a server-only `prerenderSecret` during a production build. Treat
+the generated server manifest and bundles as sensitive; do not print their values
+while inspecting output, attach them to reports, or commit them to Git.
+
+If that value is exposed, run `npm run build:fly` from the repository root. This
+uses the production environment allowlist and refuses local web dotenv files.
+Rebuild all artifacts together rather than manually changing one generated file.
+Compare old and new values only in memory: confirm the value changed, the old
+value is absent from the rebuilt `apps/web/dist` tree, and neither value occurs in
+`apps/web/dist/client` or `apps/web/public`. Report only pass/fail results and
+counts, never the values. Generated artifacts remain ignored and uncommitted.
+
+A local rebuild does not replace an already running process or a deployed
+artifact. If the exposed build was deployed or copied elsewhere, arrange a
+separately authorized rebuild/redeployment or removal of those copies too.
