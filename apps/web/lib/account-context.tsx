@@ -12,6 +12,7 @@ export type ConnectedAccount = {
   signImage?: (quote: ImageQuote, input: ImageOperation, isCurrent: () => boolean) => Promise<ImageProof>;
   openWallet?: () => void;
   address?: string;
+  checkAccount?: (address: string) => Promise<void>;
   chainId?: number;
   ensureChain?: (
     address: string,

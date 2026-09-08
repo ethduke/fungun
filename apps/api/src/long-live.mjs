@@ -6,6 +6,7 @@ import { decodeEventLog, decodeFunctionResult, isAddress, keccak256, parseAbi, t
 import { buildUnsignedLongLaunchAsync, LONG_CREATE_ABI, readLongLaunchProfile } from "./long-launch.mjs";
 import { isCanonicalLongAsset } from '../../web/lib/long-encoding/long-salt.mjs';
 import { LONG_MARKET_TICKERS } from '../../web/lib/long-encoding/long-markets.mjs';
+import { LONG_NATIVE_ETH_QUOTE, isNativeLongQuote } from '../../web/lib/long-encoding/long-launch.mjs';
 import { normalizeLaunchDetails } from "./launch-metadata.mjs";
 import { ipfsContentId, ipfsUri, IPFS_IMPORT_PROFILE, LONG_IPFS_SCHEMA } from "./ipfs-content.mjs";
 import { rpcNumber } from "./fee-rpc.mjs";
@@ -105,6 +106,10 @@ export function readLongLiveConfig(env, pad = "long") {
     }
     if (pad === "long") {
       const configured = new Map(profile.quotes.map(quote => [quote.id, quote]));
+      if (configured.has('long-ETH')) {
+        configured.set('long-ETH', LONG_NATIVE_ETH_QUOTE);
+        guards['long-ETH'] = {};
+      }
       profile = readLongLaunchProfile({ ...profile, quotes: LONG_MARKET_TICKERS
         .map(symbol => configured.get(`long-${symbol}`)).filter(Boolean) });
     }
@@ -218,7 +223,8 @@ export class LongLive {
     if (retry && (await this.recovery.find(key, retry.transaction)).status !== "retryable") return resume();
     if (!retry && prior && prior.expires > this.now()) {
       const cached = JSON.parse(prior.plan);
-      if (isCanonicalLongAsset(cached.predictedAsset) && Number.isInteger(cached.saltAttempt)) return cached;
+      if (isCanonicalLongAsset(cached.predictedAsset) && Number.isInteger(cached.saltAttempt)
+        && same(cached.profile?.quotes.find(entry => entry.id === input.pairId)?.token.address, q?.token.address)) return cached;
     }
     if (!q) throw new UnsupportedPairError(this.live.profile.quotes.map(q => q.id));
     this.budget.launch("prepare", input.pairId.startsWith("longbow-") ? "longbow" : "long");
@@ -233,7 +239,7 @@ export class LongLive {
     if (digest(bytes) !== input.publication.metadataHash || await ipfsContentId(bytes) !== publication.ipfs.metadataCid) fail("launch_assets_unverified");
     const block = await this.rpc.block(4663);
     const g = this.live.guards[q.id];
-    await this.rpc.verify(4663, [...roles.map((r) => p[r]), q.token, ...(q.oracle ? [q.oracle] : [])], true, block);
+    await this.rpc.verify(4663, [...roles.map((r) => p[r]), ...(isNativeLongQuote(q) ? [] : [q.token]), ...(q.oracle ? [q.oracle] : [])], true, block);
     await this.rpc.verify(4663, [g.tokenBeacon, g.tokenImplementation, g.oracle, g.oracleAggregator].filter(Boolean), true, block);
     const [airlock, factory, duration, paused, ...moduleStates] = await this.rpc.calls(4663, [
       call(p.launcher.address, "AIRLOCK"), call(p.launcher.address, "TRUSTED_TOKEN_FACTORY"),
@@ -381,10 +387,12 @@ export class LongLive {
     });
   }
   async marketTick(input, p, q, g, block) {
+    const nativeEth = isNativeLongQuote(q);
     const [decimals, symbol, available] = await this.rpc.calls(4663, [
-      call(q.token.address, "decimals"), call(q.token.address, "symbol"), call(p.launcher.address, "isTickerAvailable", [input.draft.ticker]),
-    ], block);
-    if (decimals !== q.decimals || symbol !== g.symbol) fail("contract_unverified");
+      ...(nativeEth ? [] : [call(q.token.address, "decimals"), call(q.token.address, "symbol")]),
+      call(p.launcher.address, "isTickerAvailable", [input.draft.ticker]),
+    ], block).then(values => nativeEth ? [18, 'ETH', ...values] : values);
+    if (decimals !== q.decimals || symbol !== (nativeEth ? 'ETH' : g.symbol)) fail("contract_unverified");
     if (!available) fail("ticker_reserved");
     if (g.storageSlot) {
       const [word] = await this.rpc.batch(4663, [{ method: "eth_getStorageAt", params: [q.token.address, g.storageSlot, block] }]);
@@ -416,6 +424,9 @@ export class LongLive {
     const row = this.row(input.id);
     if (!row || JSON.parse(row.plan).binding !== input.binding) fail("invalid_request", 400);
     if (row.expires <= this.now()) fail("quote_expired");
+    const plan = JSON.parse(row.plan), context = JSON.parse(row.context);
+    if (context.pairId === 'long-ETH' && !isNativeLongQuote(plan.profile?.quotes.find(q => q.id === 'long-ETH')))
+      fail('quote_expired');
     const changed = this.db.prepare("UPDATE long_launches SET state='wallet' WHERE id=? AND state IN ('prepared','wallet') AND tx_hash IS NULL AND expires>?").run(input.id, this.now());
     if (changed.changes !== 1) fail("launch_pending");
     return { id: input.id, status: "wallet" };

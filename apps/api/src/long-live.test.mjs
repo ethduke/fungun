@@ -10,6 +10,7 @@ import { LongLive, LONG_STATE_ABI, readLongLiveConfig, validateLongInput } from 
 import { LONG_CREATE_ABI } from "./long-launch.mjs";
 import { ipfsContentId } from "./ipfs-content.mjs";
 import { InsufficientFundsError, ServiceError, serviceErrorBody } from "./errors.mjs";
+import { LONG_NATIVE_ETH_QUOTE } from '../../web/lib/long-encoding/long-launch.mjs';
 const addr = (n) => toHex(BigInt(n), { size: 20 });
 const hash = (n) => toHex(BigInt(n), { size: 32 });
 const contract = (n) => ({ address: addr(n), codeHash: hash(n) });
@@ -112,6 +113,41 @@ test('preparation binds metadata, verifies dependencies at one block and returns
   assert.deepEqual(await f.service.run('launch-prepare', f.input), plan);
   assert.equal(f.requests.length, reads);
   assert.ok(!f.requests.some((m) => /send|sign/i.test(m)));
+});
+
+test('LONG config resolves ETH to native currency while Longbow retains its ERC-20 quote', async t => {
+  const f = await fixture(t);
+  const weth = { quote: { symbol: 'ETH', token: contract(35), decimals: 18, onchainSymbol: 'WETH' },
+    guards: { tokenImplementation: contract(36), storageSlot: hash(37) } };
+  const env = { LONG_WALLET_LAUNCH: 'true', LONG_LAUNCH_PROFILE_JSON: JSON.stringify(f.p),
+    LONG_LAUNCH_GUARDS_JSON: JSON.stringify({ 'long-NVDA': f.g }), LAUNCH_ASSET_SERVICE_ORIGIN: 'https://assets.example.com',
+    LONG_EXTRA_QUOTES_JSON: JSON.stringify([weth]), LONGBOW_ALLOCATION_RECIPIENT: addr(15),
+    ROBINHOOD_LAUNCH_TOKENS_JSON: JSON.stringify([{ symbol: 'NVDA', address: f.p.quotes[0].token.address }]) };
+  const long = readLongLiveConfig(env), bow = readLongLiveConfig(env, 'longbow');
+  assert.deepEqual(long.profile.quotes.find(q => q.id === 'long-ETH'), LONG_NATIVE_ETH_QUOTE);
+  assert.deepEqual(long.guards['long-ETH'], {});
+  assert.equal(bow.profile.quotes.find(q => q.id === 'longbow-ETH').token.address, weth.quote.token.address);
+  assert.deepEqual(bow.guards['longbow-ETH'], { ...weth.guards, symbol: 'WETH' });
+});
+
+test('native ETH preparation makes no ERC-20 reads and invalidates unsent WETH quotes', async t => {
+  const f = await fixture(t);
+  const weth = { ...LONG_NATIVE_ETH_QUOTE, token: { ...contract(35), address: addr(2n ** 160n - 1n) } };
+  f.p.quotes = [weth]; f.config.longLaunch.guards['long-ETH'] = { symbol: f.input.draft.ticker };
+  const input = { ...f.input, pairId: 'long-ETH' };
+  const old = await f.service.run('launch-prepare', input);
+  f.p.quotes = [LONG_NATIVE_ETH_QUOTE]; f.config.longLaunch.guards['long-ETH'] = {};
+  assert.throws(() => f.service.reserve(old), /quote_expired/);
+  const calls = [], original = f.options.rpc.calls;
+  f.options.rpc.calls = async (...args) => { calls.push(...args[1]); return original(...args); };
+  f.seen.length = 0;
+  const plan = await f.service.run('launch-prepare', input);
+  assert.notEqual(plan.binding, old.binding);
+  assert.equal(plan.id, old.id);
+  assert.equal(decodeFunctionData({ abi: LONG_CREATE_ABI, data: plan.transaction.data }).args[0].numeraire, addr(0));
+  assert.ok(calls.every(call => call.address !== addr(0)));
+  assert.ok(f.seen.every(([, contracts]) => contracts.every(c => c.address !== addr(0))));
+  assert.equal(f.service.reserve(plan).status, 'wallet');
 });
 
 test('address preparation returns checkpoints before simulation and resumes into a freshly verified quote', async (t) => {

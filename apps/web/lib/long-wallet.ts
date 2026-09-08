@@ -1,5 +1,5 @@
 import { decodeFunctionResult, encodeFunctionData, toHex, toBytes, keccak256, type EIP1193Provider } from 'viem';
-import { buildUnsignedLongLaunch, readLongLaunchProfile } from './long-encoding/long-launch.mjs';
+import { buildUnsignedLongLaunch, readLongLaunchProfile, isNativeLongQuote } from './long-encoding/long-launch.mjs';
 import { LONG_SALT_ATTEMPTS, isCanonicalLongAsset } from './long-encoding/long-salt.mjs';
 import { assetDraft, assetWallet, type AssetDraft, type PublishedAsset } from './asset-protocol.ts';
 import { parseLaunchFunding, fundingMessage, type LaunchFunding } from './launch-funding.ts';
@@ -97,6 +97,8 @@ export function launchMessage(error: unknown) {
     launch_context_locked: 'Coin details changed while preparing. Launch again with the current details.',
     quote_expired: 'The gas estimate expired. Refresh it before opening your wallet.',
     wrong_account: 'The connected account changed. Restore the account used for this launch.',
+    wallet_changed: 'Your wallet changed. Launch again with the account now shown in the header.',
+    wallet_unavailable: 'Could not read your wallet account. Unlock your wallet and try again.',
     wrong_chain: 'Switch your wallet to the selected launch network before continuing.',
     launch_eoa_required: 'This launch currently supports ordinary wallet accounts only.',
     busy: 'Another launch check is running. Try again shortly.',
@@ -151,6 +153,7 @@ export function validateLongPlan(raw: unknown, input: LaunchInput, published: Pu
       && buildInput.chainDeadline * 1000 > p.expiresAt && buildInput.chainDeadline * 1000 <= p.serverTime + 1800000);
     rebuilt = buildUnsignedO1Launch(buildInput, p.profile, p.saltAttempt);
   } else {
+    assert(input.pairId !== 'long-ETH' || isNativeLongQuote(readLongLaunchProfile(p.profile).quotes.find((q: { id: string }) => q.id === 'long-ETH')));
     assert(input.chainId === 4663 && Number.isInteger(p.saltAttempt) && p.saltAttempt >= 0 && p.saltAttempt < LONG_SALT_ATTEMPTS
       && isCanonicalLongAsset(p.predictedAsset));
     rebuilt = buildUnsignedLongLaunch({ chainId: 4663, wallet: assetWallet(input.wallet), draft: inputDraft,

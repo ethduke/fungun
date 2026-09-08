@@ -21,6 +21,7 @@ import {
   DialogTitle,
 } from '@/components/ui/dialog';
 import { createPreviewConfig, previewQueryDefaults } from '@/lib/preview-web3';
+import { observeWalletSession, refreshWalletSession } from '@/lib/injected-session';
 import type { ConnectedAccount } from '@/lib/account-context';
 import { AppError, describeError } from '@/lib/user-error';
 import {
@@ -29,13 +30,20 @@ import {
   ensureClaimChain as ensureWalletClaimChain,
 } from '@/lib/claim-wallet';
 import type { ClaimQuote } from '@/lib/fee-service';
-import { sendLongWallet, type LongPlan } from '@/lib/long-wallet';
+import { LaunchError, sendLongWallet, type LongPlan } from '@/lib/long-wallet';
 import { signWalletAsset } from '@/lib/asset-wallet';
 import type { AssetApproval } from '@/lib/asset-protocol';
 import { signImagePayment } from '@/lib/image-wallet';
 import type { ImageQuote, ImageOperation } from '@/lib/image-generation';
 
 let configuration: ReturnType<typeof createPreviewConfig> | undefined;
+async function checkAccount(address: string) {
+  if (!configuration) throw new LaunchError('wallet_changed');
+  await refreshWalletSession(configuration);
+  const current = getConnection(configuration);
+  if (!current.isConnected || current.address?.toLowerCase() !== address.toLowerCase())
+    throw new LaunchError('wallet_changed');
+}
 async function walletProvider() {
   if (!configuration) throw new AppError('disconnected');
   const connection = getConnection(configuration);
@@ -99,6 +107,7 @@ function ConnectionControl({
       connection.isConnected
         ? {
             address,
+            checkAccount,
             chainId: connection.chainId,
             ensureChain,
             sendClaim,
@@ -228,6 +237,7 @@ export default function WalletConnection({
   const [queryClient] = useState(
     () => new QueryClient({ defaultOptions: previewQueryDefaults }),
   );
+  useEffect(() => observeWalletSession(config), [config]);
   return (
     <WagmiProvider config={config} reconnectOnMount>
       <QueryClientProvider client={queryClient}>

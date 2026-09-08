@@ -8,16 +8,18 @@ import { TokenImages } from '../apps/api/src/token-image.mjs';
 import { Upstream } from '../apps/api/src/upstream.mjs';
 import { ipfsContentId } from '../apps/api/src/ipfs-content.mjs';
 import { POST } from '../apps/web/app/api/[operation]/route.ts';
-import { copiedTokenImage } from '../apps/web/lib/copied-token-image.ts';
+import { copiedTokenImage, copiedImageError, GMGN_IMAGE_BLOCKED_ERROR } from '../apps/web/lib/copied-token-image.ts';
 const require = createRequire(new URL('../apps/api/package.json', import.meta.url));
 const { encodeAbiParameters } = require('viem');
 const sharp = require('sharp');
 
-for (const provider of ['doppler', 'pons-v2']) test(`${provider} COPY crosses the production proxy, route, RPC resolver and launch decoder`, async t => {
+for (const scenario of ['doppler', 'pons-v2', 'gmgn-blocked']) test(`${scenario} COPY crosses the production proxy, route and RPC resolver`, async t => {
+  const provider = scenario === 'gmgn-blocked' ? 'doppler' : scenario;
+  const gmgnUrl = `https://gmgn.ai/external-res/${'a'.repeat(32)}_v2.webp`;
   const source = { chainId: 4663, address: `0x${'a'.repeat(40)}`, provider };
   const png = await sharp({ create: { width: 3, height: 4, channels: 3, background: 'blue' } }).png().toBuffer();
   const imageCid = await ipfsContentId(png);
-  const metadata = Buffer.from(JSON.stringify({ image_hash: `ipfs://${imageCid}` }));
+  const metadata = Buffer.from(JSON.stringify({ image_hash: scenario === 'gmgn-blocked' ? gmgnUrl : `ipfs://${imageCid}` }));
   const metadataCid = await ipfsContentId(metadata);
   const origin = 'https://app.example.invalid';
   const previousOrigin = process.env.APP_ORIGIN, previousBackend = process.env.READ_SERVICE_ORIGIN;
@@ -35,6 +37,7 @@ for (const provider of ['doppler', 'pons-v2']) test(`${provider} COPY crosses th
             [source.address, `ipfs://${imageCid}`, '', ['', '', '', '', '']]) });
     }
     imageReads++;
+    if (url === gmgnUrl) return new Response('challenge', { status: 403 });
     return new Response(String(url).endsWith(imageCid) ? png : metadata);
   };
   const images = new TokenImages(config, new Upstream(budget, providerFetch), providerFetch);
@@ -59,6 +62,14 @@ for (const provider of ['doppler', 'pons-v2']) test(`${provider} COPY crosses th
   const browserFetch = (path, options) => POST(new Request(`${origin}${path}`, {
     ...options, headers: { ...options.headers, origin },
   }), { params: Promise.resolve({ operation: 'token-image' }) });
+  if (scenario === 'gmgn-blocked') {
+    await assert.rejects(copiedTokenImage(source, new AbortController().signal, browserFetch), error => {
+      assert.equal(copiedImageError(error), GMGN_IMAGE_BLOCKED_ERROR);
+      return true;
+    });
+    assert.equal(imageReads, 2);
+    return;
+  }
   const blob = await copiedTokenImage(source, new AbortController().signal, browserFetch);
   const decoded = await sharp(Buffer.from(await blob.arrayBuffer())).metadata();
   assert.deepEqual([decoded.width, decoded.height], [3, 4]);

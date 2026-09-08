@@ -4,7 +4,7 @@ import sharp from 'sharp';
 import { encodeAbiParameters } from 'viem';
 import { CID } from 'multiformats/cid';
 import { sha256 } from 'multiformats/hashes/sha2';
-import { DopplerTokenImages, TokenImages, imageCid, validateCopiedTokenImageInput } from './token-image.mjs';
+import { DopplerTokenImages, TokenImages, gmgnImageUrl, imageCid, validateCopiedTokenImageInput } from './token-image.mjs';
 import { Upstream } from './upstream.mjs';
 import { ServiceError } from './errors.mjs';
 
@@ -187,4 +187,57 @@ test('provider dispatch preserves legacy O1 and isolates Doppler', async () => {
   assert.deepEqual(service.get(source), { provider: 'o1', ...source });
   assert.deepEqual(service.get({ ...source, provider: 'doppler' }), { provider: 'doppler', ...source });
   assert.deepEqual(service.get({ ...source, provider: 'o1' }), { provider: 'o1', ...source });
+});
+
+const gmgnUrl = `https://gmgn.ai/external-res/${'a'.repeat(32)}_v2.webp`;
+
+test('GMGN image paths reject arbitrary hosts, URLs, credentials and traversal', () => {
+  assert.equal(gmgnImageUrl(gmgnUrl), gmgnUrl);
+  for (const url of [null, gmgnUrl.replace('https:', 'http:'),
+    gmgnUrl.replace('gmgn.ai', 'gmgn.ai.example.invalid'),
+    gmgnUrl.replace('gmgn.ai', 'user:secret@gmgn.ai'),
+    gmgnUrl.replace('gmgn.ai', 'gmgn.ai:443'),
+    gmgnUrl.replace('/external-res/', '/external-res/../external-res/'),
+    gmgnUrl.replace('/external-res/', '/api/'), `${gmgnUrl}?x=1`, `${gmgnUrl}#x`,
+    gmgnUrl.replace('.webp', '.svg'), 'http://127.0.0.1/private'])
+    assert.throws(() => gmgnImageUrl(url));
+});
+
+for (const field of ['image', 'image_hash']) test(`GMGN HTTPS ${field} downloads and decodes through the bounded resolver`, async () => {
+  let reads = 0;
+  const f = fixture({ gateway(url) {
+    if (url === gmgnUrl) { reads++; return new Response(png); }
+    assert.ok(url.includes(document));
+    return Response.json({ [field]: gmgnUrl });
+  } });
+  const result = await f.service.get(source);
+  assert.equal(result.mime, 'image/webp');
+  assert.equal((await sharp(Buffer.from(result.base64, 'base64')).metadata()).width, 2);
+  await f.service.get(source);
+  assert.equal(reads, 1);
+  f.advance(60_001);
+  await f.service.get(source);
+  assert.equal(reads, 2, 'immutable metadata cannot keep a mutable HTTPS image cached for an hour');
+});
+
+test('blocked or redirected GMGN images fail closed and can fall back to an IPFS image_hash', async () => {
+  for (const response of [() => new Response('<html>challenge</html>', { status: 403 }),
+    () => new Response(null, { status: 302, headers: { location: 'http://127.0.0.1/private' } }),
+    () => new Response('not an image'),
+    () => new Response(Buffer.concat([png, Buffer.alloc(2 * 1024 * 1024)]))]) {
+    const f = fixture({ gateway(url) {
+      if (url === gmgnUrl) return response();
+      if (url.includes(image)) return new Response(png);
+      return Response.json({ image: gmgnUrl, image_hash: `ipfs://${image}` });
+    } });
+    assert.equal((await f.service.get(source)).mime, 'image/webp');
+    assert.ok(f.requests.every(r => !r.url.includes('127.0.0.1')));
+    assert.equal(f.upstream.active, 0);
+  }
+  const blocked = fixture({ gateway(url) {
+    return url === gmgnUrl ? new Response('challenge', { status: 403 })
+      : Response.json({ image_hash: gmgnUrl });
+  } });
+  await assert.rejects(blocked.service.get(source), { code: 'gmgn_image_blocked' });
+  assert.equal(blocked.upstream.active, 0);
 });

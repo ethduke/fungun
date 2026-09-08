@@ -23,6 +23,7 @@ const transientRead = (e: unknown) => {
  * Retry only preparation or errors proven to precede eth_sendTransaction. */
 export async function runLaunchFlow<A, Q>({
   availability,
+  checkAccount,
   artwork,
   quote,
   wallet,
@@ -33,6 +34,7 @@ export async function runLaunchFlow<A, Q>({
   now = () => performance.now(),
 }: {
   availability?: () => Promise<unknown>;
+  checkAccount?: () => Promise<void>;
   artwork: () => Promise<A>;
   quote: (artwork: A) => Promise<Q>;
   wallet: (quote: Q) => Promise<void>;
@@ -59,9 +61,16 @@ export async function runLaunchFlow<A, Q>({
       guard();
       const second = Math.ceil(remaining / 1000);
       if (second !== lastSecond) {
-        onProgress(original instanceof LaunchError && original.message === 'long_address_pending'
+        const code = original instanceof AssetError ? original.code
+          : original instanceof Error ? original.message : '';
+        const service = original instanceof AssetError ? 'Artwork service' : 'Launch service';
+        onProgress(code === 'long_address_pending'
           ? `Preparing token address… Continuing in ${second}s…`
-          : `Retrying launch preparation in ${second}s…`);
+          : code === 'rate_limited'
+            ? `${service} rate-limited. Retrying in ${second}s…`
+            : ['busy', 'asset_busy'].includes(code)
+              ? `${service} busy. Retrying in ${second}s…`
+              : `Preparation interrupted. Retrying in ${second}s…`);
         lastSecond = second;
       }
       await pause(Math.min(remaining, 250));
@@ -73,6 +82,8 @@ export async function runLaunchFlow<A, Q>({
       guard();
       if (now() >= deadline) throw new LaunchError('timeout');
       try {
+        await checkAccount?.();
+        guard();
         const result = await operation();
         guard();
         return result;
@@ -96,6 +107,7 @@ export async function runLaunchFlow<A, Q>({
   for (let attempt = 0; ; attempt++) {
     onProgress('Preparing launch and estimating fees…');
     const prepared = await read(() => quote(published));
+    await checkAccount?.();
     guard();
     try {
       await wallet(prepared);

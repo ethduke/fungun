@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { ImageRequests, copiedTokenImage, tokenImageSource, validateDraftImage } from '../apps/web/lib/copied-token-image.ts';
+import { COPIED_IMAGE_ERROR, GMGN_IMAGE_BLOCKED_ERROR, copiedImageError, ImageRequests, copiedTokenImage, tokenImageSource, validateDraftImage } from '../apps/web/lib/copied-token-image.ts';
 import { trackedTokenDraft } from '../apps/web/components/tracked-market-feed.mjs';
 import { draftImageBlob } from '../apps/web/lib/launch-draft-cache.ts';
 
@@ -8,6 +8,24 @@ const address = `0x${'a'.repeat(40)}`;
 const source = { chainId: 4663, address };
 const png = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+aQ1cAAAAASUVORK5CYII=', 'base64');
 const payload = { ...source, size: png.length, mime: 'image/png', base64: png.toString('base64') };
+
+test('COPY explains a confirmed GMGN block while other failures remain generic', async () => {
+  for (const [body, expected] of [
+    [{ error: 'gmgn_image_blocked' }, GMGN_IMAGE_BLOCKED_ERROR],
+    [{ error: 'image_unavailable' }, COPIED_IMAGE_ERROR],
+    [{ error: 'private upstream details' }, COPIED_IMAGE_ERROR],
+  ]) {
+    await assert.rejects(copiedTokenImage(source, new AbortController().signal,
+      async () => Response.json(body, { status: 404 })), error => {
+      assert.equal(copiedImageError(error), expected);
+      return true;
+    });
+  }
+  assert.equal(copiedImageError(new Error('private upstream details')), COPIED_IMAGE_ERROR);
+  await assert.rejects(copiedTokenImage(source, new AbortController().signal,
+    async () => new Response('x'.repeat(4097), { status: 404,
+      headers: { 'content-type': 'application/json' } })), { message: COPIED_IMAGE_ERROR });
+});
 
 test('COPY preserves O1 dispatch and probes supported chains even with generic feed labels', () => {
   for (const launchpad of ['o1', 'O1 RWA', 'O1 migrated']) {

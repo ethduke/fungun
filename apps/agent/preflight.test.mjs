@@ -2,7 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { toHex, keccak256, encodeAbiParameters, parseAbiParameters } from "viem";
 import { privateKeyToAccount } from "viem/accounts";
-import { buildUnsignedLongLaunch } from "../web/lib/long-encoding/long-launch.mjs";
+import { buildUnsignedLongLaunch, LONG_NATIVE_ETH_QUOTE } from "../web/lib/long-encoding/long-launch.mjs";
 import { preflight, validateSigned } from "./preflight.mjs";
 import { defaultLimits } from "./index.mjs";
 const address = (n) => toHex(BigInt(n), { size: 20 }),
@@ -38,18 +38,18 @@ const input = {
   draft: { name: "Moon", ticker: "MOON", description: "" },
   pairId: "long-EXAMPLE",
 };
-function fixture() {
+function fixture(selectedProfile = profile, selectedInput = input) {
   const built = buildUnsignedLongLaunch(
     {
       chainId: input.chainId,
       wallet: input.wallet,
       draft: input.draft,
-      pairId: input.pairId,
+      pairId: selectedInput.pairId,
       metadataUri: `ipfs://${published.ipfs.metadataCid}`,
       startingTick: -160000,
       intentId: "00000000-0000-4000-8000-000000000001",
     },
-    profile,
+    selectedProfile,
   );
   const now = Date.now();
   return {
@@ -57,7 +57,7 @@ function fixture() {
     predictedPool: address(12),
     id: "a".repeat(64),
     chainId: 4663,
-    profile,
+    profile: selectedProfile,
     quotedAt: now,
     expiresAt: now + 30000,
     startingTick: -160000,
@@ -163,4 +163,26 @@ test("simulation must return expected asset and nonzero predicted pool", async (
       /launch_simulation_failed/,
     );
   }
+});
+
+test("native ETH preflight verifies real contracts without querying currency0 bytecode", async () => {
+  const nativeProfile = { ...profile, quotes: [LONG_NATIVE_ETH_QUOTE] };
+  const nativeInput = { ...input, pairId: "long-ETH" };
+  const plan = fixture(nativeProfile, nativeInput), checked = [];
+  const nativeRpc = { request: async (request) => {
+    if (request.method === "eth_getCode") {
+      checked.push(request.params[0]);
+      assert.notEqual(request.params[0], address(0));
+    }
+    if (request.method === "eth_call") return encodeAbiParameters(
+      parseAbiParameters("address,address,address,address,address"),
+      [plan.predictedAsset, address(12), address(13), address(14), address(15)],
+    );
+    return rpc.request(request);
+  } };
+  assert.equal(await preflight(plan, nativeInput, published, nativeProfile, nativeRpc, defaultLimits), 30000n);
+  assert.equal(checked.length, 7);
+  const bad = structuredClone(nativeProfile);
+  bad.quotes[0].token.codeHash = keccak256("0x6001");
+  await assert.rejects(preflight(plan, nativeInput, published, bad, nativeRpc, defaultLimits));
 });

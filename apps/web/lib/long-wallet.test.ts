@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { keccak256, toHex, type EIP1193Provider } from 'viem';
-import { buildUnsignedLongLaunch } from './long-encoding/long-launch.mjs';
+import { buildUnsignedLongLaunch, LONG_NATIVE_ETH_QUOTE } from './long-encoding/long-launch.mjs';
 import { sendLongWallet, validateLongPlan, LaunchError, launchMessage, launchRequest, LaunchPreflightError, type LaunchInput, readLaunchRecovery, saveLaunchRecovery, prepareLongWallet, isLongLaunchPair } from './long-wallet.ts';
 import { launchRecoveryScope } from './launch-draft-cache.ts';
 import { runLaunchFlow } from './launch-flow.ts';
@@ -51,6 +51,18 @@ void test('browser reconstructs the exact reviewed calldata and rejects value, t
   assert.throws(() => validateLongPlan({ ...f.raw, launchFeeSource: { ...f.raw.launchFeeSource, contract: addr(999) } }, f.input, f.published, start));
   assert.throws(() => validateLongPlan(f.raw, { ...f.input, draft: { ...f.input.draft, name: 'Changed' } }, f.published, start));
   assert.throws(() => validateLongPlan(f.raw, f.input, f.published, start, start + 31000));
+});
+
+void test('browser accepts native ETH calldata and rejects legacy wrapped-ETH launch offers', () => {
+  const f = response('long-ETH'), start = performance.now();
+  assert.throws(() => validateLongPlan(f.raw, f.input, f.published, start));
+  const profile = { ...f.profile, quotes: [LONG_NATIVE_ETH_QUOTE] };
+  const native = buildUnsignedLongLaunch({ chainId: 4663, wallet: f.input.wallet, draft: f.input.draft,
+    pairId: 'long-ETH', metadataUri: f.plan.review.metadataUri, startingTick: f.startingTick, intentId: f.intentId }, profile);
+  const raw = { ...f.raw, profile, binding: native.binding, predictedAsset: native.predictedAsset,
+    saltAttempt: native.saltAttempt, review: native.review,
+    transaction: { ...f.raw.transaction, data: native.transaction.data } };
+  assert.equal(validateLongPlan(raw, f.input, f.published, start).transaction.data, native.transaction.data);
 });
 
 void test('only the wallet sends, once, after current identity checks and durable reservation', async () => {

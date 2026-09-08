@@ -154,6 +154,25 @@ void test('changing the draft/account while waiting prevents all further prepara
   assert.equal(quotes, 1);
   assert.equal(sent, 0);
 });
+
+void test('a missed wallet event is caught before retrying preparation or opening the wallet', async () => {
+  for (const switchAt of ['start', 'retry', 'prepared']) {
+    const f = fixture(); let switched = switchAt === 'start', reads = 0, sent = 0;
+    await assert.rejects(runLaunchFlow({ ...f.options,
+      checkAccount: async () => { if (switched) throw new LaunchError('wallet_changed'); },
+      artwork: async () => 'artwork',
+      quote: async () => {
+        reads++;
+        switched = true;
+        if (switchAt === 'retry') throw new LaunchError('rate_limited', 2);
+        return 'prepared for previous wallet';
+      },
+      wallet: async () => { sent++; },
+    }), /wallet_changed/);
+    assert.equal(reads, switchAt === 'start' ? 0 : 1);
+    assert.equal(sent, 0);
+  }
+});
 void test('daily exhaustion and repeated preflight failures have bounded retries', async () => {
   const f = fixture();
   let quotes = 0;
@@ -198,8 +217,8 @@ void test('temporary read throttling counts down and continues without a second 
   await runLaunchFlow({ ...f.options, onProgress: message => { progress.push(message); }, artwork: async () => 1,
     quote: async () => { if (++reads === 1) throw new LaunchError('rate_limited', 2); return 1; },
     wallet: async () => { sends++; } });
-  assert.ok(progress.includes('Retrying launch preparation in 2s…'));
-  assert.ok(progress.includes('Retrying launch preparation in 1s…'));
+  assert.ok(progress.includes('Launch service rate-limited. Retrying in 2s…'));
+  assert.ok(progress.includes('Launch service rate-limited. Retrying in 1s…'));
   assert.equal(sends, 1); assert.equal(f.clock, 2000);
 });
 

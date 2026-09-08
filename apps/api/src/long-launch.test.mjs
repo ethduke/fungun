@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
+import { LONG_NATIVE_ETH_QUOTE } from '../../web/lib/long-encoding/long-launch.mjs';
 import {
   decodeAbiParameters,
   decodeFunctionData,
@@ -47,6 +48,26 @@ function profile() {
   };
 }
 const publicOrigin = "https://assets.example.com";
+
+test('native ETH uses the canonical numeraire and native hook fees without funding or wrapping', () => {
+  const p = { ...profile(), quotes: [LONG_NATIVE_ETH_QUOTE] }, request = { ...input(), pairId: 'long-ETH' };
+  const plan = buildUnsignedLongLaunch(request, p, publicOrigin);
+  const params = decodeFunctionData({ abi: LONG_CREATE_ABI, data: plan.transaction.data }).args[0];
+  const pool = decodeAbiParameters(LONG_POOL_PARAMETERS, params.poolInitializerData)[0];
+  const hook = decodeAbiParameters(LONG_HOOK_PARAMETERS, pool.onInitializationDopplerHookCalldata);
+  assert.equal(params.numeraire, zeroAddress);
+  assert.equal(hook[0], zeroAddress);
+  assert.equal(hook[3], 2340n);
+  assert.equal(pool.fee, 7000);
+  assert.equal(plan.transaction.value, '0');
+  assert.match(plan.predictedAsset, /1e18$/i);
+  assert.deepEqual(buildUnsignedLongLaunch(request, p, publicOrigin, plan.saltAttempt), plan);
+  for (const change of [{ id: 'long-NVDA' }, { symbol: 'USDG' }, { decimals: 6 }, { priceSource: 'robinhood' },
+    { token: { ...LONG_NATIVE_ETH_QUOTE.token, codeHash: hash(3) } }]) {
+    assert.throws(() => readLongLaunchProfile({ ...p, quotes: [{ ...LONG_NATIVE_ETH_QUOTE, ...change }] }), /invalid_long_launch_profile/);
+  }
+  assert.throws(() => readLongLaunchProfile({ ...p, launchpad: 'longbow', platformAllocation: address(15) }), /invalid_long_launch_profile/);
+});
 function input() {
   return {
     chainId: 4663,
