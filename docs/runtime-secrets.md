@@ -48,3 +48,11 @@ the public USDG asset configuration is shared with the web quote proxy.
 For managed IPFS, set `ASSET_STORAGE=ipfs`, `PINATA_GATEWAY` to the public
 `*.mypinata.cloud` hostname, and `PINATA_JWT` only in the asset service. Never add
 the JWT to the web application, a gateway URL, Git, logs or wallet messages.
+
+Facilitator request logs contain only a fixed event, a recognized route label
+(`/healthz`, `/supported`, `/verify`, `/settle`, or `unknown`), HTTP status, and
+duration. Unexpected-error logs contain only the event, route label, and fixed
+`unexpected_error` code. Raw paths, queries, headers, bodies, provider messages,
+stacks and error causes must not be added to these records, including on HTTP 401.
+Any reverse-proxy or hosting access logs need their own equivalent configuration;
+the application logger cannot redact another service's logs.

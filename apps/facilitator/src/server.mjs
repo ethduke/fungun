@@ -5,6 +5,7 @@ import { PaymentPolicyError, validateFacilitatorRequest, X402_NETWORK } from "./
 
 const BODY_LIMIT = 32 * 1024;
 const activeLimit = 8;
+const knownRoutes = new Set(["/healthz", "/supported", "/verify", "/settle"]);
 const baseHeaders = {
   "cache-control": "no-store",
   "content-type": "application/json; charset=utf-8",
@@ -65,7 +66,8 @@ export function createFacilitatorServer({ facilitator, config, relayerAddress, l
     let counted = false;
     try {
       const url = new URL(request.url || "/", "http://facilitator.invalid");
-      route = url.pathname;
+      // Authentication failures are logged too: never retain a caller's path.
+      route = knownRoutes.has(url.pathname) ? url.pathname : "unknown";
       if (url.search) {
         status = 404;
         return send(response, status, { error: "not_found" });
@@ -160,7 +162,8 @@ export function createFacilitatorServer({ facilitator, config, relayerAddress, l
       status = error?.message === "request_too_large" ? 413 : 400;
       if (!["request_too_large", "invalid_content_type", "invalid_json"].includes(error?.message)) {
         status = 500;
-        logger.error?.({ event: "facilitator_request_failed", route, code: safeReason(error?.message) });
+        // Character filtering is not redaction; a secret can look like a code.
+        logger.error?.({ event: "facilitator_request_failed", route, code: "unexpected_error" });
       }
       if (!response.headersSent) send(response, status, { error: status === 500 ? "unexpected_error" : error.message });
       else response.destroy();
