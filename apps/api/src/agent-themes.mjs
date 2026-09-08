@@ -9,10 +9,18 @@ export function normalizeThemeName(value) {
   const name = value.normalize('NFKC').trim().replace(/\s+/gu, ' ').toLowerCase();
   return name && name.length <= 128 ? name : null;
 }
-async function publicSnapshot() {
-  const response = await handleTrackedFeed(new Request('https://local.invalid/api/tracked-feed'));
-  if (!response.ok) throw new Error('feed unavailable');
-  return response.json();
+export async function publicSnapshot(handle = handleTrackedFeed) {
+  const response = await handle(new Request('https://local.invalid/api/tracked-feed'));
+  if (!response.ok) {
+    const error = new Error('feed unavailable');
+    const seconds = Number(response.headers.get('retry-after'));
+    error.retryAfterMs = Number.isFinite(seconds) ? Math.max(0, Math.min(300000, seconds * 1000)) : 0;
+    throw error;
+  }
+  const snapshot = await response.json();
+  if (!snapshot || !Array.isArray(snapshot.pools)) throw new Error('invalid snapshot');
+  // The trusted public projection treats absent chain IDs as its Robinhood cohort.
+  return { ...snapshot, pools: snapshot.pools.map(row => row && ({ ...row, chain_id: row.chain_id ?? 4663 })) };
 }
 const invalid = () => { throw new ServiceError('invalid_request', 400); };
 
@@ -23,7 +31,7 @@ export class AgentThemes {
     this.db = db; this.fetchSnapshot = fetchSnapshot; this.now = now;
     this.refreshMs = Math.max(1000, refreshMs); this.pending = null;
     db.exec(`
-      CREATE TABLE IF NOT EXISTS agent_theme_meta (id INTEGER PRIMARY KEY CHECK(id=1), observed INTEGER, retry INTEGER NOT NULL DEFAULT 0, failures INTEGER NOT NULL DEFAULT 0, floor INTEGER NOT NULL DEFAULT 0);
+      CREATE TABLE IF NOT EXISTS agent_theme_meta (id INTEGER PRIMARY KEY CHECK(id=1), observed INTEGER, retry INTEGER NOT NULL DEFAULT 0, failures INTEGER NOT NULL DEFAULT 0, floor INTEGER NOT NULL DEFAULT 0, dropped INTEGER NOT NULL DEFAULT 0);
       INSERT OR IGNORE INTO agent_theme_meta(id) VALUES(1);
       CREATE TABLE IF NOT EXISTS agent_theme_tokens (address TEXT PRIMARY KEY, name TEXT NOT NULL, display TEXT NOT NULL, first_seen INTEGER NOT NULL, last_seen INTEGER NOT NULL);
       CREATE INDEX IF NOT EXISTS agent_theme_first ON agent_theme_tokens(first_seen);
@@ -31,6 +39,7 @@ export class AgentThemes {
       CREATE TABLE IF NOT EXISTS agent_theme_active (config TEXT NOT NULL, name TEXT NOT NULL, PRIMARY KEY(config,name));
       CREATE TABLE IF NOT EXISTS agent_theme_events (seq INTEGER PRIMARY KEY AUTOINCREMENT, config TEXT NOT NULL, created INTEGER NOT NULL, body TEXT NOT NULL);
     `);
+    if (!db.prepare('PRAGMA table_info(agent_theme_meta)').all().some(column => column.name === 'dropped')) db.exec('ALTER TABLE agent_theme_meta ADD COLUMN dropped INTEGER NOT NULL DEFAULT 0');
   }
   meta() { return this.db.prepare('SELECT * FROM agent_theme_meta WHERE id=1').get(); }
   groups(config, at) {
@@ -43,8 +52,10 @@ export class AgentThemes {
     return [...groups.values()].filter(group => group.tokens.length >= config.minimum).map(group => ({ ...group, count: group.tokens.length, tokens: group.tokens.slice(0, 100), tokensTruncated: group.tokens.length > 100 }));
   }
   evaluate(at) {
+    const windows = new Map();
     for (const config of this.db.prepare('SELECT * FROM agent_theme_configs').all()) {
-      const themes = this.groups(config, at);
+      if (!windows.has(config.window)) windows.set(config.window, this.groups({ ...config, minimum: 2 }, at));
+      const themes = windows.get(config.window).filter(theme => theme.count >= config.minimum);
       const active = new Set(this.db.prepare('SELECT name FROM agent_theme_active WHERE config=?').all(config.key).map(row => row.name));
       for (const theme of themes) {
         if (active.has(theme.key)) { active.delete(theme.key); continue; }
@@ -70,10 +81,12 @@ export class AgentThemes {
       const snapshot = await this.fetchSnapshot();
       if (!snapshot || !Array.isArray(snapshot.pools) || snapshot.pools.length > 10000) throw new Error('invalid snapshot');
       const observations = new Map();
+      let dropped = 0;
       for (const row of snapshot.pools) {
         const name = normalizeThemeName(row?.name);
         const address = row?.meme || row?.token;
-        if (!row || Number(row.chain_id) !== 4663 || !['eth', 'shares'].includes(row.quote_kind) || !name || typeof address !== 'string' || !addressPattern.test(address) || /^0x0{40}$/i.test(address)) throw new Error('invalid observation');
+        if (!row || Number(row.chain_id) !== 4663) throw new Error('invalid observation chain');
+        if (!['eth', 'shares'].includes(row.quote_kind) || !name || typeof address !== 'string' || !addressPattern.test(address) || /^0x0{40}$/i.test(address)) { dropped++; continue; }
         const key = address.toLowerCase();
         if (observations.has(key) && observations.get(key).name !== name) throw new Error('conflicting token names');
         observations.set(key, { name, display: row.name.normalize('NFKC').trim().replace(/\s+/gu, ' ') });
@@ -84,13 +97,13 @@ export class AgentThemes {
         for (const [address, row] of observations) insert.run(address, row.name, row.display, at, at);
         if (this.db.prepare('SELECT COUNT(*) AS count FROM agent_theme_tokens').get().count > 100000) throw new Error('observation capacity');
         // Keep first observation/name immutable, including across disappearing pools.
-        this.db.prepare('UPDATE agent_theme_meta SET observed=?,retry=0,failures=0 WHERE id=1').run(at);
+        this.db.prepare('UPDATE agent_theme_meta SET observed=?,retry=0,failures=0,dropped=? WHERE id=1').run(at, dropped);
         this.evaluate(at);
         this.db.exec('COMMIT');
       } catch (error) { this.db.exec('ROLLBACK'); throw error; }
-    } catch {
+    } catch (error) {
       const failures = Math.min(this.meta().failures + 1, 5);
-      this.db.prepare('UPDATE agent_theme_meta SET failures=?,retry=? WHERE id=1').run(failures, at + Math.min(300000, this.refreshMs * 2 ** failures));
+      this.db.prepare('UPDATE agent_theme_meta SET failures=?,retry=? WHERE id=1').run(failures, at + Math.max(Math.min(300000, this.refreshMs * 2 ** failures), Number.isFinite(error?.retryAfterMs) ? Math.max(0, Math.min(300000, error.retryAfterMs)) : 0));
     }
   }
   async poll({ minimumTokens = 3, windowSeconds = 3600, cursor } = {}) {
@@ -120,7 +133,7 @@ export class AgentThemes {
     if (cursor !== undefined && seq < this.meta().floor) throw new ServiceError('theme_cursor_expired', 410);
     const rows = this.db.prepare('SELECT seq,body FROM agent_theme_events WHERE config=? AND seq>? ORDER BY seq LIMIT 100').all(key, seq);
     return {
-      minimumTokens, windowSeconds, windowBasis: 'first_observed',
+      minimumTokens, windowSeconds, windowBasis: 'first_observed', droppedObservationCount: meta.dropped,
       themes: this.groups({ minimum: minimumTokens, window: windowSeconds }, at).slice(0, 100),
       events: rows.map(row => ({ ...JSON.parse(row.body), id: `${scope}:${row.seq}` })),
       nextCursor: `${scope}:${rows.length === 100 ? rows.at(-1).seq : this.db.prepare("SELECT COALESCE((SELECT seq FROM sqlite_sequence WHERE name='agent_theme_events'),0) AS seq").get().seq}`,

@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { DatabaseSync } from 'node:sqlite';
-import { AgentThemes, normalizeThemeName } from './agent-themes.mjs';
+import { AgentThemes, normalizeThemeName, publicSnapshot } from './agent-themes.mjs';
 const row = (n, name = 'Moon Club', extra = {}) => ({ chain_id: 4663, quote_kind: 'eth', token: `0x${n.toString(16).padStart(40, '0')}`, name, ...extra });
 function setup() {
   const db = new DatabaseSync(':memory:');
@@ -57,7 +57,7 @@ test('coalesced refresh and upstream failure preserve stale status with backoff'
   s.db.close();
 });
 test('malformed source cannot produce fresh data, and invalid cursors/configurations fail', async () => {
-  for (const bad of [row(1, 'x', { chain_id: 1 }), row(1, 'x', { chain_id: undefined }), row(1, 'x', { token: 'bad' }), row(1, 'x'.repeat(129))]) {
+  for (const bad of [row(1, 'x', { chain_id: 1 }), row(1, 'x', { chain_id: undefined })]) {
     const s = setup(); s.set([bad]);
     assert.equal((await s.service.poll()).freshness.status, 'unavailable'); s.db.close();
   }
@@ -91,4 +91,27 @@ test('persisted cursor survives database reopen and retention gaps are explicit'
     await assert.rejects(service.poll({ minimumTokens: 2, cursor: zero }), /theme_cursor_expired/);
     assert.equal((await service.poll({ minimumTokens: 2, cursor: first.nextCursor })).events.length, 0);
   } finally { db.close(); rmSync(dir, { recursive: true, force: true }); }
+});
+
+test('trusted public adapter supplies projected cohort chain and honors provider backoff', async () => {
+  const adapted = await publicSnapshot(async () => Response.json({ pools: [row(1, 'Moon Club', { chain_id: undefined })] }));
+  assert.equal(adapted.pools[0].chain_id, 4663);
+  let at = 1000000, calls = 0;
+  const db = new DatabaseSync(':memory:');
+  const service = new AgentThemes(db, { now: () => at, fetchSnapshot: () => publicSnapshot(async () => { calls++; return new Response('', { status: 502, headers: { 'Retry-After': '300' } }); }) });
+  assert.equal((await service.poll()).freshness.retryAt, at + 300000);
+  at += 60000;
+  await service.poll(); assert.equal(calls, 1);
+  db.close();
+});
+
+test('invalid token metadata is dropped without disabling valid observations', async () => {
+  const s = setup();
+  s.set([row(1), row(2), row(3, ''), row(4, 'bad\u0000name'), row(5, 'x'.repeat(129)), row(6, 'name', { token: 'bad' })]);
+  const result = await s.service.poll({ minimumTokens: 2 });
+  assert.equal(result.freshness.status, 'fresh');
+  assert.equal(result.droppedObservationCount, 4);
+  assert.equal(result.events.length, 1);
+  assert.equal(result.themes[0].count, 2);
+  s.db.close();
 });
