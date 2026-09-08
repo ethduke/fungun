@@ -38,13 +38,50 @@ function placeholder(value) {
 }
 
 function sensitiveKey(key) {
-  return /(?:apikey|privatekey|secret|password|passwd|accesstoken|refreshtoken|authtoken|bearertoken|authorization|mnemonic|seedphrase|signature|rpc(?:https?|wss?)?(?:url|endpoint))/i.test(key.replace(/[^a-z0-9]/gi, ''));
+  const name = key.replace(/[^a-z0-9]/gi, '').toLowerCase();
+  // Explicit provider names also cover prefixed variants, without treating
+  // ordinary public token addresses as credentials.
+  return ['pinatajwt', 'fomorelaytoken', 'telegrambottoken', 'openrouterkey', 'x402facilitatortoken']
+    .some((credential) => name.endsWith(credential))
+    || /(?:apikey|privatekey|secret|password|passwd|accesstoken|refreshtoken|authtoken|bearertoken|authorization|mnemonic|seedphrase|signature|rpc(?:https?|wss?)?(?:url|endpoint))/i.test(name);
+}
+
+// Exact historical negative-test inputs, retained so full-history scans can run
+// without exempting entire test files or ignoring other credentials beside them.
+const legacyTestUrls = new Map([
+  ['apps/api/src/token-image.test.mjs', new Set([['https://ipfs.io', '@localhost/'].join('')])],
+  ['apps/api/src/config.test.mjs', new Set([['http://user', '@127.0.0.1:3011'].join('')])],
+  ['apps/api/src/fomo-collector.test.mjs', new Set([['wss://example.invalid?key=', 'synthetic-private-key'].join('')])],
+  ['apps/api/src/x402-payments.test.mjs', new Set([
+    ['https://secret', '@payments.example'].join(''), ['https://payments.example?key=', 'secret'].join(''),
+  ])],
+]);
+
+function hasCredentialUrl(path, text) {
+  const isValue = (value) => value !== '' && !placeholder(value) && !/^\$\{[^}]+\}$/.test(value);
+  for (const match of text.matchAll(/\b(?:https?|wss?):\/\/[^\s"'`<>]+/gi)) {
+    if (legacyTestUrls.get(path)?.has(match[0])) continue;
+    let url;
+    try { url = new URL(match[0].replace(/&amp;/g, '&')); } catch { continue; }
+    if ([url.username, url.password].some((value) => {
+      try { return isValue(decodeURIComponent(value)); } catch { return isValue(value); }
+    })) return true;
+    for (const [name, value] of url.searchParams) {
+      if (/^(?:key|api[_-]?key|(?:access|auth|bearer|refresh)[_-]?token|token|secret|password|jwt)$/i.test(name)
+        && isValue(value)) return true;
+    }
+    if (/(?:^|\.)(?:infura\.io|alchemy\.com)$/i.test(url.hostname)
+      && /^\/v[23]\/[A-Za-z0-9_-]{12,}/.test(url.pathname)) return true;
+  }
+  return false;
 }
 
 function assignmentPlaceholder(path, key, value) {
   if (placeholder(value)) return true;
   if (!/\.test\.(?:mjs|ts)$/.test(path)) return false;
   const name = key.replace(/[^a-z0-9]/gi, '').toLowerCase();
+  if (path === 'apps/api/src/fomo-api.test.mjs' && name === 'fomorelaytoken'
+    && value === 'synthetic-private-token') return true;
   if (name === 'authorization') return /^Bearer (?:EXAMPLE|PLACEHOLDER|REDACTED)$/.test(value);
   // Exact reserved fixture hosts only, without user info, ports or URL suffixes.
   return /^(?:base)?rpc(?:https?|wss?)?(?:url|endpoint)$/.test(name)
@@ -121,10 +158,10 @@ export function analyzeBlob(path, content, size = content.length) {
   if (!reviewedPublicFile && /\b0x(?:[a-f\d]{40}|[a-f\d]{64}|[a-f\d]{128}|[a-f\d]{130})\b/i.test(text)) rules.add('literal-evm-address-key-or-signature');
   if (/-----BEGIN (?:[A-Z]+ )?PRIVATE KEY-----/.test(text)) rules.add('private-key-material');
   if (/\b(?:sk-(?:proj-)?[A-Za-z0-9_-]{16,}|xai-[A-Za-z0-9_-]{20,}|gh[pousr]_[A-Za-z0-9]{30,}|github_pat_[A-Za-z0-9_]{30,}|AKIA[A-Z0-9]{16})\b/.test(text)) rules.add('provider-credential-token');
+  if (/\beyJ[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]{8,}\b/.test(text)) rules.add('jwt-credential-token');
+  if (/\b(?:bot)?[0-9]{5,15}:[A-Za-z0-9_-]{30,}\b/.test(text)) rules.add('telegram-bot-token');
   if (hasCredentialAssignment(path, text)) rules.add('non-placeholder-credential-assignment');
-  if (/https?:\/\/[^\s/"'<>]+:[^\s/"'<>]+@/i.test(text)
-    || /https?:\/\/[^\s"'<>]+[?&](?:api[_-]?key|token|secret|password)=(?!<|\$\{)[A-Za-z0-9_%.-]{8,}/i.test(text)
-    || /https?:\/\/[^\s/"'<>]*(?:infura\.io|alchemy\.com)\/v[23]\/[A-Za-z0-9_-]{12,}/i.test(text)) rules.add('credential-bearing-url');
+  if (hasCredentialUrl(path, text)) rules.add('credential-bearing-url');
   return [...rules];
 }
 
