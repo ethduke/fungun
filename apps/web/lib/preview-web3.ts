@@ -1,5 +1,6 @@
-import { createConfig, custom } from 'wagmi';
+import { createConfig, createStorage, custom } from 'wagmi';
 import { base, robinhood } from 'viem/chains';
+import { walletStorage, walletStorageKey } from './connection-session.ts';
 
 export function createPreviewConfig() {
   const offline = custom(
@@ -15,7 +16,7 @@ export function createPreviewConfig() {
     chains: [robinhood, base],
     connectors: [],
     multiInjectedProviderDiscovery: true,
-    storage: null,
+    storage: createStorage({ key: walletStorageKey, storage: walletStorage }),
     ssr: false,
     transports: { [robinhood.id]: offline, [base.id]: offline },
   });

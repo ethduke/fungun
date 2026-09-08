@@ -104,10 +104,12 @@ Popularity counts similarly named distinct contracts by
 chain, ranked by count then inflow, with links to X search. It makes no claim
 about social trends or complete market coverage. This feed cannot trade or sign.
 COPY fills the coin name and ticker and jumps to the launch form immediately.
-It clears prior artwork and pending uploads. On this test branch, recognized
-Robinhood O1 tokens then load artwork through O1's API and save its bytes with
-the draft. Missing artwork leaves the copied text usable; upload an image instead.
-Other launchpads still require a separate image.
+It clears prior artwork and pending uploads. Recognized Robinhood O1 tokens load
+artwork through O1's API. Other Robinhood and Base tokens try compatible on-chain
+metadata, including Long and Longbow artwork. Pons v2 rows fetch their token logo.
+Available still images are saved
+with the draft. Missing or unsupported artwork leaves the copied text usable;
+upload an image instead.
 
 Canonical stablecoins do not appear as tracked tokens, including stable/stable
 and USDG/stock pairs. A nonstable token may still use a stablecoin as its quote.
@@ -202,3 +204,37 @@ and LP shares on-chain, and claims each stream separately. Claim all reviews
 transactions in sequence. New pools may appear after an indexing delay. Each
 claim requires wallet confirmation; there are no token approvals or fee-rights
 transfers in this flow.
+
+
+## Configured Long agent API
+
+The optional server API supports Long on Robinhood Chain (4663). Its Node SDK
+runs locally with an owner-configured signer and can submit without repeated
+approval prompts. This is separate from browser preview tools; it does not add
+signing to `document.modelContext`. The operator must enable the agent API and
+provision a bearer credential bound to the agent's public wallet, with scopes
+`long:deploy` and/or `themes:read`. Private keys never belong in API payloads.
+
+At the operator-provided API origin, `GET /v1/agent/launchpads` lists configured
+Long pairings. JSON POSTs under `/v1/agent/long/` expose `ticker`, `artwork-prepare`,
+`artwork-publish`, `artwork-status`, `prepare`, `reserve` and `status`. These routes
+retain contract checks, independent client validation and durable recovery. The
+SDK accepts name, ticker, artwork and optional description/website/Twitter links.
+Website/Twitter are HTTPS metadata fields, not instructions or fetched resources.
+
+`GET /v1/agent/themes?minimumTokens=3&windowSeconds=3600` returns `themes`,
+`events`, `nextCursor` and `freshness`. Append the opaque cursor on the next poll.
+Count thresholds range from 2 to 100 and windows from 60 to 86,400 seconds. Counts
+refer to distinct contracts first observed by the service within that window,
+not deployment timestamps. Names match after Unicode, whitespace and case
+normalization; this differs from fuzzy popularity groups in the visual feed.
+
+Automatic deployment acts only on fresh data and the configured Long search and
+deployment targets. Preserve journals across restarts to prevent duplicates.
+Image modes are provided, Grok through USDG/x402, and none; none uses a neutral
+placeholder because current Long publication still requires an image. Grok
+payments have separate owner-configured USDG limits and recover the existing
+request after an uncertain outcome, without another charge.
+
+Repository operators can find full setup and CLI commands in
+`docs/agent-launches.md`; that repository path is not a public HTTP endpoint.

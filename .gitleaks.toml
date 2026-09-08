@@ -1,0 +1,23 @@
+title = "fungun independent secret scan"
+
+[extend]
+useDefault = true
+
+# Suppress only the exact variable-name pair that the generic rule reads as
+# a multiline assignment. Real assignments in this file remain scanned.
+[[rules]]
+id = "generic-api-key"
+
+[[rules.allowlists]]
+description = "Reviewed runtime environment allowlist, not a credential value"
+condition = "AND"
+paths = ['''^apps/api/src/asset-environment\.mjs$''']
+regexTarget = "match"
+regexes = ['''^OPENROUTER(?:_API)?_KEY",\r?\n[ \t]*"X402_FACILITATOR_URL"$''']
+
+[[rules.allowlists]]
+description = "Reviewed dev environment exclusion names, not a token assignment"
+condition = "AND"
+paths = ['''^scripts/dev\.test\.mjs$''']
+regexTarget = "match"
+regexes = ['''^X402_FACILITATOR_[T]OKEN", "X402_FACILITATOR_PRIVATE_[K]EY"$''']

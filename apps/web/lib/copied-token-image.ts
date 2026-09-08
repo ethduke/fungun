@@ -1,7 +1,10 @@
 import { IMAGE_LIMIT, imageFileError, imageKind } from './launch-model.ts';
 
 export const COPIED_IMAGE_ERROR = 'Image unavailable—upload one.';
-export type TokenImageSource = { chainId: 4663; address: string };
+export type TokenImageSource =
+  | { chainId: 4663; address: string; provider?: undefined }
+  | { chainId: 4663 | 8453; address: string; provider: 'doppler' }
+  | { chainId: 4663; address: string; provider: 'pons-v2' };
 export type ImageRequest = { signal: AbortSignal; isCurrent: () => boolean };
 
 export class ImageRequests {
@@ -26,10 +29,15 @@ export class ImageRequests {
 export function tokenImageSource(value: unknown): TokenImageSource | null {
   if (!value || typeof value !== 'object') return null;
   const source = value as Record<string, unknown>;
-  return source.chainId === 4663 &&
-    typeof source.address === 'string' &&
-    /^0x[\da-f]{40}$/i.test(source.address)
-    ? { chainId: 4663, address: source.address.toLowerCase() }
+  if (typeof source.address !== 'string' || !/^0x[\da-f]{40}$/i.test(source.address))
+    return null;
+  const address = source.address.toLowerCase();
+  if (source.provider === 'doppler' && (source.chainId === 4663 || source.chainId === 8453))
+    return { chainId: source.chainId, address, provider: 'doppler' };
+  if (source.provider === 'pons-v2' && source.chainId === 4663)
+    return { chainId: 4663, address, provider: 'pons-v2' };
+  return source.provider === undefined && source.chainId === 4663
+    ? { chainId: 4663, address }
     : null;
 }
 
@@ -38,13 +46,14 @@ export async function copiedTokenImage(
   signal: AbortSignal,
   fetcher: typeof fetch = fetch,
 ): Promise<Blob> {
-  const response = await fetcher('/api/o1-token-image', {
+  const operation = source.provider ? 'token-image' : 'o1-token-image';
+  const response = await fetcher(`/api/${operation}`, {
     method: 'POST',
     credentials: 'omit',
     redirect: 'error',
     headers: {
       'content-type': 'application/json',
-      'x-fungun-intent': 'o1-token-image',
+      'x-fungun-intent': operation,
     },
     body: JSON.stringify(source),
     signal: AbortSignal.any([signal, AbortSignal.timeout(20_000)]),

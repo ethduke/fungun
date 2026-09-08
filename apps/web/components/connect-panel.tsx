@@ -229,7 +229,7 @@ export default function WalletConnection({
     () => new QueryClient({ defaultOptions: previewQueryDefaults }),
   );
   return (
-    <WagmiProvider config={config} reconnectOnMount={false}>
+    <WagmiProvider config={config} reconnectOnMount>
       <QueryClientProvider client={queryClient}>
         <ConnectionControl
           onAccountChange={onAccountChange}

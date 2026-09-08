@@ -65,3 +65,14 @@ economics are checked before wallet submission. pons fee claims are not yet
 integrated. It can be combined with O1 and either Long or Longbow.
 
 stonx on Base supports all 45 wrapped-stock pairs and wallet fee claims. See [launch integration](docs/stonx-base-launch.md) and [fees](docs/stonx-fees.md).
+
+
+## Agent deployments and themes
+
+The optional authenticated agent API and local Node SDK support Long deployments,
+exact-name trending-theme subscriptions and configured automatic launches. The
+signer stays local; artwork can be supplied, generated with Grok/x402 or replaced
+with a neutral placeholder. See [agent setup](docs/agent-launches.md) for runtime
+access, spending limits, CLI commands and recovery. Run `npm run test:agent` for
+agent, payment, subscription and integration checks. This feature is disabled by
+default and requires deployment configuration before use.

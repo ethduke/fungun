@@ -1,6 +1,6 @@
 'use client';
 
-import { lazy, Suspense, useState, type ReactNode } from 'react';
+import { lazy, Suspense, useState, useSyncExternalStore, type ReactNode } from 'react';
 import Link from 'next/link';
 import Image from 'next/image';
 import { usePathname } from 'next/navigation';
@@ -9,6 +9,7 @@ import { Button } from '@/components/ui/button';
 import { AccountContext, type ConnectedAccount } from '@/lib/account-context';
 import { LaunchDraftProvider } from '@/lib/launch-draft';
 import { MarketFeed } from '@/components/market-feed';
+import { hasPreviousWalletConnection, subscribeWalletSession } from '@/lib/connection-session';
 
 const WalletConnection = lazy(() => import('@/components/connect-panel'));
 
@@ -17,6 +18,11 @@ export function AppShell({ children }: { children: ReactNode }) {
   const [walletStarted, setWalletStarted] = useState(false);
   const [walletOpen, setWalletOpen] = useState(false);
   const [account, setAccount] = useState<ConnectedAccount>({});
+  const restoreWallet = useSyncExternalStore(
+    subscribeWalletSession,
+    hasPreviousWalletConnection,
+    () => false,
+  );
   const openWallet = () => {
     setWalletStarted(true);
     setWalletOpen(true);
@@ -58,7 +64,7 @@ export function AppShell({ children }: { children: ReactNode }) {
             </Link>
           </nav>
           <div className="header-actions">
-            {walletStarted ? (
+            {walletStarted || restoreWallet ? (
               <Suspense
                 fallback={
                   <Button className="wallet-button" disabled>

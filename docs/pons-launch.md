@@ -97,3 +97,8 @@ not been performed.
 
 Sources: [pons v2 builder guide](https://docs.ponsfamily.com/v2),
 [pons machine-readable guide](https://docs.ponsfamily.com/llms.txt).
+
+## Copy existing artwork
+
+Feed rows labelled `pons-v2` can copy existing token artwork into the draft.
+See [Pons v2 image COPY](pons-v2-image-copy.md) for supported URI formats and verification.

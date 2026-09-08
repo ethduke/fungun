@@ -20,9 +20,10 @@ with shared server caching, request coalescing and failure backoff. It uses no
 configured RPC calls and is independent of the optional read service.
 Popularity counts similarly named distinct token
 contracts in the source's selected tracked cohort, not social trends.
-COPY fills the launch form with the selected token's name and ticker. This test
-branch also retrieves artwork for recognized Robinhood O1 tokens when available.
-Other launchpads need a separate image.
+COPY fills the launch form with the selected token's name and ticker and retrieves
+available artwork for Robinhood O1 tokens and compatible Long/Doppler tokens on
+Robinhood or Base, plus Pons v2 logos on Robinhood. Missing or unsupported artwork
+leaves text COPY usable.
 Compact venue labels include O1 RWA, UniV3 and UniV4. O1 hooks are recognized
 using a daily server cache of the official current and historical suite registry,
 with no RPC enrichment. Migration labels require explicit upstream provenance.
@@ -77,3 +78,25 @@ and LP shares on-chain, and claims each stream separately. Claim all reviews
 transactions in sequence. New pools may appear after an indexing delay. Each
 claim requires wallet confirmation; there are no token approvals or fee-rights
 transfers in this flow.
+
+
+## Optional Long agent API
+
+Configured deployments can expose an authenticated Long-only agent API at the
+operator-provided API origin. It is disabled by default. The companion Node SDK
+can deploy without per-launch prompts after its owner configures access, signing
+and spending limits. Keys stay in the local signer; the API prepares unsigned
+transactions and verifies recovery. The experimental browser preview tools remain
+limited to drafting.
+
+`GET /v1/agent/launchpads` lists configured Long pairings. `GET /v1/agent/themes`
+provides exact normalized-name trends, distinct contract counts, threshold-crossing
+events and opaque cursors. Threshold and observation-window settings are configurable;
+freshness must be checked before automatic deployment. The SDK searches Long ticker
+availability and remembers handled themes across restarts.
+
+Image modes are provided, Grok through USDG/x402, or none (a neutral placeholder
+required by the publication protocol). Optional website and Twitter HTTPS links
+are included in token metadata. API credentials, public wallet bindings and
+runtime configuration must be provisioned by the operator; do not invent addresses
+or copy secrets into requests. [Agent guide](/agent-guide.md) explains access.

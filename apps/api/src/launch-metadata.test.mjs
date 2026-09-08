@@ -98,3 +98,15 @@ test("metadata references accept only content-addressed IPFS or exact configured
     assert.throws(() => validatePublishedUri(uri, "image", origin));
   assert.throws(() => validatePublishedUri(image, "metadata", origin));
 });
+
+test('optional HTTPS links preserve canonical metadata bytes across server and portable encoder', async () => {
+  const { buildLongMetadata: portable } = await import('../../web/lib/long-encoding/launch-metadata.mjs');
+  const origin='https://assets.example';
+  const uri=origin+'/launch-assets/'+'a'.repeat(64)+'.webp';
+  const details={name:'Coin',ticker:'COIN',website:'https://example.com/',twitter:'https://x.com/example'};
+  const server=buildLongMetadata(details,uri,origin);
+  assert.deepEqual(server.bytes,portable(details,uri,origin).bytes);
+  assert.equal(server.sha256,portable(details,uri,origin).sha256);
+  assert.equal(JSON.parse(server.bytes).website,details.website);
+  for (const website of ['http://example.com',new URL('https://example.com').href.replace('://', '://' + ['user', 'pass'].join(':') + '@'),'https://example.com/\n']) assert.throws(()=>buildLongMetadata({...details,website},uri,origin));
+});

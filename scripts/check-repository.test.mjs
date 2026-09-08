@@ -60,6 +60,71 @@ test('rejects JSON, code and environment credential assignments', () => {
   }
 });
 
+test('rejects every supported provider credential name, including public prefixes', () => {
+  const names = ['PINATA_JWT', 'FOMO_RELAY_TOKEN', 'TELEGRAM_BOT_TOKEN', 'OPENROUTER_KEY', 'X402_FACILITATOR_TOKEN'];
+  for (const name of names) {
+    for (const key of [name, `NEXT_PUBLIC_${name}`, `VITE_${name}`, name.toLowerCase().replaceAll('_', '')]) {
+      const value = 'synthetic-'.repeat(4);
+      for (const content of [JSON.stringify({ [key]: value }), `${key} = '${value}'`])
+        assert.ok(scan('config.mjs', content).includes('non-placeholder-credential-assignment'), key);
+      if (key === key.toUpperCase()) {
+        assert.ok(scan('.env.example', `${key}=${value}`).includes('non-placeholder-credential-assignment'), key);
+        for (const replacement of ['', '<set-at-runtime>', 'REDACTED', '${RUNTIME_CREDENTIAL}'])
+          assert.deepEqual(scan('.env.example', `${key}=${replacement}\nFEATURE_ENABLED=1`), [], key);
+      }
+    }
+  }
+  assert.deepEqual(scan('config.mjs', names.map((name) => `const ${name.toLowerCase()} = process.env.${name};`).join('\n')), []);
+  assert.deepEqual(scan('token.json', JSON.stringify({ token: 'public-token-identifier' })), []);
+});
+
+test('detects JWT and Telegram credentials even without a recognized assignment', () => {
+  const jwt = [{ alg: 'HS256', typ: 'JWT' }, { sub: 'synthetic-audit' }, 'synthetic-signature']
+    .map((value) => Buffer.from(JSON.stringify(value)).toString('base64url')).join('.');
+  const bot = ['123456789', 'synthetic'.repeat(5)].join(':');
+  for (const [value, rule] of [[jwt, 'jwt-credential-token'], [bot, 'telegram-bot-token']]) {
+    for (const content of [value, `\0${value}\0`, JSON.stringify({ unrelated: value })])
+      assert.ok(scan('capture.txt', content).includes(rule), rule);
+  }
+  assert.ok(scan('config.txt', `https://api.telegram.org/bot${bot}/sendMessage`).includes('telegram-bot-token'));
+});
+
+test('detects HTTP and WebSocket URL credentials, including encoded query names', () => {
+  for (const scheme of ['http', 'https', 'ws', 'wss']) {
+    for (const name of ['key', 'api_key', 'api-key', 'token', 'access_token', 'jwt', 'password', '%6bey']) {
+      const url = `${scheme}://example.invalid/ws?chain=test&${name}=synthetic-value`;
+      assert.ok(scan('request.txt', url).includes('credential-bearing-url'), `${scheme}:${name}`);
+    }
+    assert.ok(scan('request.txt', `${scheme}://synthetic:credential@example.invalid`).includes('credential-bearing-url'));
+    for (const replacement of ['', 'REDACTED', 'YOUR_KEY', '<set-at-runtime>', '${runtime.key}', '%3Cset-at-runtime%3E'])
+      assert.deepEqual(scan('request.txt', `${scheme}://example.invalid/?key=${replacement}`), []);
+  }
+  const htmlUrl = ['https://example.invalid/?chain=test&amp;key=', 'synthetic-value'].join('');
+  assert.ok(scan('request.txt', htmlUrl).includes('credential-bearing-url'));
+  assert.deepEqual(scan('request.txt', 'wss://example.invalid/ws?chain=test'), []);
+  for (const host of ['mainnet.infura.io', 'eth-mainnet.g.alchemy.com'])
+    assert.ok(scan('request.txt', `https://${host}/v3/${'synthetic'.repeat(3)}`).includes('credential-bearing-url'));
+});
+
+test('historical URL fixture exceptions cannot hide changed or adjacent credentials', () => {
+  const fixtures = [
+    ['apps/api/src/token-image.test.mjs', ['https://ipfs.io', '@localhost/'].join('')],
+    ['apps/api/src/config.test.mjs', ['http://user', '@127.0.0.1:3011'].join('')],
+    ['apps/api/src/fomo-collector.test.mjs', ['wss://example.invalid?key=', 'synthetic-private-key'].join('')],
+    ['apps/api/src/x402-payments.test.mjs', ['https://secret', '@payments.example'].join('')],
+    ['apps/api/src/x402-payments.test.mjs', ['https://payments.example?key=', 'secret'].join('')],
+  ];
+  for (const [path, url] of fixtures) {
+    assert.deepEqual(scan(path, url), []);
+    assert.ok(scan('request.txt', url).includes('credential-bearing-url'));
+    assert.ok(scan(path, url.replace(/user|synthetic|secret|ipfs\.io/, 'changed')).includes('credential-bearing-url'));
+    assert.ok(scan(path, `${url}\n${credential()}`).includes('non-placeholder-credential-assignment'));
+  }
+  const legacy = JSON.stringify({ FOMO_RELAY_TOKEN: ['synthetic', 'private', 'token'].join('-') });
+  assert.deepEqual(scan('apps/api/src/fomo-api.test.mjs', legacy), []);
+  assert.ok(scan('config.json', legacy).includes('non-placeholder-credential-assignment'));
+});
+
 test('permits empty and unmistakable placeholders, environment lookups and regex source', () => {
   for (const value of ['', '<set-at-runtime>', 'YOUR_KEY', 'REPLACE_ME', '${XAI_API_KEY}', 'REDACTED']) {
     assert.deepEqual(scan('.env.example', JSON.stringify({ [['api', 'key'].join('_')]: value })), []);

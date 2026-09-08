@@ -3,21 +3,23 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "setup": "npm --prefix apps/web ci && npm --prefix apps/api ci --ignore-scripts && npm --prefix apps/facilitator ci --ignore-scripts && git config --local core.hooksPath .githooks",
+    "setup": "npm --prefix apps/web ci && npm --prefix apps/api ci --ignore-scripts && npm --prefix apps/facilitator ci --ignore-scripts && npm --prefix apps/agent ci --ignore-scripts && git config --local core.hooksPath .githooks",
     "dev": "node scripts/dev.mjs",
     "dev:web": "npm --prefix apps/web run dev -- --hostname 127.0.0.1 --port 3000",
     "dev:api": "npm --prefix apps/api start",
     "assets:snapshot": "node scripts/asset-snapshots.mjs",
     "build": "npm --prefix apps/web run build",
     "build:fly": "npm --prefix apps/web run build:fly",
-    "lint": "npm --prefix apps/web run lint && apps/web/node_modules/.bin/oxlint apps/api/src",
+    "lint": "npm --prefix apps/web run lint && apps/web/node_modules/.bin/oxlint apps/api/src apps/agent",
     "typecheck": "npm --prefix apps/web run typecheck",
     "runtime:status": "node --env-file-if-exists=.env scripts/runtime-status.mjs",
     "verify:catalog:local": "node --experimental-strip-types scripts/verify-local-catalog.mjs",
     "test": "node --experimental-strip-types --test scripts/*.test.mjs apps/web/lib/launch-model.test.ts apps/web/lib/launch-draft-cache.test.ts apps/web/lib/launch-cost.test.ts apps/web/lib/user-error.test.ts apps/web/lib/preview-web3.test.ts apps/web/lib/fees-model.test.ts apps/web/lib/fee-service.test.ts apps/web/lib/fee-usd.test.ts apps/web/lib/long-wallet.test.ts apps/web/lib/long-recovery.test.ts apps/web/lib/launch-flow.test.ts apps/web/lib/auto-ticker.test.ts apps/web/lib/claim-wallet.test.ts apps/web/lib/claim-queue.test.ts apps/web/lib/read-service.test.ts apps/web/lib/read-proxy.test.ts apps/api/src/*.test.mjs",
     "check:staged": "node scripts/check-repository.mjs",
     "check:tracked": "node scripts/check-repository.mjs --tracked",
-    "check:history": "node scripts/check-repository.mjs --history"
+    "check:history": "node scripts/check-repository.mjs --history",
+    "test:agent": "node --experimental-strip-types --test apps/agent/*.test.mjs apps/api/src/agent-*.test.mjs",
+    "agent": "node --experimental-strip-types apps/agent/cli.mjs"
   },
   "engines": {
     "node": ">=24.4.0"
