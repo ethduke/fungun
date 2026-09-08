@@ -1,3 +1,4 @@
+import { safeSdkError } from "./errors.mjs";
 import { keccak256, parseTransaction, decodeFunctionResult, zeroAddress } from "viem";
 import {
   buildUnsignedLongLaunch,
@@ -10,7 +11,7 @@ const same = (a, b) =>
 const check = (ok, code = "launch_transaction_changed") => {
   if (!ok) throw new Error(code);
 };
-export async function preflight(plan, input, published, trustedProfile, rpc, limits) {
+async function preflightPlan(plan, input, published, trustedProfile, rpc, limits) {
   const trusted = readLongLaunchProfile(trustedProfile);
   const profile = readLongLaunchProfile({
     ...trusted,
@@ -114,7 +115,7 @@ export async function preflight(plan, input, published, trustedProfile, rpc, lim
   check(Date.now() < plan.expiresAt, "quote_expired");
   return cost;
 }
-export function validateSigned(raw, tx) {
+function validateSignedTransaction(raw, tx) {
   const signed = parseTransaction(raw);
   check(
     signed.chainId === 4663 &&
@@ -126,4 +127,19 @@ export function validateSigned(raw, tx) {
       BigInt(signed.nonce ?? 0) === BigInt(tx.nonce),
   );
   return keccak256(raw);
+}
+
+export async function preflight(...args) {
+  try {
+    return await preflightPlan(...args);
+  } catch (error) {
+    throw safeSdkError(error);
+  }
+}
+export function validateSigned(...args) {
+  try {
+    return validateSignedTransaction(...args);
+  } catch (error) {
+    throw safeSdkError(error);
+  }
 }

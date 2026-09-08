@@ -1,3 +1,4 @@
+import { safeSdkError } from "./errors.mjs";
 import { createHash, randomUUID } from "node:crypto";
 import { recoverTransactionAddress } from "viem";
 import { Journal } from "./journal.mjs";
@@ -79,8 +80,12 @@ export class FungunAgent {
     imageGenerator,
     fetcher = fetch,
   }) {
-    this.appOrigin = new URL(appOrigin ?? apiUrl).origin;
-    this.url = new URL(apiUrl);
+    try {
+      this.appOrigin = new URL(appOrigin ?? apiUrl).origin;
+      this.url = new URL(apiUrl);
+    } catch {
+      throw new Error("agent_configuration");
+    }
     if (this.url.username || this.url.password || this.url.search || this.url.hash)
       throw new Error("agent_configuration");
     if (this.url.protocol !== "https:" && !["localhost", "127.0.0.1"].includes(this.url.hostname))
@@ -116,55 +121,63 @@ export class FungunAgent {
         throw new Error("invalid_limits");
   }
   async request(path, body) {
-    const res = await this.fetcher(new URL(`/v1/agent/${path}`, this.url), {
-      method: body === undefined ? "GET" : "POST",
-      redirect: "error",
-      signal: AbortSignal.timeout(25000),
-      headers: {
-        authorization: ["Bearer", this.token].join(" "),
-        "content-type": "application/json",
-      },
-      ...(body === undefined ? {} : { body: JSON.stringify(body) }),
-    });
-    let value;
-    if (res.body?.getReader) {
-      const reader = res.body.getReader();
-      const chunks = [];
-      let size = 0;
-      try {
-        for (;;) {
-          const { done, value: chunk } = await reader.read();
-          if (done) break;
-          size += chunk.length;
-          if (size > 4194304) throw new Error("response_size");
-          chunks.push(chunk);
+    try {
+      const res = await this.fetcher(new URL(`/v1/agent/${path}`, this.url), {
+        method: body === undefined ? "GET" : "POST",
+        redirect: "error",
+        signal: AbortSignal.timeout(25000),
+        headers: {
+          authorization: ["Bearer", this.token].join(" "),
+          "content-type": "application/json",
+        },
+        ...(body === undefined ? {} : { body: JSON.stringify(body) }),
+      });
+      let value;
+      if (res.body?.getReader) {
+        const reader = res.body.getReader();
+        const chunks = [];
+        let size = 0;
+        try {
+          for (;;) {
+            const { done, value: chunk } = await reader.read();
+            if (done) break;
+            size += chunk.length;
+            if (size > 4194304) throw new Error("response_size");
+            chunks.push(chunk);
+          }
+        } finally {
+          await reader.cancel();
         }
-      } finally {
-        await reader.cancel();
+        value = JSON.parse(Buffer.concat(chunks).toString());
+      } else value = await res.json();
+      if (!res.ok) {
+        const error = new Error(value?.error || `api_${res.status}`);
+        error.retryAfter = Math.min(
+          86400,
+          Math.max(1, Number(res.headers?.get("retry-after")) || 30),
+        );
+        error.retryable = res.status === 429 || res.status >= 500;
+        throw error;
       }
-      value = JSON.parse(Buffer.concat(chunks).toString());
-    } else value = await res.json();
-    if (!res.ok) {
-      const error = new Error(value?.error || `api_${res.status}`);
-      error.retryAfter = Math.min(
-        86400,
-        Math.max(1, Number(res.headers?.get("retry-after")) || 30),
-      );
-      error.retryable = res.status === 429 || res.status >= 500;
-      throw error;
+      return value;
+    } catch (error) {
+      throw safeSdkError(error);
     }
-    return value;
   }
   async searchLaunchpads() {
     return this.request("launchpads");
   }
   async resume() {
-    return this.journal.lock(async (j) => {
-      const out = [];
-      for (const r of Object.values(j.data.intents))
-        if (!terminal(r)) out.push(await this.advance(j, r));
-      return out;
-    });
+    try {
+      return await this.journal.lock(async (j) => {
+        const out = [];
+        for (const r of Object.values(j.data.intents))
+          if (!terminal(r)) out.push(await this.advance(j, r));
+        return out;
+      });
+    } catch (error) {
+      throw safeSdkError(error);
+    }
   }
   async deploy(
     input,
@@ -174,15 +187,19 @@ export class FungunAgent {
       image = { mode: input.image ? "provided" : "none" },
     } = {},
   ) {
-    return this.journal.lock(async (j) => {
-      // A new intent may never pass an unresolved transaction or publication.
-      for (const [key, r] of Object.entries(j.data.intents))
-        if (key !== intentKey && !terminal(r)) {
-          await this.advance(j, r);
-          if (!terminal(r)) throw new Error("unresolved_intent");
-        }
-      return this.start(j, input, { intentKey, themeKey, image });
-    });
+    try {
+      return await this.journal.lock(async (j) => {
+        // A new intent may never pass an unresolved transaction or publication.
+        for (const [key, r] of Object.entries(j.data.intents))
+          if (key !== intentKey && !terminal(r)) {
+            await this.advance(j, r);
+            if (!terminal(r)) throw new Error("unresolved_intent");
+          }
+        return this.start(j, input, { intentKey, themeKey, image });
+      });
+    } catch (error) {
+      throw safeSdkError(error);
+    }
   }
   async start(j, input, { intentKey, themeKey, image }) {
     if (
@@ -421,68 +438,72 @@ export class FungunAgent {
     await j.save();
   }
   async tick(config) {
-    for (const key of ["searchLaunchpads", "deployLaunchpads"])
-      if (!Array.isArray(config[key]) || config[key].length !== 1 || config[key][0] !== "long")
-        throw new Error("unsupported_launchpad");
-    const maximum = config.maxLaunchesPerTheme ?? 1;
-    if (!Number.isSafeInteger(maximum) || maximum < 1) throw new Error("invalid_theme_limit");
-    return this.journal.lock(async (j) => {
-      for (const r of Object.values(j.data.intents))
-        if (!terminal(r)) {
-          await this.advance(j, r);
-          if (!terminal(r)) return { status: "pending" };
+    try {
+      for (const key of ["searchLaunchpads", "deployLaunchpads"])
+        if (!Array.isArray(config[key]) || config[key].length !== 1 || config[key][0] !== "long")
+          throw new Error("unsupported_launchpad");
+      const maximum = config.maxLaunchesPerTheme ?? 1;
+      if (!Number.isSafeInteger(maximum) || maximum < 1) throw new Error("invalid_theme_limit");
+      return await this.journal.lock(async (j) => {
+        for (const r of Object.values(j.data.intents))
+          if (!terminal(r)) {
+            await this.advance(j, r);
+            if (!terminal(r)) return { status: "pending" };
+          }
+        const cursorScope = canonicalJson({
+          minimumTokens: config.minimumTokens ?? 3,
+          windowSeconds: config.windowSeconds ?? 3600,
+        });
+        if (j.data.cursorScope !== cursorScope) {
+          j.data.cursor = null;
+          j.data.cursorScope = cursorScope;
+          await j.save();
         }
-      const cursorScope = canonicalJson({
-        minimumTokens: config.minimumTokens ?? 3,
-        windowSeconds: config.windowSeconds ?? 3600,
-      });
-      if (j.data.cursorScope !== cursorScope) {
-        j.data.cursor = null;
-        j.data.cursorScope = cursorScope;
+        const query = new URLSearchParams({
+          minimumTokens: String(config.minimumTokens ?? 3),
+          windowSeconds: String(config.windowSeconds ?? 3600),
+          ...(j.data.cursor ? { cursor: j.data.cursor } : {}),
+        });
+        const page = await this.request(`themes?${query}`);
+        if (page.freshness?.status !== "fresh") return { status: "stale" };
+        for (const theme of [...(page.events ?? []).map((e) => e.theme), ...(page.themes ?? [])]) {
+          const key = theme.key ?? theme.id;
+          if (typeof key !== "string") throw new Error("invalid_theme");
+          const previous = Object.values(j.data.intents).filter((r) => r.themeKey === key);
+          if (previous.filter((r) => r.state !== "skipped").length >= maximum) continue;
+          const tried = new Set(previous.map((r) => r.draft?.ticker));
+          for (const ticker of tickerCandidates(theme)) {
+            if (tried.has(ticker)) continue;
+            const status = await this.request("long/ticker", { ticker });
+            if (status.results?.long?.status !== "unreserved") continue;
+            const attempt = Object.values(j.data.intents).filter((r) => r.themeKey === key).length;
+            const intentKey = createHash("sha256").update(`long:${key}:${attempt}`).digest("hex");
+            const cleanName = String(theme.name ?? ticker)
+              .replace(/[\p{Cc}\p{Cf}]/gu, "")
+              .trim();
+            await this.start(
+              j,
+              {
+                name: Array.from(cleanName || ticker)
+                  .slice(0, 50)
+                  .join(""),
+                ticker,
+                pairId: config.pairId,
+                image: config.image?.base64,
+              },
+              { intentKey, themeKey: key, image: config.image ?? { mode: "none" } },
+            );
+            const record = j.data.intents[intentKey];
+            if (!terminal(record)) return { status: "pending" };
+            if (record.state !== "skipped") break;
+          }
+        }
+        j.data.cursor = page.nextCursor;
         await j.save();
-      }
-      const query = new URLSearchParams({
-        minimumTokens: String(config.minimumTokens ?? 3),
-        windowSeconds: String(config.windowSeconds ?? 3600),
-        ...(j.data.cursor ? { cursor: j.data.cursor } : {}),
+        return { status: "checked", cursor: page.nextCursor };
       });
-      const page = await this.request(`themes?${query}`);
-      if (page.freshness?.status !== "fresh") return { status: "stale" };
-      for (const theme of [...(page.events ?? []).map((e) => e.theme), ...(page.themes ?? [])]) {
-        const key = theme.key ?? theme.id;
-        if (typeof key !== "string") throw new Error("invalid_theme");
-        const previous = Object.values(j.data.intents).filter((r) => r.themeKey === key);
-        if (previous.filter((r) => r.state !== "skipped").length >= maximum) continue;
-        const tried = new Set(previous.map((r) => r.draft?.ticker));
-        for (const ticker of tickerCandidates(theme)) {
-          if (tried.has(ticker)) continue;
-          const status = await this.request("long/ticker", { ticker });
-          if (status.results?.long?.status !== "unreserved") continue;
-          const attempt = Object.values(j.data.intents).filter((r) => r.themeKey === key).length;
-          const intentKey = createHash("sha256").update(`long:${key}:${attempt}`).digest("hex");
-          const cleanName = String(theme.name ?? ticker)
-            .replace(/[\p{Cc}\p{Cf}]/gu, "")
-            .trim();
-          await this.start(
-            j,
-            {
-              name: Array.from(cleanName || ticker)
-                .slice(0, 50)
-                .join(""),
-              ticker,
-              pairId: config.pairId,
-              image: config.image?.base64,
-            },
-            { intentKey, themeKey: key, image: config.image ?? { mode: "none" } },
-          );
-          const record = j.data.intents[intentKey];
-          if (!terminal(record)) return { status: "pending" };
-          if (record.state !== "skipped") break;
-        }
-      }
-      j.data.cursor = page.nextCursor;
-      await j.save();
-      return { status: "checked", cursor: page.nextCursor };
-    });
+    } catch (error) {
+      throw safeSdkError(error);
+    }
   }
 }

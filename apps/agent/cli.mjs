@@ -4,6 +4,7 @@ import { privateKeyToAccount } from "viem/accounts";
 import { createPublicClient, http } from "viem";
 import { FungunAgent } from "./index.mjs";
 import { deployAndWait, watchThemes, safeAgentError } from "./run.mjs";
+import { safeAgentResult } from "./errors.mjs";
 const [command, configPath, inputPath] = process.argv.slice(2);
 const controller = new AbortController();
 for (const signal of ["SIGINT", "SIGTERM"]) process.on(signal, () => controller.abort());
@@ -51,14 +52,14 @@ try {
           signal: controller.signal,
         },
       );
-      console.log(JSON.stringify(result));
+      console.log(JSON.stringify(safeAgentResult(result)));
       if (result.status !== "confirmed") process.exitCode = 2;
     } else if (command === "resume") {
-      console.log(JSON.stringify(await agent.resume()));
+      console.log(JSON.stringify(safeAgentResult(await agent.resume())));
     } else {
       await watchThemes(agent, config, {
         signal: controller.signal,
-        onResult: (value) => console.log(JSON.stringify(value)),
+        onResult: (value) => console.log(JSON.stringify(safeAgentResult(value))),
         onError: (code) => console.error(`Agent waiting: ${code}`),
       });
     }
@@ -69,5 +70,10 @@ try {
     process.exitCode = 1;
   }
 } finally {
-  imageGenerator?.close();
+  try {
+    imageGenerator?.close();
+  } catch (error) {
+    console.error(safeAgentError(error));
+    process.exitCode = 1;
+  }
 }

@@ -165,7 +165,7 @@ test("uncertain theme intent persists without acknowledging cursor", async () =>
   };
   await assert.rejects(
     agent.tick({ searchLaunchpads: ["long"], deployLaunchpads: ["long"], pairId: "long-EXAMPLE" }),
-    /uncertain/,
+    /agent_failed/,
   );
   await agent.journal.lock((j) => {
     assert.equal(j.data.cursor, null);
@@ -193,7 +193,7 @@ test("none, provided and Grok choices are durably stored before artwork requests
         },
         { intentKey: "intent", image: { mode } },
       ),
-      /artwork_unavailable/,
+      /agent_failed/,
     );
     await agent.journal.lock((j) => {
       assert.ok(j.data.intents.intent.imageBase64);
@@ -207,7 +207,7 @@ test("reused idempotency key rejects changed launch details", async () => {
     throw new Error("stop");
   });
   const input = { name: "Moon", ticker: "MOON", pairId: "long-EXAMPLE" };
-  await assert.rejects(agent.deploy(input, { intentKey: "same" }), /stop/);
+  await assert.rejects(agent.deploy(input, { intentKey: "same" }), /agent_failed/);
   await assert.rejects(
     agent.deploy({ ...input, ticker: "SUN" }, { intentKey: "same" }),
     /intent_input_changed/,
@@ -248,14 +248,14 @@ test("canonical input accepts reordered equivalent details without duplicating i
       { name: " Moon ", ticker: "MOON", pairId: "long-EXAMPLE", intentKey: "ignored" },
       { intentKey: "same" },
     ),
-    /stop/,
+    /agent_failed/,
   );
   await assert.rejects(
     agent.deploy(
       { pairId: "long-EXAMPLE", description: "", ticker: "MOON", name: "Moon" },
       { intentKey: "same" },
     ),
-    /stop/,
+    /agent_failed/,
   );
   await agent.journal.lock((j) => assert.equal(Object.keys(j.data.intents).length, 1));
 });
@@ -279,7 +279,7 @@ test("retryable reservation refreshes without repeating any prior signing state"
     };
     await j.save();
   });
-  await assert.rejects(agent.resume(), /fresh_artwork_attempt/);
+  await assert.rejects(agent.resume(), /agent_failed/);
   assert.equal(statusCalls, 1);
   assert.equal(prepareCalls, 1);
   assert.deepEqual(counts(), { signed: 0, sent: 0 });

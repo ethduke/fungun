@@ -309,3 +309,13 @@ test("public artwork origin is pinned independently of the private service origi
       }),
     );
 });
+
+test("opaque lowercase upstream error values are not reflected", async (t) => {
+  const { request } = await fixture(t, {
+    fetcher: async () => Response.json({ error: "synthetic_opaque_credential" }, { status: 503 }),
+  });
+  const response = await request("long/artwork-prepare", {
+    chainId: 4663, wallet, draft, imageBase64: "aGk=",
+  });
+  assert.deepEqual(await response.json(), { error: "unavailable" });
+});

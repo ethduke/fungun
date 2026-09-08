@@ -1,69 +1,8 @@
 import { createHash } from "node:crypto";
 import { canonicalJson, launchIdentity } from "./index.mjs";
 
-const retries = new Set([
-  "rate_limited",
-  "busy",
-  "upstream_unavailable",
-  "read_service_unavailable",
-  "unavailable",
-  "timeout",
-  "fetch failed",
-  "long_address_pending",
-  "quote_expired",
-  "asset_busy",
-  "asset_publication_uncertain",
-  "image_job_pending",
-  "image_retry_later",
-  "image_request_uncertain",
-  "image_recovery_unavailable",
-  "image_quote_refreshed",
-  "image_quote_unavailable",
-  "image_payment_uncertain",
-  "daily_launch_limit",
-  "daily_spend_limit",
-  "image_daily_budget",
-]);
-const visible = new Set([
-  ...retries,
-  "agent_configuration",
-  "unsupported_launchpad",
-  "journal_locked",
-  "daily_reservation_expired",
-  "unresolved_intent",
-  "contract_unverified",
-  "nonce_changed",
-  "insufficient_funds",
-  "intent_input_changed",
-  "spend_limit",
-  "wrong_chain",
-  "image_generator_required",
-  "response_size",
-  "journal_identity_changed",
-  "image_job_terminal",
-  "image_payment_not_allowed",
-  "image_config_invalid",
-  "image_journal_permissions",
-  "image_signing_failed",
-  "invalid_limits",
-  "invalid_launch_details",
-  "invalid_image_mode",
-  "unauthorized",
-  "forbidden",
-  "invalid_theme",
-  "theme_cursor_expired",
-  "image_journal_full",
-  "launch_unknown",
-  "launch_outcome_pending",
-  "launch_failed",
-  "invalid_runtime",
-  "invalid_input",
-  "invalid_wait_settings",
-  "aborted",
-  "image_signer_mismatch",
-]);
-export const safeAgentError = (error) =>
-  visible.has(error?.message) ? error.message : "agent_failed";
+import { retries, safeAgentError } from "./errors.mjs";
+export { safeAgentError } from "./errors.mjs";
 export function retryDelay(error, now = Date.now()) {
   if (
     !error?.retryable &&

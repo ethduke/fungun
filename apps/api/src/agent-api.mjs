@@ -5,6 +5,17 @@ import { validateLongInput } from "./long-live.mjs";
 import { validateAssetInput } from "./asset-service.mjs";
 import { IMAGE_BYTE_LIMIT } from "./launch-image.mjs";
 
+// Only contractually public asset error codes may cross the service boundary.
+const assetErrors = new Set([
+  "unavailable", "not_found", "invalid_request", "request_too_large", "origin_denied",
+  "rate_limited", "image_size", "invalid_wallet", "invalid_asset_image",
+  "invalid_asset_approval", "asset_approval_changed", "asset_approval_expired",
+  "asset_busy", "asset_publication_uncertain", "ipfs_approval_pending",
+  "asset_history_full", "asset_storage_full", "asset_integrity_failed",
+  "asset_storage_unavailable", "asset_clock_unavailable", "asset_uploads_disabled",
+  "ipfs_publication_disabled", "artwork_daily_limit", "artwork_service_limit",
+]);
+
 const fail = (code, status = 400) => {
   throw new ServiceError(code, status);
 };
@@ -242,7 +253,7 @@ export function createAgentHandler(
             [400, 403, 404, 409, 413, 429, 503].includes(upstream.status) ? upstream.status : 503,
             {
               error:
-                typeof value.error === "string" && /^[a-z_]{1,64}$/.test(value.error)
+                assetErrors.has(value.error)
                   ? value.error
                   : "unavailable",
             },

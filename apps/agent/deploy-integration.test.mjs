@@ -305,7 +305,7 @@ test("deploy traverses real authenticated API, IPFS capability publication and l
 });
 test("lost broadcast acknowledgment recovers original hash after restart without re-signing", async (t) => {
   const f = await fixture(t, { loseBroadcast: true });
-  await assert.rejects(f.deploy(), /dropped broadcast acknowledgment/);
+  await assert.rejects(f.deploy(), /agent_failed/);
   f.restart();
   const [result] = await f.resume();
   assert.equal(result.status, "confirmed");
