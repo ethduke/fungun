@@ -424,7 +424,7 @@ export class FungunAgent {
     return this.advance(j, r);
   }
   async reserveDailyBudget(j, r) {
-    if (r.hash || !["intent", "publishing", "reserving"].includes(r.state))
+    if (r.hash || !["intent", "publishing", "published", "reserving"].includes(r.state))
       throw new Error("unresolved_intent");
     // Resumed unsigned plans use current transaction limits; never refund an older reservation.
     const previous = BigInt(r.reservedWei);

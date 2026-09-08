@@ -273,6 +273,8 @@ test("retryable reservation refreshes without repeating any prior signing state"
   await agent.journal.lock(async (j) => {
     j.data.intents.a = {
       state: "reserving",
+      day: "2000-01-01",
+      reservedWei: "100",
       plan: { id: "a" },
       draft: { name: "Moon", ticker: "MOON", description: "" },
       image: { mode: "none" },
@@ -284,6 +286,13 @@ test("retryable reservation refreshes without repeating any prior signing state"
   assert.equal(prepareCalls, 1);
   assert.deepEqual(counts(), { signed: 0, sent: 0 });
   await agent.journal.lock(async (j) => {
+    assert.equal(j.data.intents.a.state, "published");
+    assert.equal(j.data.intents.a.plan, undefined);
+    agent.limits.maxTransactionWei = "200";
+    agent.limits.maxSpendWeiPerDay = "200";
+    await agent.reserveDailyBudget(j, j.data.intents.a);
+    assert.equal(j.data.intents.a.reservedWei, "200");
+    assert.equal(j.data.intents.a.day, new Date().toISOString().slice(0, 10));
     j.data.intents.a.state = "signing";
     j.data.intents.a.plan = { id: "a" };
     await j.save();
