@@ -14,7 +14,7 @@ export class FungunAgent {
   constructor({apiUrl,appOrigin,token,signer,rpc,profile,journalPath,limits={},imageGenerator,fetcher=fetch}) {
     this.appOrigin=new URL(appOrigin??apiUrl).origin;this.url=new URL(apiUrl); if(this.url.protocol!=='https:'&&!['localhost','127.0.0.1'].includes(this.url.hostname))throw new Error('https_required');
     if(!token||!signer?.address||!signer.signTransaction||!rpc?.request||!profile||!journalPath)throw new Error('agent_configuration');
-    Object.assign(this,{token,signer,rpc,profile,imageGenerator,fetcher}); this.journal=new Journal(journalPath);this.limits={...defaultLimits,...limits};
+    Object.assign(this,{token,signer,rpc,profile,imageGenerator,fetcher}); this.journal=new Journal(journalPath,createHash('sha256').update(JSON.stringify({wallet:signer.address.toLowerCase(),apiOrigin:this.url.origin,appOrigin:this.appOrigin,profile})).digest('hex'));this.limits={...defaultLimits,...limits};
     if(!Number.isSafeInteger(this.limits.maxLaunchesPerDay)||this.limits.maxLaunchesPerDay<1)throw new Error('invalid_limits');
     for(const k of ['maxSpendWeiPerDay','maxTransactionWei','maxGas','maxGasPriceWei'])if(!/^\d+$/.test(String(this.limits[k]))||BigInt(this.limits[k])<=0n)throw new Error('invalid_limits');
   }
@@ -86,11 +86,14 @@ export class FungunAgent {
     const p=await this.request('long/prepare',input);
     if(p.recovery){r.plan=p.recovery;r.state='uncertain';await j.save();return this.advance(j,r);}
     await preflight(p,input,r.publication,this.profile,this.rpc,this.limits);
+    const day=new Date().toISOString().slice(0,10);
+    if(r.day!==day){const entries=Object.values(j.data.intents).filter(x=>x!==r&&x.day===day);if(entries.length>=this.limits.maxLaunchesPerDay)throw new Error('daily_launch_limit');if(entries.reduce((n,x)=>n+BigInt(x.reservedWei),0n)+BigInt(r.reservedWei)>BigInt(this.limits.maxSpendWeiPerDay))throw new Error('daily_spend_limit');r.day=day;await j.save();}
     r.plan={id:p.id,binding:p.binding};r.state='reserving';await j.save();
     await this.request('long/reserve',r.plan);
     // Persist before requesting a signature: an interrupted signer is never invoked twice.
     r.state='signing';await j.save();
     if(Date.now()>=p.expiresAt)throw new Error('quote_expired');
+    if(r.day!==new Date().toISOString().slice(0,10))throw new Error('daily_reservation_expired');
     const tx=p.transaction;
     const raw=await this.signer.signTransaction({chainId:4663,type:'legacy',to:tx.to,data:tx.data,value:BigInt(tx.value),nonce:Number(BigInt(tx.nonce)),gas:BigInt(tx.gas),gasPrice:BigInt(tx.gasPrice)});
     const hash=validateSigned(raw,tx);
@@ -115,7 +118,7 @@ export class FungunAgent {
         let ticker;for(const candidate of tickerCandidates(theme)){const status=await this.request('long/ticker',{ticker:candidate});if(status.results?.long?.status==='unreserved'){ticker=candidate;break;}}
         if(!ticker)continue;
         const intentKey=createHash('sha256').update(`long:${key}:${count}`).digest('hex');
-        await this.start(j,{name:String(theme.name??ticker).slice(0,64),ticker,pairId:config.pairId,image:config.image?.base64},{intentKey,themeKey:key,image:config.image??{mode:'none'}});
+        await this.start(j,{name:Array.from(String(theme.name??ticker)).slice(0,50).join(''),ticker,pairId:config.pairId,image:config.image?.base64},{intentKey,themeKey:key,image:config.image??{mode:'none'}});
         if(!terminal(j.data.intents[intentKey]))return {status:'pending'};
       }
       j.data.cursor=page.nextCursor;await j.save();return {status:'checked',cursor:page.nextCursor};

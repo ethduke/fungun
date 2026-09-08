@@ -1,5 +1,6 @@
 import { keccak256, parseTransaction } from 'viem';
 import { buildUnsignedLongLaunch, readLongLaunchProfile } from '../web/lib/long-encoding/long-launch.mjs';
+import { isCanonicalLongAsset } from '../web/lib/long-encoding/long-salt.mjs';
 const same = (a,b) => typeof a === 'string' && typeof b === 'string' && a.toLowerCase() === b.toLowerCase();
 const check = (ok, code = 'launch_transaction_changed') => { if (!ok) throw new Error(code); };
 export async function preflight(plan, input, published, trustedProfile, rpc, limits) {
@@ -11,6 +12,8 @@ export async function preflight(plan, input, published, trustedProfile, rpc, lim
   check(/^[a-f0-9]{64}$/.test(plan.id) && /^[a-f0-9]{64}$/.test(plan.binding));
   const rebuilt = buildUnsignedLongLaunch({ ...input, metadataUri: `ipfs://${published.ipfs.metadataCid}`, startingTick: plan.startingTick, intentId: plan.intentId }, profile, undefined, plan.saltAttempt);
   const tx = plan.transaction;
+  check(isCanonicalLongAsset(plan.predictedAsset));
+  check(BigInt(tx.nonce)>=0n&&BigInt(tx.nonce)<=BigInt(Number.MAX_SAFE_INTEGER),'nonce_limit');
   check(rebuilt.binding === plan.binding && same(rebuilt.predictedAsset, plan.predictedAsset));
   check(Object.keys(tx).sort().join(',') === 'chainId,data,from,gas,gasPrice,nonce,to,value');
   check(tx.chainId === '0x1237' && same(tx.from,input.wallet) && same(tx.to,rebuilt.transaction.to) && tx.data === rebuilt.transaction.data && BigInt(tx.value) === BigInt(rebuilt.transaction.value));
