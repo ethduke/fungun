@@ -31,8 +31,8 @@ Construct new fake credentials and authenticated test URLs at runtime.
 
 CI additionally runs [Gitleaks 8.30.1](https://github.com/gitleaks/gitleaks/releases/tag/v8.30.1),
 downloaded from the official release and verified against a pinned SHA-256.
-Its default rules are enabled, with one narrowly scoped exception for a reviewed
-pair of environment-variable names. It scans all available refs with full secret
+Its default rules are enabled, with narrowly scoped exceptions for reviewed
+pairs of environment-variable names. It scans all available refs with full secret
 redaction and ignores inline suppression comments. To run the same independent
 check locally after installing that version:
 

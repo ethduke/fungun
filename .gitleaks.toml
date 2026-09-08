@@ -14,3 +14,10 @@ condition = "AND"
 paths = ['''^apps/api/src/asset-environment\.mjs$''']
 regexTarget = "match"
 regexes = ['''^OPENROUTER(?:_API)?_KEY",\r?\n[ \t]*"X402_FACILITATOR_URL"$''']
+
+[[rules.allowlists]]
+description = "Reviewed dev environment exclusion names, not a token assignment"
+condition = "AND"
+paths = ['''^scripts/dev\.test\.mjs$''']
+regexTarget = "match"
+regexes = ['''^X402_FACILITATOR_[T]OKEN", "X402_FACILITATOR_PRIVATE_[K]EY"$''']

@@ -10,11 +10,11 @@ import test from 'node:test';
 const available = spawnSync('gitleaks', ['version']).status === 0;
 const config = fileURLToPath(new URL('../.gitleaks.toml', import.meta.url));
 
-function fixture(t) {
+function fixture(t, path = 'apps/api/src/asset-environment.mjs') {
   const root = mkdtempSync(join(tmpdir(), 'gitleaks-safety-test-'));
   t.after(() => rmSync(root, { recursive: true, force: true }));
   const source = join(root, 'source');
-  const target = join(source, 'apps/api/src/asset-environment.mjs');
+  const target = join(source, path);
   const report = join(root, 'report.json');
   mkdirSync(join(target, '..'), { recursive: true });
   return (content) => {
@@ -55,4 +55,21 @@ test('Gitleaks remains independent of project assignment-name detection', { skip
   assert.ok(result.findings.some((finding) => finding.RuleID === 'jwt'));
   assert.ok(!result.output.includes(jwt));
   assert.ok(!JSON.stringify(result.findings).includes(jwt));
+});
+
+test('the dev exclusion-name exception is exact and cannot hide adjacent credentials', { skip: !available }, (t) => {
+  assert.equal(fixture(t, '.gitleaks.toml')(readFileSync(config, 'utf8')).status, 0, 'The rule configuration itself must scan cleanly');
+  const scan = fixture(t, 'scripts/dev.test.mjs');
+  const tokenName = ['X402', 'FACILITATOR', 'TOKEN'].join('_');
+  const keyName = ['X402', 'FACILITATOR', 'PRIVATE', 'KEY'].join('_');
+  const names = `const names = ["${tokenName}", "${keyName}"];\n`;
+  assert.equal(scan(names).status, 0);
+  assert.equal(fixture(t, 'config.mjs')(names).status, 1, 'The same text outside its reviewed path remains scanned');
+  const token = createHash('sha256').update('synthetic dev exception regression').digest('hex');
+  const assignmentName = ['OPENROUTER', 'API', 'KEY'].join('_');
+  const result = scan(names + `const ${assignmentName} = "${token}";\n`);
+  assert.equal(result.status, 1);
+  assert.ok(result.findings.some(finding => finding.RuleID === 'generic-api-key'));
+  assert.ok(!result.output.includes(token));
+  assert.ok(!JSON.stringify(result.findings).includes(token));
 });
