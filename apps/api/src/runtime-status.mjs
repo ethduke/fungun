@@ -85,6 +85,8 @@ export function runtimeStatus(env) {
         ["FEE_CONTRACTS_JSON.baseOracle", !!config.feeContracts.baseOracle],
       ], ["READ_UPSTREAMS", "O1_BASE_WALLET_LAUNCH"]),
       feature("o1_indexed_fees", [o1], fees),
+      feature("pons_escrow_fees", [rpc, ["PONS_FEE_PROFILE_JSON", !!config.ponsFees]], fees),
+      feature("pons_escrow_claims", [rpc, ["PONS_FEE_PROFILE_JSON", !!config.ponsFees]], claims),
       ...["long", "longbow"].flatMap((padId) => [
         feature(`${padId}_locked_pool_fees`, [rpc, lockedFees(padId)], fees),
         feature(`${padId}_locked_pool_claims`, [rpc, lockedFees(padId)], claims),

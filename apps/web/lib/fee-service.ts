@@ -41,7 +41,7 @@ export type FeeSource = {
   status: 'ready' | 'partial' | 'unavailable';
   reason?: (typeof feeUnavailableReasons)[number];
   nextCursor?: string | null;
-  coverage?: 'wallet_index' | 'configured_pools' | 'beneficiary_events';
+  coverage?: 'wallet_index' | 'configured_pools' | 'beneficiary_events' | 'configured_escrow';
   progress?: { scannedThroughBlock: string | null; toBlock: string };
   positions: FeePosition[];
   expiresAt: number;
@@ -70,6 +70,14 @@ export type ClaimQuote = {
 };
 
 export const stonksClaimAbi = parseAbi(['function collectAll(address token)', 'function claim(address token)', 'event Transfer(address indexed from,address indexed to,uint256 value)', 'event PayoutClaimed(address indexed to,address indexed token,uint256 amount)']);
+export const ponsClaimAbi = parseAbi([
+  'function claim(uint256 amount) returns (uint256)',
+  'function claimToken(address token, uint256 amount) returns (uint256)',
+  'event Claimed(address indexed recipient, uint256 amount)',
+  'event ClaimedToken(address indexed recipient, address indexed token, uint256 amount)',
+  'event Transfer(address indexed from, address indexed to, uint256 value)',
+]);
+
 export const claimAbi = parseAbi([
   'function claimFor(address recipient, address currency)',
   'function collectFees(bytes32 poolId) returns (uint128 fees0, uint128 fees1)',
@@ -215,8 +223,10 @@ export function parseFees(
     !equal(result.address, owner) ||
     result.chainId !== chainId ||
     result.padId !== padId ||
-    !['long', 'o1', 'longbow', 'stonks'].includes(padId) ||
+    !['long', 'o1', 'longbow', 'pons', 'stonks'].includes(padId) ||
     !supportsChain(padId, chainId) ||
+    (padId === 'pons' && result.status !== 'unavailable' &&
+      (result.coverage !== 'configured_escrow' || result.status !== 'partial' || result.nextCursor != null)) ||
     !['ready', 'partial', 'unavailable'].includes(result.status) ||
     (result.reason !== undefined &&
       (!feeUnavailableReasons.includes(result.reason) ||
@@ -225,7 +235,7 @@ export function parseFees(
     (result.nextCursor != null && !id(result.nextCursor)) ||
     (result.nextCursor != null && result.status !== 'partial') ||
     (result.coverage !== undefined &&
-      !['wallet_index', 'configured_pools', 'beneficiary_events'].includes(
+      !['wallet_index', 'configured_pools', 'beneficiary_events', 'configured_escrow'].includes(
         result.coverage,
       )) ||
     (result.progress !== undefined &&
@@ -245,6 +255,7 @@ export function parseFees(
         !id(position.id) ||
         !nonzeroAddress(position.target) ||
         !payouts(position.payouts) ||
+        (padId === 'pons' && (position.verification !== 'live' || position.payouts.length !== 1)) ||
         (padId === 'stonks' && (!nonzeroAddress(position.collectionToken) || !['collect', 'claim'].includes(position.claimMode ?? '') || position.verification !== 'live')) ||
         !['live', 'indexed'].includes(position.verification) ||
         typeof position.claimable !== 'boolean' ||
@@ -413,10 +424,11 @@ export function validateClaim(value: unknown): ClaimQuote {
   if (
     !quote ||
     !id(quote.positionId) ||
-    !['long', 'o1', 'longbow', 'stonks'].includes(quote.kind) ||
+    !['long', 'o1', 'longbow', 'pons', 'stonks'].includes(quote.kind) ||
     !(isLockedPoolClaim(quote.kind)
       ? quote.chainId === 4663
       : quote.kind === 'stonks' ? quote.chainId === 8453 : [4663, 8453].includes(quote.chainId)) ||
+    (quote.kind === 'pons' && quote.chainId !== 4663) ||
     !nonzeroAddress(quote.address) ||
     !nonzeroAddress(quote.target) ||
     (quote.escrowVersion !== undefined &&
@@ -442,6 +454,18 @@ export function validateClaim(value: unknown): ClaimQuote {
     !/^0x[\da-f]+$/i.test(quote.data)
   )
     throw new AppError('invalid_response');
+  if (quote.kind === 'pons') {
+    if (quote.payouts.length !== 1 || quote.poolId !== undefined) throw new AppError('invalid_response');
+    try {
+      const decoded = decodeFunctionData({ abi: ponsClaimAbi, data: quote.data });
+      const native = /^0x0{40}$/i.test(quote.payouts[0].asset);
+      if (native
+        ? decoded.functionName !== 'claim' || quote.data.length !== 74 || decoded.args[0] !== BigInt(quote.payouts[0].claimableRaw)
+        : decoded.functionName !== 'claimToken' || quote.data.length !== 138 || !equal(decoded.args[0], quote.payouts[0].asset) || decoded.args[1] !== BigInt(quote.payouts[0].claimableRaw))
+        throw new Error();
+    } catch { throw new AppError('invalid_response'); }
+    return quote;
+  }
   let decoded;
   try {
     decoded = decodeFunctionData({
