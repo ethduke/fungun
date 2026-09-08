@@ -61,20 +61,6 @@ explorer link, without being presented as accepted by Long. An address cannot
 be changed after deployment; repairing this class of existing token requires a
 new deployment or a Long-side listing exception.
 
-The search cost varies with the context and the numeric numeraire address. A
-Darwin arm64/Node 23.11 review run on September 6 sampled 12 successful searches
-against the maximum numeraire: median 566 ms, maximum 1.65 seconds and maximum
-190,629 attempts. An intentionally impractical low numeraire exhausted all three
-million attempts in 18–22 seconds. Production keeps the 20-second read deadline,
-one active operation in each launchpad handler, event-loop yields every 4,096 hashes,
-and the fixed attempt ceiling. A timeout fails before wallet dispatch. Successful
-plans are durably reused, and the in-process salt cache holds at most 64 entries.
-The three-per-minute and 30-per-day launch allowance is shared across launchpads
-and is debited only after the server-issued publication ticket, immutable metadata,
-configured quote, current contracts, ticker and oracle have been validated. Invalid
-anonymous inputs retain the broader request, asset-status and upstream limits but
-cannot spend this scarce CPU admission allowance.
-
 A read-only replay of the corrected ROBOTAXI recipe at block 55,285,630 returned
 the predicted suffix-bearing address and estimated 1,968,454 gas. No transaction
 was signed or broadcast. This verifies the contract recipe and address invariant;
@@ -126,17 +112,9 @@ within 60 seconds. USD is indicative; ETH is the actual payment currency.
 
 The existing budget database holds an additive `long_launches` table. HMAC identity
 binds a wallet and metadata hash; the complete input cannot change under that record.
-New version-1 rows also retain the publication CIDs, exact portable-builder inputs
-and the selected quote's normalized beacon, implementation, aggregator and heartbeat
-guard. Cached reuse and reservation compare that snapshot with current configuration.
-Status reconstructs current-format calldata, binding, address and review fields, then
-checks the saved profile and guard code plus historical beacon/aggregator links at the
-canonical receipt block. Explicit version-0 rows remain receipt/event/state recoverable,
-but an unsent legacy plan is rebuilt before it can be offered to a wallet.
 Preparation is capped at 3/minute and 30/day, with a 4,096-record ceiling. All RPC
-methods debit the existing durable provider/global budgets. Each launchpad handler
-admits one active launch read, with bounded deadlines and cached publication/price
-reads and receipt checks.
+methods debit the existing durable provider/global budgets. There is one active
+launch read, bounded deadlines, cached publication/price reads and receipt checks.
 No arbitrary target, RPC URL, calldata, signature or gas override is accepted.
 
 Reservation is durably saved before the wallet opens. Attempted records never
@@ -187,23 +165,6 @@ reports these requirements under `long_wallet_launch` without exposing their val
 No credentials enter client
 build variables; only public deployment information accompanies an unsigned plan.
 
-O1 has a separate API-only switch and profile: `O1_WALLET_LAUNCH`,
-`O1_LAUNCH_PROFILE_JSON`, and `O1_LAUNCH_TOKENS_JSON`. Its native metadata call
-also requires the existing server-only `O1_API_KEY`. The token list is an array of
-reviewed `{symbol,address}` entries and is required for the configured Robinhood
-RWA pairing set. `LONG_EXTRA_QUOTES_JSON` is optional; O1 selects only a reviewed
-USDG record from it. No value from these settings enters the web or decoder runtime.
-
-The O1 parser deliberately reuses the validated Long stock-token runtime hash
-template and `LAUNCH_ASSET_SERVICE_ORIGIN`, so `LONG_LAUNCH_PROFILE_JSON` and
-`LONG_LAUNCH_GUARDS_JSON` must also be valid. `O1_WALLET_LAUNCH=true` validates
-those shared settings directly when Long is off; it leaves the Long handler
-disabled unless `LONG_WALLET_LAUNCH` is independently `true`. Missing or malformed
-shared settings reject startup with a fixed O1 configuration error. With the
-switches off, dormant O1 settings are not parsed. `npm run runtime:status` reports
-presence and switches under `o1_wallet_launch`; live RPC, contract, provider and
-pair verification still occurs only in the bounded request path.
-
 The portable encoder lives in `apps/web/lib/long-encoding`; the API imports it
 through a wrapper that preserves API error handling. The web image includes no
 API service source. API packaging includes only this portable encoding directory.
@@ -213,18 +174,6 @@ Exact legacy `/files/{cid}` browser recovery records are normalized to `/ipfs/{c
 without changing publication IDs, hashes, CIDs or wallet bindings. Both URLs must
 match the recorded origin and CIDs; altered paths or queries remain rejected.
 Recovery continues through the existing status endpoint without another signature.
-
-`saltAttempt` is a required browser plan field for the canonical-address format. New
-API journals also add a version, immutable publication CIDs and the selected guard;
-these server recovery fields distinguish reconstructable rows from the explicit
-legacy fallback. A new web build rejects plans from an old API, and an old web build
-cannot reconstruct plans from a new API. Deploy the API and web from the same
-reviewed Git revision in one
-maintenance window: stop new launch preparation, confirm there is no wallet handoff
-in progress, deploy both immediate-strategy single-Machine apps, verify each image
-revision and health endpoint, then re-enable preparation. Do not use a rolling or
-mixed-revision rollout for this format change. Existing journaled recovery must
-remain served by the API throughout the window; do not reset or replace its volume.
 
 New uploads use version-3 server-issued upload capabilities. They bind the exact
 publication ID, wallet field, processed bytes, metadata and five-minute expiry.
@@ -258,9 +207,8 @@ Gateway 401/403 responses surface a concise service-unavailable error immediatel
 with recovery retained, rather than asking the user to wait for access to repair itself.
 O1 retains its native pinning path. All listed Long, O1 and Longbow pairs are
 eligible for draft selection. O1 catalog refreshes extend the saved choices and
-do not lock them when missing or expired. Wallet transactions use dedicated Long
-and O1 handlers with their configured server quotes. The Longbow wallet handler
-is not configured by these settings.
+do not lock them when missing or expired. Wallet transactions use the Long handler
+and its configured server quotes; O1 and Longbow wallet handlers are not connected.
 
 Sources: [Robinhood network configuration](https://docs.robinhood.com/chain/connecting/),
 [gas and fees](https://docs.robinhood.com/chain/gas-and-fees/),

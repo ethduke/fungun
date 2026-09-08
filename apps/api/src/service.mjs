@@ -3,8 +3,12 @@ import { isIP } from "node:net";
 import { ServiceError, safeError, serviceErrorBody } from "./errors.mjs";
 import { validAddress } from "./fee-contracts.mjs";
 import { validatePriceInput } from "./tracked-prices.mjs";
+import { validateTokenImageInput } from "./o1-token-image.mjs";
+import { validateCopiedTokenImageInput } from "./token-image.mjs";
 
 export function validateInput(kind, input) {
+  if (kind === "token-image") return validateCopiedTokenImageInput(input);
+  if (kind === "o1-token-image") return validateTokenImageInput(input);
   if (kind === "fomo") {
     if (!input || typeof input !== "object" || Array.isArray(input) || Object.keys(input).length)
       throw new ServiceError("invalid_request", 400);
@@ -27,8 +31,8 @@ export function validateInput(kind, input) {
     if (
       kind === "fees"
         ? ![4663, 8453].includes(input.chainId) ||
-          !["long", "o1", "longbow"].includes(input.padId) ||
-          (input.padId !== "o1" && input.chainId !== 4663) ||
+          !["long", "o1", "longbow", "pons", "stonks"].includes(input.padId) ||
+          (input.padId === 'stonks' ? input.chainId !== 8453 : input.padId !== 'o1' && input.chainId !== 4663) ||
           (Object.hasOwn(input, "cursor") &&
             (typeof input.cursor !== "string" || !/^[a-f0-9]{64}$/.test(input.cursor)))
         : typeof input.positionId !== "string" || !/^[a-f0-9]{64}$/.test(input.positionId)
@@ -56,7 +60,7 @@ export function validateInput(kind, input) {
       input.pads.length > 2 ||
       new Set(input.pads).size !== input.pads.length ||
       input.pads.some(
-        (pad) => !["long", "o1"].includes(pad) || (pad === "long" && input.chainId !== 4663),
+        (pad) => !['long', 'o1', 'stonks'].includes(pad) || (pad === 'long' && input.chainId !== 4663) || (pad === 'stonks' && input.chainId !== 8453),
       ) ||
       (input.pads.includes("long") && !/^[A-Z]{1,11}$/.test(input.ticker)))
   )
@@ -86,7 +90,7 @@ async function readBody(request, limit = 2048) {
   }
 }
 
-export function createHandler(config, budget, adapters, fees, trackedPrices, launches, fomo) {
+export function createHandler(config, budget, adapters, fees, trackedPrices, launches, fomo, tokenImages) {
   let active = 0;
   return async (request, response) => {
     response.setHeader("content-type", "application/json; charset=utf-8");
@@ -115,7 +119,7 @@ export function createHandler(config, budget, adapters, fees, trackedPrices, lau
         request.headers["sec-fetch-site"] === "cross-site"
       )
         throw new ServiceError("origin_denied", 403);
-      const kind = ["fomo", "catalog", "ticker", "fees", "claim-prepare", "tracked-prices", "launch-prepare", "launch-reserve", "launch-status", "launch-estimate"].find(
+      const kind = ["token-image", "o1-token-image", "fomo", "catalog", "ticker", "fees", "claim-prepare", "tracked-prices", "launch-prepare", "launch-reserve", "launch-status", "launch-estimate"].find(
         (operation) => request.url === `/v1/${operation}`,
       );
       if (!kind || request.method !== "POST" || request.headers["x-fungun-intent"] !== kind)
@@ -126,6 +130,7 @@ export function createHandler(config, budget, adapters, fees, trackedPrices, lau
       budget.request(ip, kind === "ticker");
       const input = validateInput(kind, await readBody(request, kind.startsWith("launch-") ? 4096 : 2048));
       const value =
+        ["token-image", "o1-token-image"].includes(kind) ? await tokenImages.get(input) :
         kind === "fomo" ? fomo.snapshot() :
         kind.startsWith("launch-")
           ? await launches.run(kind, input)

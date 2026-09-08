@@ -257,3 +257,26 @@ await test('a failed write does not prevent the next edit from being saved', asy
   await succeeded;
   assert.equal(saved, 'Latest');
 });
+
+await test('legacy three-pad drafts retain artwork and selections when Stonks is added', async () => {
+  const encoded = await encodeLaunchDraft(draft());
+  const legacy = { ...encoded, selection: { ...encoded.selection,
+    destinations: encoded.selection.destinations.filter(pad => pad.id !== 'stonks') } };
+  const restored = await decodeLaunchDraft(legacy);
+  assert.ok(restored?.image instanceof Blob);
+  assert.deepEqual(restored.selection.destinations.filter(pad => pad.id !== 'stonks'), legacy.selection.destinations);
+  assert.equal(restored.selection.destinations.find(pad => pad.id === 'stonks')?.selected, false);
+});
+
+await test('production four-pad drafts gain pons without losing existing choices', async () => {
+  const saved = await encodeLaunchDraft(draft());
+  saved.selection.destinations = saved.selection.destinations.filter(pad => pad.id !== 'pons');
+  const original = structuredClone(saved.selection.destinations);
+  const restored = await decodeLaunchDraft(saved);
+  assert.ok(restored);
+  assert.deepEqual(restored.selection.destinations.filter(pad => pad.id !== 'pons'), original);
+  assert.equal(restored.selection.destinations.find(pad => pad.id === 'pons')?.selected, false);
+  const legacy = { ...saved, selection: { ...saved.selection, destinations: saved.selection.destinations.filter(pad => pad.id !== 'stonks') } };
+  const oldest = await decodeLaunchDraft(legacy);
+  assert.equal(oldest?.selection.destinations.length, 5);
+});

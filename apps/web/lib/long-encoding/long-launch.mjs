@@ -66,7 +66,8 @@ function contract(value, factory = false) {
 
 export function readLongLaunchProfile(value) {
   if (
-    !exactObject(value, ["chainId", ...roles, "integrator", "protocolBeneficiary", "quotes"]) ||
+    !exactObject(value, ["chainId", ...roles, "integrator", "protocolBeneficiary", "quotes", ...(value?.launchpad === "longbow" ? ["launchpad", "platformAllocation"] : [])]) ||
+    (value?.launchpad === "longbow" && !address(value.platformAllocation)) ||
     value.chainId !== 4663 ||
     roles.some((role) => !contract(value[role], role === "tokenFactory")) ||
     !address(value.integrator) ||
@@ -74,27 +75,28 @@ export function readLongLaunchProfile(value) {
     new Set(roles.map((role) => value[role].address.toLowerCase())).size !== roles.length ||
     !Array.isArray(value.quotes) ||
     value.quotes.length < 1 ||
-    value.quotes.length > 100
+    value.quotes.length > 512
   )
     throw new ServiceError("invalid_long_launch_profile");
   const quotes = value.quotes.map((quote) => {
     if (
-      !exactObject(quote, ["id", "token", "oracle", "decimals", "oracleDecimals"]) ||
+      !exactObject(quote, ["robinhood", "market"].includes(quote?.priceSource) ? ["id", "token", "decimals", "symbol", "priceSource"] : ["id", "token", "oracle", "decimals", "oracleDecimals"]) ||
       typeof quote.id !== "string" ||
-      !/^(?:long-[A-Z0-9._-]{1,24}|rwa-[a-f\d]{24})$/.test(quote.id) ||
+      !/^(?:(?:long|longbow)-[A-Z0-9._-]{1,24}|rwa-[a-f\d]{24})$/.test(quote.id) ||
       !contract(quote.token) ||
-      !contract(quote.oracle) ||
-      quote.decimals !== 18 ||
-      quote.oracleDecimals !== 8 ||
-      quote.token.address.toLowerCase() === quote.oracle.address.toLowerCase()
+      ![6, 18].includes(quote.decimals) ||
+      (["robinhood", "market"].includes(quote.priceSource)
+        ? typeof quote.symbol !== "string" || !/^[A-Z0-9._-]{1,24}$/.test(quote.symbol)
+        : !contract(quote.oracle) || quote.oracleDecimals !== 8 || quote.token.address.toLowerCase() === quote.oracle.address.toLowerCase())
     )
       throw new ServiceError("invalid_long_launch_profile");
     return Object.freeze({
       id: quote.id,
       token: normalizeContract(quote.token),
-      oracle: normalizeContract(quote.oracle),
-      decimals: 18,
-      oracleDecimals: 8,
+      decimals: quote.decimals,
+      ...(["robinhood", "market"].includes(quote.priceSource)
+        ? { priceSource: quote.priceSource, symbol: quote.symbol }
+        : { oracle: normalizeContract(quote.oracle), oracleDecimals: 8 }),
     });
   });
   if (
@@ -104,6 +106,7 @@ export function readLongLaunchProfile(value) {
     throw new ServiceError("invalid_long_launch_profile");
   return Object.freeze({
     chainId: 4663,
+    ...(value.launchpad === "longbow" ? { launchpad: "longbow", platformAllocation: value.platformAllocation.toLowerCase() } : {}),
     ...Object.fromEntries(roles.map((role) => [role, normalizeContract(value[role])])),
     integrator: value.integrator.toLowerCase(),
     protocolBeneficiary: value.protocolBeneficiary.toLowerCase(),
@@ -145,6 +148,7 @@ function launchContext(input, configuredProfile, publicOrigin) {
   const quote = profile.quotes.find((entry) => entry.id === input.pairId);
   if (!quote) throw new ServiceError("unsupported_pair", 400);
   const draft = normalizeLaunchDetails(input.draft);
+  if ((draft.launchpad === "longbow") !== (profile.launchpad === "longbow")) throw new ServiceError("invalid_long_launch", 400);
   const metadataUri = validatePublishedUri(input.metadataUri, "metadata", publicOrigin);
   const wallet = input.wallet.toLowerCase();
   const binding = sha256(toBytes(
@@ -174,13 +178,14 @@ export async function buildUnsignedLongLaunchAsync(input, configuredProfile, pub
 }
 
 function assembleLaunch({ profile, quote, draft, metadataUri, wallet, binding, input }, { salt, predictedAsset, saltAttempt }) {
+  const allocation = profile.launchpad === "longbow" ? supply / 100n : 0n;
   const tokenFactoryData = encodeAbiParameters(LONG_TOKEN_PARAMETERS, [
     draft.name,
     draft.ticker,
-    [],
-    [],
-    [],
-    [],
+    allocation ? [{ cliff: 0n, duration: 0n }] : [],
+    allocation ? [profile.platformAllocation] : [],
+    allocation ? [0n] : [],
+    allocation ? [allocation] : [],
     metadataUri,
     0n,
     0,
@@ -239,7 +244,7 @@ function assembleLaunch({ profile, quote, draft, metadataUri, wallet, binding, i
     args: [
       {
         initialSupply: supply,
-        numTokensToSell: supply,
+        numTokensToSell: supply - allocation,
         numeraire: quote.token.address,
         tokenFactory: profile.tokenFactory.address,
         tokenFactoryData,
@@ -272,7 +277,7 @@ function assembleLaunch({ profile, quote, draft, metadataUri, wallet, binding, i
       pairId: quote.id,
       metadataUri,
       totalSupply: supply.toString(),
-      tokensForSale: supply.toString(),
+      tokensForSale: (supply - allocation).toString(),
       creatorAllocation: "0",
       metadataMutable: false,
       launchpadValueWei: "0",

@@ -11,12 +11,13 @@ import {
   imageFileError,
   imageKind,
   selectChain,
+  selectDestination,
+  hasSharedTickerConflict,
   supportsChain,
   isWebviewChain,
   pairingName,
   readablePads,
   validateDraft,
-  walletLaunchDestination,
   type Destination,
 } from './launch-model.ts';
 import { LONGBOW_PAIRS } from './longbow-markets.ts';
@@ -29,6 +30,28 @@ const draft = {
   hasImage: true,
 };
 const destinations = () => structuredClone(DEFAULT_DESTINATIONS);
+
+await test('selecting Long or Longbow switches the shared ticker destination and preserves O1 and pairings', () => {
+  let selected = destinations().map(pad => pad.id === 'o1' ? { ...pad, selected: true } : pad);
+  const original = structuredClone(selected);
+  selected = selectDestination(selected, { ...selected[2], selected: true });
+  assert.deepEqual(selected.map(pad => pad.selected), [false, true, true, false, false]);
+  assert.deepEqual(validateDraft(draft, selected, 4663), {});
+  selected = selectDestination(selected, { ...selected[0], selected: true });
+  assert.deepEqual(selected.map(pad => pad.selected), [true, true, false, false, false]);
+  assert.deepEqual(selected.map(pad => pad.pairId), original.map(pad => pad.pairId));
+  selected = selectDestination(selected, { ...selected[0], selected: false });
+  assert.deepEqual(selected.map(pad => pad.selected), [false, true, false, false, false]);
+  assert.deepEqual(original.map(pad => pad.selected), [true, true, false, false, false]);
+});
+
+await test('a restored legacy selection with both ticker-sharing pads cannot launch', () => {
+  const selected = destinations().map(pad => ({ ...pad, selected: pad.chainId === 4663 }));
+  assert.equal(hasSharedTickerConflict(selected), true);
+  assert.match(validateDraft(draft, selected, 4663).destinations, /Choose Long or Longbow/);
+  assert.equal(draftStatus(validateDraft(draft, selected, 4663), false), 'incomplete');
+  assert.equal(hasSharedTickerConflict(selectDestination(selected, { ...selected[0], selected: true })), false);
+});
 
 await test('Grok prompt uses the coin name and permits only ticker text', () => {
   assert.equal(
@@ -163,7 +186,7 @@ await test('inline launch status revalidates chain and launchpad selections', ()
   ];
   assert.equal(
     draftStatus(validateDraft(draft, base, 8453), false),
-    'incomplete',
+    'complete',
   );
   assert.equal(
     draftStatus(validateDraft(draft, base, 4663), false),
@@ -217,7 +240,7 @@ await test('Long rejects unsupported chain, route and editable metadata', () => 
 });
 
 await test('multi-launch validates every selected destination', () => {
-  const pads = destinations().map((pad) => ({ ...pad, selected: true }));
+  const pads = destinations().map((pad) => ({ ...pad, selected: ['long', 'o1'].includes(pad.id) }));
   assert.deepEqual(validateDraft(draft, pads), {});
   assert.ok(
     validateDraft(
@@ -229,10 +252,10 @@ await test('multi-launch validates every selected destination', () => {
   assert.ok(validateDraft(draft, pads).destinations);
 });
 
-await test('Robinhood is the default chain with all three launchpads available', () => {
+await test('Robinhood is the default chain with all four Robinhood launchpads available', () => {
   assert.equal(DEFAULT_CHAIN_ID, 4663);
   assert.ok(
-    destinations().every((pad) => supportsChain(pad.id, DEFAULT_CHAIN_ID)),
+    destinations().filter(pad => pad.id !== 'stonks').every((pad) => supportsChain(pad.id, DEFAULT_CHAIN_ID)),
   );
   assert.deepEqual(
     destinations()
@@ -242,32 +265,29 @@ await test('Robinhood is the default chain with all three launchpads available',
   );
 });
 
-await test('paused Base selection preserves the current Robinhood draft', () => {
-  const before = destinations().map((pad) => ({ ...pad, selected: true }));
+await test('Base selects O1 and resets chain-specific quote addresses', () => {
+  const before = destinations().map((pad) => ({ ...pad, selected: ['long', 'o1'].includes(pad.id) }));
   before[1].route = 'rwa';
-  const pair = O1_ROBINHOOD_PAIRS.find((pair) => pair.symbol === 'AAPL')!;
-  before[1].pairId = pair.id;
+  before[1].pairId = O1_ROBINHOOD_PAIRS.find((pair) => pair.symbol === 'AAPL')!.id;
   const after = selectChain(before, 8453);
-  assert.equal(isWebviewChain(8453), false);
+  assert.equal(isWebviewChain(8453), true);
   assert.equal(isWebviewChain(4663), true);
-  assert.deepEqual(after, before);
-  assert.notEqual(after, before);
-  assert.deepEqual(validateDraft(draft, after, 4663, {
-    chainId: 4663,
-    expiresAt: performance.now() + 1000,
-    pads: { o1: { status: 'ready', pairs: [pair] } },
-  }), {});
+  assert.deepEqual(after.filter(pad => pad.selected).map(pad => pad.id), ['o1']);
+  assert.equal(after[1].chainId, 8453);
+  assert.equal(after[1].pairId, 'native');
+  assert.equal(after[1].route, 'standard');
+  assert.equal(before[1].route, 'rwa');
+  assert.deepEqual(validateDraft(draft, after, 8453), {});
+  assert.equal(selectChain(destinations(), 8453)[1].selected, true);
 });
 
-await test('stale Base destinations fail validation with or without a chain filter', () => {
+await test('Base O1 is valid only with a matching chain selection', () => {
   const base: Destination[] = [
     { ...DEFAULT_DESTINATIONS[1], selected: true, chainId: 8453 },
   ];
-  for (const chainId of [undefined, 4663, 8453] as const)
-    assert.equal(
-      validateDraft(draft, base, chainId).destinations,
-      'Base is paused. Choose Robinhood Chain.',
-    );
+  assert.deepEqual(validateDraft(draft, base), {});
+  assert.deepEqual(validateDraft(draft, base, 8453), {});
+  assert.ok(validateDraft(draft, base, 4663).destinations);
   assert.ok(validateDraft(draft, destinations(), 8453).destinations);
   const recovered = selectChain(base, 4663);
   assert.equal(recovered[0].chainId, 4663);
@@ -300,7 +320,7 @@ await test('Longbow accepts only its registry pairs independently of a live O1 c
     'long-NVDA',
     'sample-nvda',
     'native',
-    'longbow-BND',
+    'longbow-UNKNOWN',
     'longbow-SKYHY',
   ])
     assert.ok(
@@ -320,26 +340,11 @@ await test('Longbow accepts only its registry pairs independently of a live O1 c
     );
 });
 
-await test('Longbow remains outside ticker service requests for every selection combination', () => {
-  assert.deepEqual(readablePads(['longbow']), []);
+await test('Longbow shares Long ticker reads, coalescing the registry for mixed selections', () => {
+  assert.deepEqual(readablePads(['longbow']), ['long']);
   assert.deepEqual(readablePads(['long', 'longbow']), ['long']);
-  assert.deepEqual(readablePads(['o1', 'longbow']), ['o1']);
+  assert.deepEqual(readablePads(['o1', 'longbow']), ['o1', 'long']);
   assert.deepEqual(readablePads(['long', 'o1', 'longbow']), ['long', 'o1']);
-});
-
-await test('wallet launch selection keeps Long compatibility and enables only sole-destination O1', () => {
-  const pads = destinations();
-  assert.equal(walletLaunchDestination(pads)?.id, 'long');
-  pads[0].selected = false;
-  pads[1].selected = true;
-  assert.deepEqual(walletLaunchDestination(pads), pads[1]);
-  pads[2].selected = true;
-  assert.equal(walletLaunchDestination(pads), null);
-  pads[0].selected = true;
-  assert.deepEqual(walletLaunchDestination(pads), pads[0]);
-  pads[0].selected = false;
-  pads[1].selected = false;
-  assert.equal(walletLaunchDestination(pads), null);
 });
 
 await test('description has a UTF-8 byte limit', () => {
@@ -462,4 +467,18 @@ await test('mislabeled raster files still reject unsupported MIME labels and non
     'image/unknown',
   ])
     assert.ok(imageFileError(jpeg.length, mime, jpeg));
+});
+
+await test('pons uses its own ETH route on Robinhood without a ticker reservation', () => {
+  const pons = { ...DEFAULT_DESTINATIONS.find(pad => pad.id === 'pons')!, selected: true };
+  assert.deepEqual(validateDraft(draft, [pons], 4663), {});
+  assert.equal(pairingName(pons.pairId), 'ETH');
+  assert.deepEqual(readablePads(['pons']), []);
+  assert.deepEqual(readablePads(['pons', 'longbow']), ['long']);
+  assert.equal(supportsChain('pons', 8453), false);
+  for (const change of [{ chainId: 8453 }, { pairId: 'native' }, { route: 'rwa' }, { editableMetadata: true }])
+    assert.ok(validateDraft(draft, [{ ...pons, ...change } as Destination], 4663).destinations);
+  const base = selectChain([pons, DEFAULT_DESTINATIONS[1]], 8453);
+  assert.equal(base.find(pad => pad.id === 'pons')?.selected, false);
+  assert.equal(base.find(pad => pad.id === 'o1')?.selected, true);
 });

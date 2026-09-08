@@ -60,3 +60,12 @@ void test('a hash alone, mismatched recovery and incomplete receipt cannot decla
     assert.throws(() => validateLaunchStatus(value, recovery));
   assert.throws(() => validateLaunchStatus({ id: recovery.id, status: 'submitted', hash }, { ...recovery, hash: `0x${'e'.repeat(64)}` }));
 });
+
+void test('pons confirmations use its token page only on Robinhood', () => {
+  const asset = `0x${'ab'.repeat(20)}`;
+  const receipt = { id: recovery.id, status: 'confirmed', hash, asset, paidGasWei: '1' };
+  assert.equal(confirmedLaunchTokenUrl('pons', receipt), `https://www.ponsfamily.com/launchpad/${asset}`);
+  assert.equal(confirmedLaunchTokenUrl('pons', receipt, 8453), null);
+  assert.equal(confirmedLaunchTokenUrl('pons', { ...receipt, status: 'confirming' }), null);
+  assert.equal(confirmedLaunchTokenUrl('pons', { ...receipt, asset: 'invalid' }), null);
+});

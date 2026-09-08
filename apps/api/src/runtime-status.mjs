@@ -41,6 +41,11 @@ export function runtimeStatus(env) {
     message:
       "Configuration presence only; no live verification, requests or writes were performed.",
     features: [
+      feature("stonks_base_wallet_launch", [
+        ["STONKS_BASE_PROFILE_JSON", !!config.stonksLaunch], ["BASE_RPC_URL", present(config.baseRpcUrl)],
+        ["FEE_CONTRACTS_JSON.baseOracle", !!config.feeContracts.baseOracle],
+      ], ["READ_UPSTREAMS", "STONKS_BASE_WALLET_LAUNCH"]),
+      feature("stonks_base_creator_fees", [["STONKS_BASE_PROFILE_JSON", !!config.stonksLaunch], ["BASE_RPC_URL", present(config.baseRpcUrl)]], fees),
       feature("o1_catalog", [o1], reads),
       feature(
         "long_catalog_subset",
@@ -67,20 +72,21 @@ export function runtimeStatus(env) {
         ],
         ["READ_UPSTREAMS", "LONG_WALLET_LAUNCH"],
       ),
-      feature(
-        "o1_wallet_launch",
-        [
-          rpc,
-          o1,
-          ["O1_LAUNCH_PROFILE_JSON", present(env.O1_LAUNCH_PROFILE_JSON)],
-          ["O1_LAUNCH_TOKENS_JSON", present(env.O1_LAUNCH_TOKENS_JSON)],
-          ["LONG_LAUNCH_PROFILE_JSON", present(env.LONG_LAUNCH_PROFILE_JSON)],
-          ["LONG_LAUNCH_GUARDS_JSON", present(env.LONG_LAUNCH_GUARDS_JSON)],
-          ["LAUNCH_ASSET_SERVICE_ORIGIN", present(env.LAUNCH_ASSET_SERVICE_ORIGIN)],
-        ],
-        ["READ_UPSTREAMS", "O1_WALLET_LAUNCH"],
-      ),
+      feature("pons_wallet_launch", [
+        rpc,
+        ["PONS_LAUNCH_PROFILE_JSON", present(env.PONS_LAUNCH_PROFILE_JSON)],
+        ["LAUNCH_ASSET_SERVICE_ORIGIN", present(env.LAUNCH_ASSET_SERVICE_ORIGIN)],
+      ], ["READ_UPSTREAMS", "PONS_WALLET_LAUNCH"]),
+      feature("o1_base_wallet_launch", [
+        o1,
+        ["BASE_RPC_URL", present(config.baseRpcUrl)],
+        ["O1_BASE_LAUNCH_PROFILE_JSON", present(env.O1_BASE_LAUNCH_PROFILE_JSON)],
+        ["LAUNCH_ASSET_SERVICE_ORIGIN", present(env.LAUNCH_ASSET_SERVICE_ORIGIN)],
+        ["FEE_CONTRACTS_JSON.baseOracle", !!config.feeContracts.baseOracle],
+      ], ["READ_UPSTREAMS", "O1_BASE_WALLET_LAUNCH"]),
       feature("o1_indexed_fees", [o1], fees),
+      feature("pons_escrow_fees", [rpc, ["PONS_FEE_PROFILE_JSON", !!config.ponsFees]], fees),
+      feature("pons_escrow_claims", [rpc, ["PONS_FEE_PROFILE_JSON", !!config.ponsFees]], claims),
       ...["long", "longbow"].flatMap((padId) => [
         feature(`${padId}_locked_pool_fees`, [rpc, lockedFees(padId)], fees),
         feature(`${padId}_locked_pool_claims`, [rpc, lockedFees(padId)], claims),

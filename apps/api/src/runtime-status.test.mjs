@@ -108,46 +108,7 @@ test("Long wallet launch reports all server settings and remains disabled by def
   });
 });
 
-test("O1 wallet launch reports dedicated and shared settings without enabling Long", () => {
-  assert.deepEqual(feature({}, "o1_wallet_launch"), {
-    id: "o1_wallet_launch",
-    missing: [
-      "ROBINHOOD_RPC",
-      "O1_API_KEY",
-      "O1_LAUNCH_PROFILE_JSON",
-      "O1_LAUNCH_TOKENS_JSON",
-      "LONG_LAUNCH_PROFILE_JSON",
-      "LONG_LAUNCH_GUARDS_JSON",
-      "LAUNCH_ASSET_SERVICE_ORIGIN",
-    ],
-    disabled: ["READ_UPSTREAMS", "O1_WALLET_LAUNCH"],
-    status: "missing_configuration",
-  });
-  const configured = {
-    ROBINHOOD_RPC: "https://rpc.example.invalid",
-    O1_API_KEY: "EXAMPLE",
-    O1_WALLET_LAUNCH: "false",
-    O1_LAUNCH_PROFILE_JSON: "O1-PROFILE-SENTINEL",
-    O1_LAUNCH_TOKENS_JSON: "O1-TOKENS-SENTINEL",
-    LONG_LAUNCH_PROFILE_JSON: "LONG-PROFILE-SENTINEL",
-    LONG_LAUNCH_GUARDS_JSON: "LONG-GUARDS-SENTINEL",
-    LAUNCH_ASSET_SERVICE_ORIGIN: "https://assets.example.invalid",
-    READ_UPSTREAMS: "true",
-  };
-  assert.deepEqual(feature(configured, "o1_wallet_launch"), {
-    id: "o1_wallet_launch",
-    missing: [],
-    disabled: ["O1_WALLET_LAUNCH"],
-    status: "disabled",
-  });
-  assert.equal(feature(configured, "long_wallet_launch").status, "disabled");
-  const serialized = JSON.stringify(runtimeStatus(configured));
-  for (const value of Object.values(configured))
-    if (value.includes("SENTINEL") || value.startsWith("https://"))
-      assert.ok(!serialized.includes(value));
-});
-
-test("fee readiness requires chain-specific escrow configuration", () => {
+test("fee readiness uses reviewed Robinhood defaults and still requires Base configuration", () => {
   const escrow = `0x${"1".repeat(40)}`;
   const codeHash = `0x${"2".repeat(64)}`;
   const env = {
@@ -161,8 +122,9 @@ test("fee readiness requires chain-specific escrow configuration", () => {
   assert.equal(feature(env, "o1_base_live_fees_and_claims").status, "missing_configuration");
   assert.equal(
     feature({ ...env, FEE_CONTRACTS_JSON: "{}" }, "o1_robinhood_claims").status,
-    "missing_configuration",
+    "needs_live_verification",
   );
+  assert.equal(feature({ ...env, ROBINHOOD_RPC: "" }, "o1_robinhood_claims").status, "missing_configuration");
 });
 
 test("Longbow readiness requires its own profile without enabling Long", () => {
@@ -201,4 +163,13 @@ test("Longbow readiness requires its own profile without enabling Long", () => {
     feature({ ...env, WALLET_CLAIMS: "false" }, "longbow_locked_pool_claims").status,
     "disabled",
   );
+});
+
+test('pons runtime status identifies its own launch profile and gate', () => {
+  assert.deepEqual(feature({}, 'pons_wallet_launch'), {
+    id: 'pons_wallet_launch',
+    missing: ['ROBINHOOD_RPC', 'PONS_LAUNCH_PROFILE_JSON', 'LAUNCH_ASSET_SERVICE_ORIGIN'],
+    disabled: ['READ_UPSTREAMS', 'PONS_WALLET_LAUNCH'],
+    status: 'missing_configuration',
+  });
 });

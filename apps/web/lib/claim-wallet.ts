@@ -8,7 +8,9 @@ import {
 } from 'viem';
 import { base, robinhood } from 'viem/chains';
 import {
+  stonksClaimAbi,
   claimAbi,
+  ponsClaimAbi,
   legacyClaimAbi,
   isLockedPoolClaim,
   validateClaim,
@@ -246,7 +248,34 @@ export function receiptPayouts(
   )
     return null;
   const amounts = quote.payouts.map(() => 0n);
+  let ponsTransferred = 0n;
   for (const log of receipt.logs) {
+    if (quote.kind === 'pons') {
+      try {
+        const event = decodeEventLog({ abi: ponsClaimAbi, data: log.data, topics: log.topics as [`0x${string}`, ...`0x${string}`[]] });
+        if (event.eventName === 'Transfer') {
+          if (log.address.toLowerCase() === quote.payouts[0].asset.toLowerCase() &&
+            event.args.from.toLowerCase() === quote.target.toLowerCase() && event.args.to.toLowerCase() === quote.address.toLowerCase())
+            ponsTransferred += event.args.value;
+          continue;
+        }
+        if (log.address.toLowerCase() !== quote.target.toLowerCase() || event.args.recipient.toLowerCase() !== quote.address.toLowerCase()) continue;
+        const native = /^0x0{40}$/i.test(quote.payouts[0].asset);
+        if ((native && event.eventName === 'Claimed') ||
+          (!native && event.eventName === 'ClaimedToken' && event.args.token.toLowerCase() === quote.payouts[0].asset.toLowerCase()))
+          amounts[0] += event.args.amount;
+      } catch { /* Unrelated or malformed events are not payout evidence. */ }
+      continue;
+    }
+    if (quote.kind === 'stonks') {
+      try {
+        const event = decodeEventLog({ abi: stonksClaimAbi, data: log.data, topics: log.topics as [`0x${string}`, ...`0x${string}`[]] });
+        const index = quote.payouts.findIndex(p => p.asset.toLowerCase() === log.address.toLowerCase());
+        if (event.eventName === 'Transfer' && index >= 0 && event.args.from.toLowerCase() === quote.target.toLowerCase() && event.args.to.toLowerCase() === quote.address.toLowerCase())
+          amounts[index] += event.args.value;
+      } catch { /* Only actual matching ERC-20 payouts count as received. */ }
+      continue;
+    }
     if (log.address.toLowerCase() !== quote.target.toLowerCase()) continue;
     let event;
     try {
@@ -277,6 +306,13 @@ export function receiptPayouts(
     ) {
       amounts[0] += event.args.fees0;
       amounts[1] += event.args.fees1;
+    }
+  }
+  if (quote.kind === 'pons') {
+    if (amounts[0] !== BigInt(quote.payouts[0].claimableRaw)) return null;
+    if (!/^0x0{40}$/i.test(quote.payouts[0].asset)) {
+      if (ponsTransferred <= 0n || ponsTransferred > amounts[0]) return null;
+      amounts[0] = ponsTransferred;
     }
   }
   return amounts.some((value) => value > 0n)

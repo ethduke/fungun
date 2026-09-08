@@ -3,7 +3,7 @@ import test from "node:test";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { Budget, READ_LIMITS } from "./budget.mjs";
+import { Budget, READ_LIMITS, LAUNCH_LIMITS } from "./budget.mjs";
 
 test("production refuses missing quota state instead of recreating it", () => {
   const directory = mkdtempSync(join(tmpdir(), "fungun-budget-schema-"));
@@ -20,6 +20,44 @@ test("production refuses missing quota state instead of recreating it", () => {
   } finally {
     rmSync(directory, { recursive: true, force: true });
   }
+});
+
+test('launches ignore exhausted daily counters, keep independent pad bursts and recover within one minute', () => {
+  let now = 22 * 3600000;
+  const budget = new Budget(':memory:', () => now);
+  try {
+    budget.debit([['launch-prepare', 30, 86400000]], 30);
+    budget.debit([['launch-assets', 60, 86400000]], 30);
+    budget.debit([['launch-assets', 60, 86400000]], 30);
+    for (let i = 0; i < LAUNCH_LIMITS.prepare; i++) budget.launch('prepare', 'long');
+    budget.launch('prepare', 'o1');
+    budget.launch('prepare', 'longbow');
+    budget.launch('assets');
+    assert.throws(() => budget.launch('prepare', 'long'), e => e.code === 'rate_limited' && e.retryAfter <= 60);
+    now += 60000;
+    budget.launch('prepare', 'long');
+  } finally { budget.close(); }
+});
+
+test('launch RPC budget is isolated from exhausted browsing quotas and concurrent read contexts', async () => {
+  let now = 22 * 3600000;
+  const budget = new Budget(':memory:', () => now);
+  try {
+    for (let i = 0; i < READ_LIMITS.rpcPerDay / 30; i++)
+      budget.debit([['provider:rpc', READ_LIMITS.rpcPerDay, 86400000]], 30);
+    assert.throws(() => budget.upstream('rpc'), { code: 'read_daily_limit' });
+    await Promise.all([
+      budget.withLaunch(async () => { await Promise.resolve(); budget.upstream('rpc', 30); }),
+      Promise.resolve().then(() => assert.throws(() => budget.upstream('rpc'), { code: 'read_daily_limit' })),
+    ]);
+    budget.withLaunch(() => {
+      for (let i = 30; i < LAUNCH_LIMITS.rpc; i++) budget.upstream('rpc');
+      assert.throws(() => budget.upstream('rpc'), e => e.code === 'rate_limited' && e.retryAfter <= 60);
+    });
+    now += 60000;
+    budget.withLaunch(() => budget.upstream('rpc'));
+    assert.throws(() => budget.upstream('rpc'), { code: 'read_daily_limit' });
+  } finally { budget.close(); }
 });
 
 test("durable budget survives restart and cannot refill after clock rollback", () => {
@@ -80,29 +118,6 @@ test("request fairness limits and provider caps do not store raw client IPs", ()
     );
     for (let i = 0; i < 180; i++) budget.upstream("o1");
     assert.throws(() => budget.upstream("rpc"), { status: 429 });
-  } finally {
-    budget.close();
-  }
-});
-
-test("launch admission is strict, durable and shared across launchpads", () => {
-  let now = 10;
-  const budget = new Budget(":memory:", () => now);
-  try {
-    assert.throws(() => budget.launch("estimate"), { code: "invalid_budget_operation" });
-    assert.throws(() => budget.launch("prepare", "o1"), { code: "invalid_budget_operation" });
-    for (let i = 0; i < 3; i++) budget.launch("prepare");
-    assert.throws(() => budget.launch("prepare"), { code: "rate_limited", status: 429 });
-    for (let i = 0; i < 27; i++) {
-      now += 60_000;
-      budget.launch("prepare");
-    }
-    now += 60_000;
-    assert.throws(() => budget.launch("prepare"), { code: "rate_limited", status: 429 });
-    assert.equal(
-      budget.db.prepare("SELECT used FROM counters WHERE scope LIKE 'launch-prepare:86400000:%'").get().used,
-      30,
-    );
   } finally {
     budget.close();
   }

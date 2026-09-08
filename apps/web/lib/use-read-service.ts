@@ -18,9 +18,10 @@ export function useReadService(
   ticker: string,
   pads: PadId[],
 ) {
-  const key = tickerKey(chainId, ticker, pads);
+  const tickerPads: PadId[] = pads.includes('long') ? ['long'] : [];
+  const key = tickerKey(chainId, ticker, tickerPads);
   const checker = useRef<ReturnType<typeof watchTicker> | null>(null);
-  const padsKey = [...pads].sort().join(',');
+  const padsKey = tickerPads.join(',');
   const catalogSequence = useRef(0);
   const [catalog, setCatalog] = useState<Catalog | null>(null);
   const [catalogSettled, setCatalogSettled] = useState('');
@@ -45,24 +46,25 @@ export function useReadService(
     catalogRequest?.chainId === chainId
       ? `${chainId}:${catalogRequest.sequence}`
       : '';
-  const needsCatalog = pads.includes('o1');
+  const needsCatalog = pads.some(pad => ['o1', 'stonks'].includes(pad));
 
   useEffect(() => {
     if (
       !needsCatalog ||
       !isWebviewChain(chainId) ||
-      catalogRequestKey ||
-      (catalog?.chainId === chainId && catalog.expiresAt > performance.now())
+      (catalogRequestKey && (catalogSettled !== catalogRequestKey || !catalog)) ||
+      (catalog?.chainId === chainId && catalog.expiresAt > now)
     )
       return;
     catalogSequence.current += 1;
     setCatalogRequest({ chainId, sequence: catalogSequence.current });
   }, [
-    catalog?.chainId,
-    catalog?.expiresAt,
+    catalog,
     catalogRequestKey,
+    catalogSettled,
     chainId,
     needsCatalog,
+    now,
   ]);
 
   useEffect(() => {

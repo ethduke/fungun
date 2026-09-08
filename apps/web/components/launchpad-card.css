@@ -73,3 +73,24 @@
   color: #7a8175;
   cursor: not-allowed;
 }
+
+.pad-conditions { grid-column: 1 / -1; font-size: 14px; line-height: 1.5; margin: 6px 0 6px 28px; color: var(--muted-foreground); }
+
+.pad-logo.pons {
+  color: #f6f8ea;
+  background: #3b5141;
+  font-size: 23px;
+  font-weight: 700;
+}
+
+.pad-pons-details {
+  grid-column: 1 / -1;
+  margin: 4px 0 0 28px;
+  color: var(--muted-foreground);
+  font-size: 13px;
+}
+
+.pad-pons-details a {
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}

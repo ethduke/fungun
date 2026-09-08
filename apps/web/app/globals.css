@@ -841,8 +841,9 @@ h2 {
   font-weight: 600;
   color: #79856d;
 }
-.ticker-availability[data-state="reserved"] { color: #b23f2e; }
-.ticker-availability[data-state="unreserved"] { color: #376c38; }
+.ticker-availability > span { display: block; }
+.ticker-availability [data-state="reserved"] { color: #b23f2e; }
+.ticker-availability [data-state="unreserved"] { color: #376c38; }
 .ticker-input input[data-availability="reserved"] { border-color: #b23f2e; color: #b23f2e; }
 .ticker-input input[data-availability="unreserved"] { border-color: #376c38; }
 .small-dot.neutral {

@@ -1,4 +1,33 @@
 import WebSocket from "ws";
+import { createHash } from "node:crypto";
+
+// Never log arbitrary provider text, URLs, error messages/stacks or close reasons.
+const errorCodes = new Set([
+  "ECONNRESET",
+  "ECONNREFUSED",
+  "ETIMEDOUT",
+  "ENOTFOUND",
+  "EAI_AGAIN",
+  "EPIPE",
+  "ENETUNREACH",
+  "EHOSTUNREACH",
+  "ERR_TLS_CERT_ALTNAME_INVALID",
+  "CERT_HAS_EXPIRED",
+  "UNABLE_TO_VERIFY_LEAF_SIGNATURE",
+  "WS_ERR_UNSUPPORTED_MESSAGE_LENGTH",
+  "WS_ERR_INVALID_UTF8",
+]);
+const safeErrorCode = (error) => (errorCodes.has(error?.code) ? error.code : "UNKNOWN");
+
+export function retryAfterMs(value, now) {
+  if (typeof value !== "string") return 0;
+  if (/^\d+$/.test(value.trim())) {
+    const seconds = Number(value.trim());
+    return Number.isSafeInteger(seconds) && seconds <= 31_536_000 ? seconds * 1000 : 0;
+  }
+  const date = Date.parse(value);
+  return Number.isFinite(date) ? Math.max(0, date - now) : 0;
+}
 
 // One instance owned by the single-machine read service, never by an HTTP request.
 export class FomoCollector {
@@ -8,21 +37,34 @@ export class FomoCollector {
       key = "",
       enabled = false,
       now = Date.now,
+      random = Math.random,
       socketFactory = (url, options) => new WebSocket(url, options),
       schedule = setTimeout,
       cancel = clearTimeout,
+      logger = (entry) => console.info(JSON.stringify(entry)),
     } = {},
   ) {
-    Object.assign(this, { store, key, enabled, now, socketFactory, schedule, cancel });
+    Object.assign(this, { store, key, enabled, now, random, socketFactory, schedule, cancel, logger });
     this.status = {
       connected: false,
       delay_seconds: null,
       realtime: null,
       last_message_at: null,
+      retry_at: null,
       state: enabled ? (key ? "connecting" : "not_configured") : "disabled",
     };
     this.running = false;
-    this.backoff = 60_000;
+    this.keyFingerprint = createHash("sha256").update(key).digest("hex");
+    const savedBackoff = Number(store.metadata("backoff_ms"));
+    this.backoff = Number.isFinite(savedBackoff) ? Math.min(60_000, Math.max(3000, savedBackoff)) : 3000;
+  }
+
+  log(event, fields = {}) {
+    try {
+      this.logger({ component: "fomo", event, at: this.now(), ...fields });
+    } catch {
+      /* Diagnostics must never interrupt collection or retries. */
+    }
   }
 
   start() {
@@ -32,19 +74,40 @@ export class FomoCollector {
   }
 
   later(ms) {
-    this.timer = this.schedule(() => this.connect(), Math.max(1000, ms));
+    this.timer = this.schedule(() => this.connect(), Math.min(3_600_000, Math.max(1000, ms)));
     this.timer?.unref?.();
   }
 
   connect() {
     if (!this.running || this.socket) return;
+    const blocked = this.store.blocked(this.keyFingerprint);
+    if (blocked) {
+      this.status.state = blocked;
+      this.status.retry_at = null;
+      this.running = false;
+      return;
+    }
     const reservation = this.store.reserveConnection();
     if (!reservation.allowed) {
-      this.status.state = this.store.attempts() >= 12 ? "budget_exhausted" : "reconnecting";
+      this.status.state = reservation.reason;
+      this.status.retry_at = reservation.retryAt / 1000;
+      this.log("connection_deferred", {
+        reason: reservation.reason,
+        retry_at: this.status.retry_at,
+        connections_24h: this.store.attempts(),
+        connections_5m: this.store.attempts(300_000),
+        max_connections_5m: this.store.maxConnections5m,
+      });
       this.later(reservation.retryAt - this.now());
       return;
     }
     this.status.state = "connecting";
+    this.status.retry_at = null;
+    this.log("connection_attempt", {
+      connections_24h: this.store.attempts(),
+      connections_5m: this.store.attempts(300_000),
+      max_connections_5m: this.store.maxConnections5m,
+    });
     this.status.delay_seconds = null;
     this.status.realtime = null;
     const url = new URL("wss://api.fomoapi.io/ws/alerts");
@@ -57,20 +120,33 @@ export class FomoCollector {
         maxPayload: 256 * 1024,
         followRedirects: false,
       });
-    } catch {
-      this.retry(0);
+    } catch (error) {
+      this.log("disconnected", {
+        reason: "socket_creation_failed",
+        error_code: safeErrorCode(error),
+        duration_ms: 0,
+      });
+      this.retry();
       return;
-    } // Never log exception messages: URLs contain the key.
+    }
     this.socket = socket;
-    let openedAt = 0,
-      pong = true;
+    let openedAt = null,
+      welcomed = false,
+      pongReceived = false,
+      retryMinimum = 0,
+      pong = true,
+      disconnectReason = "remote_close",
+      errorCode = null,
+      httpStatus = null;
     socket.on("open", () => {
       openedAt = this.now();
       this.status.connected = true;
       this.status.state = "connected";
+      this.log("connected");
       const ping = () => {
         if (this.socket !== socket || !this.running) return;
         if (!pong) {
+          disconnectReason = "pong_timeout";
           socket.terminate();
           return;
         }
@@ -84,6 +160,7 @@ export class FomoCollector {
     });
     socket.on("pong", () => {
       pong = true;
+      pongReceived = true;
     });
     socket.on("message", (raw) => {
       this.status.last_message_at = this.now() / 1000;
@@ -94,6 +171,7 @@ export class FomoCollector {
         return;
       }
       if (message?.type === "welcome") {
+        welcomed = true;
         this.status.delay_seconds =
           Number.isFinite(message.delaySeconds) && message.delaySeconds >= 0
             ? message.delaySeconds
@@ -103,6 +181,7 @@ export class FomoCollector {
         try {
           this.store.ingest(message);
         } catch {
+          disconnectReason = "storage_error";
           this.status.state = "storage_error";
           this.running = false;
           socket.terminate();
@@ -110,38 +189,80 @@ export class FomoCollector {
       }
     });
     socket.on("unexpected-response", (request, response) => {
-      if ([401, 403, 429].includes(response.statusCode)) {
-        this.status.state = "access_denied";
-        this.store.defer(this.now() + 86_400_000);
-        this.running = false;
-      }
+      httpStatus =
+        Number.isInteger(response.statusCode) &&
+        response.statusCode >= 100 &&
+        response.statusCode <= 599
+          ? response.statusCode
+          : null;
+      disconnectReason = "http_error";
+      const blockedState = {
+        401: "invalid_credentials", 402: "credits_exhausted", 403: "access_denied",
+      }[httpStatus];
+      if (blockedState) this.pause(blockedState);
+      retryMinimum = retryAfterMs(response.headers?.["retry-after"], this.now());
+      if (httpStatus === 429 && !retryMinimum) retryMinimum = 60_000;
       response.resume();
       request.destroy();
       socket.terminate();
     });
-    socket.on("error", () => {}); // Close drives bounded retries; do not expose raw errors.
+    socket.on("error", (error) => {
+      errorCode = safeErrorCode(error);
+      if (disconnectReason === "remote_close") disconnectReason = "socket_error";
+    }); // Close drives bounded retries; only allowlisted codes reach the log.
     socket.on("close", (code) => {
       this.cancel(this.pingTimer);
       this.socket = null;
       this.status.connected = false;
+      this.status.delay_seconds = null;
+      this.status.realtime = null;
+      const duration = openedAt === null ? 0 : Math.max(0, this.now() - openedAt);
+      this.log("disconnected", {
+        reason:
+          code === 1008
+            ? "policy_denied"
+            : !this.running && disconnectReason === "remote_close"
+              ? "stopped"
+              : disconnectReason,
+        close_code: Number.isInteger(code) && code >= 1000 && code <= 4999 ? code : null,
+        error_code: errorCode,
+        http_status: httpStatus,
+        duration_ms: duration,
+      });
       if (!this.running) return;
       if (code === 1008) {
-        this.status.state = "access_denied";
-        this.store.defer(this.now() + 86_400_000);
-        this.running = false;
+        this.pause("policy_denied");
         return;
       }
-      this.retry(openedAt ? this.now() - openedAt : 0);
+      this.retry(
+        duration >= 60_000 && welcomed && pongReceived,
+        retryMinimum,
+        httpStatus === 429 ? "rate_limited" : "reconnecting",
+      );
     });
   }
 
-  retry(duration) {
+  pause(state) {
+    this.store.block(state, this.keyFingerprint);
+    this.status.state = state;
+    this.status.retry_at = null;
+    this.running = false;
+  }
+
+  retry(healthy = false, minimum = 0, state = "reconnecting") {
     this.status.connected = false;
-    this.status.state = "reconnecting";
-    if (duration >= 300_000) this.backoff = 60_000;
-    const delay = this.backoff;
-    this.backoff = Math.min(3_600_000, this.backoff * 2);
-    this.store.defer(this.now() + delay);
+    this.status.state = state;
+    if (healthy) this.backoff = 3000;
+    const jittered = Math.round(this.backoff * (0.8 + 0.4 * this.random()));
+    const delay = Math.max(minimum, Math.min(60_000, jittered));
+    this.backoff = Math.min(60_000, this.backoff * 2);
+    const retryAt = this.now() + delay;
+    this.store.transaction(() => {
+      this.store.setMetadata("backoff_ms", this.backoff);
+      this.store.defer(retryAt, state);
+    });
+    this.status.retry_at = retryAt / 1000;
+    this.log("retry_scheduled", { state, delay_ms: delay, retry_at: this.status.retry_at });
     if (this.running) this.later(delay);
   }
 
@@ -149,6 +270,8 @@ export class FomoCollector {
     return {
       ...this.status,
       connections_24h: this.store.attempts(),
+      connections_5m: this.store.attempts(300_000),
+      max_connections_5m: this.store.maxConnections5m,
       stream_tokens_checked: this.store.tokenCount(),
       history_complete: false,
       stream_highlights: this.store.highlights(),

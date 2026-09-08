@@ -209,6 +209,12 @@ export function savedO1Pairs(chainId: number): CatalogPair[] {
 
 // Catalog refreshes can add choices without locking saved draft pairings.
 export function selectableO1Pairs(chainId: number, catalog?: CatalogPad): CatalogPair[] {
+  // Base choices are live-only: a missing, failed or empty catalog must not
+  // resurrect saved, disabled or third-party pairings.
+  if (chainId === 8453)
+    return catalog?.status === 'ready'
+      ? [...new Map(catalog.pairs.map((pair) => [pair.id, pair])).values()]
+      : [];
   const pairs = new Map(savedO1Pairs(chainId).map((pair) => [pair.id, pair]));
   if (catalog?.status === 'ready')
     for (const pair of catalog.pairs) pairs.set(pair.id, pair);

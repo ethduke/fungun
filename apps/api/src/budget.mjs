@@ -1,14 +1,17 @@
 import { createHmac, randomBytes } from "node:crypto";
 import { DatabaseSync } from "node:sqlite";
+import { AsyncLocalStorage } from "node:async_hooks";
 import { ServiceError } from "./errors.mjs";
 
 const MINUTE = 60_000;
 const DAY = 86_400_000;
 export const READ_LIMITS = Object.freeze({ perMinute: 180, perDay: 16000, rpcPerDay: 12000, o1PerDay: 600, otherPerDay: 1400 });
+export const LAUNCH_LIMITS = Object.freeze({ prepare: 30, assets: 120, upstream: 1200, rpc: 1000, provider: 180 });
 
 export class Budget {
   constructor(path, now = Date.now, initialize = true) {
     this.now = now;
+    this.launchScope = new AsyncLocalStorage();
     this.db = new DatabaseSync(path, { timeout: 1000 });
     if (initialize) {
       this.db.exec(
@@ -98,24 +101,29 @@ export class Budget {
       .update(`${Math.floor(this.now() / DAY)}:${ip}`)
       .digest("hex");
     this.debit([
-      ["requests", 300, MINUTE],
-      [`client:${fingerprint}`, 30, MINUTE],
+      ["requests", 1200, MINUTE],
+      [`client:${fingerprint}`, 300, MINUTE],
       ...(ticker ? [[`ticker:${fingerprint}`, 20, MINUTE]] : []),
     ]);
   }
 
-  launch(operation, scope) {
-    // Launch admission is deliberately one shared allowance across launchpads.
-    // Callers cannot create a new quota namespace with user-controlled input.
-    if (operation !== "prepare" || scope !== undefined)
-      throw new ServiceError("invalid_budget_operation");
-    this.debit([
-      ["launch-prepare", 3, MINUTE],
-      ["launch-prepare", 30, DAY],
-    ]);
+  withLaunch(load) {
+    return this.launchScope.run(true, load);
+  }
+
+  launch(operation, pad = "shared") {
+    this.debit([[`launch-${operation}:${pad}`, LAUNCH_LIMITS[operation], MINUTE]]);
   }
 
   upstream(provider, units = 1) {
+    // Launch preparation/recovery must not inherit a daily browsing quota.
+    // Keep durable short burst limits and the provider's own Retry-After.
+    if (this.launchScope.getStore()) {
+      return this.debit([
+        ["launch-upstream", LAUNCH_LIMITS.upstream, MINUTE],
+        [`launch-provider:${provider}`, provider === "rpc" ? LAUNCH_LIMITS.rpc : LAUNCH_LIMITS.provider, MINUTE],
+      ], units);
+    }
     this.debit(
       [
         // Gas estimates alone need 1,728 RPC units per active day. Leave room for

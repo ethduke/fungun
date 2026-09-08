@@ -16,6 +16,7 @@ const config = () => ({
   registry: address("1"),
   codeHash: keccak256(bytecode),
   longQuotes: new Set([address("2")]),
+  longLaunch: { profile: { quotes: [{ id: "long-MOON" }] } },
 });
 const quote = (overrides = {}) => ({
   address: address("2"),

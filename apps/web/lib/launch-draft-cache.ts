@@ -97,13 +97,13 @@ function selection(value: unknown): LaunchDraft['selection'] {
     !record(value) ||
     !isWebviewChain(Number(value.chainId)) ||
     !Array.isArray(value.destinations) ||
-    value.destinations.length !== 3
+    ![3, 4, 5].includes(value.destinations.length)
   )
     return invalid();
   const destinations: Destination[] = value.destinations.map((item) => {
     if (
       !record(item) ||
-      !['long', 'o1', 'longbow'].includes(String(item.id)) ||
+      !['long', 'o1', 'longbow', 'stonks', 'pons'].includes(String(item.id)) ||
       typeof item.selected !== 'boolean' ||
       ![4663, 8453].includes(Number(item.chainId)) ||
       typeof item.chainId !== 'number' ||
@@ -124,7 +124,10 @@ function selection(value: unknown): LaunchDraft['selection'] {
       editableMetadata: item.editableMetadata,
     };
   });
-  if (new Set(destinations.map((item) => item.id)).size !== 3) return invalid();
+  if (new Set(destinations.map((item) => item.id)).size !== destinations.length) return invalid();
+  if (!destinations.some(item => item.id === 'stonks')) destinations.push({ ...DEFAULT_DESTINATIONS.find(item => item.id === 'stonks')! });
+  if (!destinations.some(item => item.id === 'pons')) destinations.push({ ...DEFAULT_DESTINATIONS.find(item => item.id === 'pons')! });
+  if (destinations.length !== 5) return invalid();
   return { chainId: Number(value.chainId) as ChainId, destinations };
 }
 
@@ -236,17 +239,10 @@ export async function draftArtworkKey(
 
 /** Content identity survives object-URL changes and isolates accounts and launch destinations. */
 export async function launchRecoveryScope(wallet: string, pairId: string,
-  draft: Pick<LaunchDraft, 'name' | 'ticker' | 'description'>, image: Blob,
-  editableMetadata?: boolean) {
-  const identity: unknown[] = [
-    4663, wallet.toLowerCase(), pairId, await draftArtworkKey(draft, image),
-  ];
-  // Long scopes retain their original byte-for-byte identity. O1 metadata
-  // authority changes the resulting contract and therefore needs its own
-  // recovery record even when every visible draft field is unchanged.
-  if (pairId === 'native' || /^rwa-[a-f0-9]{24}$/.test(pairId))
-    identity.push(editableMetadata === true);
-  return sha256(new TextEncoder().encode(JSON.stringify(identity)));
+  draft: Pick<LaunchDraft, 'name' | 'ticker' | 'description'>, image: Blob, chainId: ChainId = 4663) {
+  return sha256(new TextEncoder().encode(JSON.stringify([
+    chainId, wallet.toLowerCase(), pairId, await draftArtworkKey(draft, image),
+  ])));
 }
 
 export async function encodeLaunchDraft(

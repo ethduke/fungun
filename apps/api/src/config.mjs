@@ -1,9 +1,12 @@
-import { readO1LiveConfig } from './o1-live.mjs';
+import { readStonksConfig } from './stonks-live.mjs';
+import { readO1LiveConfig, readO1BaseLiveConfig } from "./o1-live.mjs";
+import { readPonsFeeProfile } from "./pons-fees.mjs";
+import { readPonsLiveConfig } from "./pons-live.mjs";
 import { readLongLiveConfig } from "./long-live.mjs";
 import { resolve } from "node:path";
 import { isAddress, isHex, size } from "viem";
 import { ServiceError } from "./errors.mjs";
-import { readFeeContracts } from "./fee-contracts.mjs";
+import { readRuntimeFeeContracts } from "./o1-fee-profiles.mjs";
 
 export function readConfig(env = process.env) {
   const { O1_API_KEY: o1Key = "" } = env;
@@ -51,14 +54,19 @@ export function readConfig(env = process.env) {
   if (
     (registry && !isAddress(registry)) ||
     (codeHash && (!isHex(codeHash) || size(codeHash) !== 32)) ||
-    longQuotes.length > 100 ||
+    longQuotes.length > 512 ||
     longQuotes.some((value) => !isAddress(value))
   )
     throw new ServiceError("invalid_long_configuration");
   const longLaunch = readLongLiveConfig(env);
   return {
+    stonksLaunch: readStonksConfig(env),
     longLaunch,
+    ponsLaunch: readPonsLiveConfig(env),
+    ponsFees: readPonsFeeProfile(env.PONS_FEE_PROFILE_JSON),
+    longbowLaunch: readLongLiveConfig(env, "longbow"),
     o1Launch: readO1LiveConfig(env, longLaunch),
+    o1BaseLaunch: readO1BaseLiveConfig(env),
     production,
     origin,
     databasePath,
@@ -71,9 +79,9 @@ export function readConfig(env = process.env) {
     rpcBatchRequests: rpcBatchRequests !== "false",
     feesEnabled: env.READ_FEES === "true",
     claimsEnabled: env.WALLET_CLAIMS === "true",
-    feeContracts: readFeeContracts(env.FEE_CONTRACTS_JSON || undefined),
+    feeContracts: readRuntimeFeeContracts(env.FEE_CONTRACTS_JSON || undefined),
     registry,
     codeHash,
-    longQuotes: new Set(longQuotes.map((value) => value.toLowerCase())),
+    longQuotes: new Set(longLaunch ? longLaunch.profile.quotes.map(q => q.token.address) : longQuotes.map((value) => value.toLowerCase())),
   };
 }

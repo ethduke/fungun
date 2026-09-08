@@ -1,8 +1,9 @@
 import { isAddress, zeroAddress } from 'viem';
+import { IPFS_PROFILE, IPFS_SCHEMA, ipfsContentId, ipfsMetadata } from './ipfs-content.ts';
 
 export const ASSET_IMAGE_LIMIT = 2 * 1024 * 1024;
 export const ASSET_BODY_LIMIT = Math.ceil(ASSET_IMAGE_LIMIT / 3) * 4 + 16384;
-export type AssetDraft = { name: string; ticker: string; description: string };
+export type AssetDraft = { name: string; ticker: string; description: string; launchpad?: 'longbow' };
 export type AssetIpfs = {
   profile: 'pinata-v1-256k';
   schema: 'long-ipfs-v1';
@@ -166,10 +167,11 @@ export function objectFields(
   );
 }
 export function assetDraft(value: unknown): AssetDraft {
-  if (!objectFields(value, ['name', 'ticker', 'description']))
+  if (!objectFields(value, ['name', 'ticker', 'description']) && !objectFields(value, ['name', 'ticker', 'description', 'launchpad']))
     throw new AssetError('invalid_launch_details');
-  const { name, ticker, description } = value;
+  const { name, ticker, description, launchpad } = value;
   if (
+    (launchpad !== undefined && launchpad !== 'longbow') ||
     typeof name !== 'string' ||
     !name.trim() ||
     Array.from(name).length > 50 ||
@@ -181,7 +183,7 @@ export function assetDraft(value: unknown): AssetDraft {
     /[\p{Cc}\p{Cf}]/u.test(description.replace(/\n/g, ''))
   )
     throw new AssetError('invalid_launch_details');
-  return { name: name.trim(), ticker, description: description.trim() };
+  return { name: name.trim(), ticker, description: description.trim(), ...(launchpad ? { launchpad } : {}) };
 }
 export function assetWallet(value: unknown): string {
   if (
@@ -357,7 +359,6 @@ export async function validateAssetPreview(
     description: draft.description, image: imageUrl }));
   let ipfs: AssetIpfs | undefined;
   if (Object.hasOwn(raw, 'ipfs')) {
-    const { IPFS_PROFILE, IPFS_SCHEMA, ipfsContentId, ipfsMetadata } = await import('./ipfs-content.ts');
     const suppliedIpfs = raw.ipfs;
     if (!objectFields(suppliedIpfs, ['profile', 'schema', 'imageCid', 'metadataCid'])
       || suppliedIpfs.profile !== IPFS_PROFILE || suppliedIpfs.schema !== IPFS_SCHEMA)

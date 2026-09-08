@@ -1,3 +1,5 @@
+import { StonksFees } from './stonks-fees.mjs';
+import { PonsFees } from "./pons-fees.mjs";
 import { createHmac, randomBytes } from "node:crypto";
 import { encodeFunctionData, serializeTransaction, zeroAddress } from "viem";
 import { ServiceError } from "./errors.mjs";
@@ -32,7 +34,8 @@ const view = (address, abi, functionName, args, from) => ({
 });
 
 const profileKey = (config, padId) =>
-  isLockedPoolPad(padId) ? JSON.stringify(config.feeContracts[padId]) : "";
+  padId === "pons" ? JSON.stringify(config.ponsFees) :
+  padId === 'stonks' ? JSON.stringify(config.stonksLaunch?.profile) : isLockedPoolPad(padId) ? JSON.stringify(config.feeContracts[padId]) : "";
 
 function lockedProfile(config, position) {
   const profile = config.feeContracts[position.kind];
@@ -138,8 +141,10 @@ export class Fees {
     this.upstream = upstream;
     this.now = now;
     this.rpc = rpc;
+    this.pons = new PonsFees(config, rpc);
     this.usd = new FeeUsd(upstream, now);
     this.cache = new ReadCache(now, 64);
+    this.stonks = new StonksFees(config, rpc, upstream, this.cache);
     this.preflights = new ReadCache(now, 32);
     this.handles = new Map();
     this.cursors = new Map();
@@ -166,6 +171,7 @@ export class Fees {
       id,
       target: position.target,
       ...(position.escrowVersion ? { escrowVersion: position.escrowVersion } : {}),
+      ...(position.kind === 'stonks' ? { collectionToken: position.collectionToken, claimMode: position.claimMode } : {}),
       payouts: position.payouts,
       verification: position.verification,
       claimable: position.claimable,
@@ -207,10 +213,10 @@ export class Fees {
 
   async list(input) {
     const { address, chainId, padId } = input;
-    if (!["o1", "long", "longbow"].includes(padId) || (isLockedPoolPad(padId) && chainId !== 4663))
+    if (!["o1", "long", "longbow", "pons", "stonks"].includes(padId) || (padId === 'stonks' && chainId !== 8453) || ((isLockedPoolPad(padId) || padId === "pons") && chainId !== 4663))
       throw new ServiceError("invalid_request", 400);
-    const coverage =
-      padId === "o1"
+    const coverage = padId === "pons" ? "configured_escrow" :
+      ['o1', 'stonks'].includes(padId)
         ? "wallet_index"
         : this.config.feeContracts[padId]?.discovery
           ? "beneficiary_events"
@@ -226,7 +232,10 @@ export class Fees {
       positions: [],
       expiresAt: this.now() + TTL,
     };
+    if (padId === 'stonks' && (!this.config.stonksLaunch || !this.config.baseRpcUrl)) return unavailable;
     if (!this.config.feesEnabled) return { ...unavailable, reason: "fees_disabled" };
+    if (padId === "pons" && !this.config.ponsFees) return { ...unavailable, reason: "contracts_not_configured" };
+    if (padId === "pons" && !this.config.rpcUrl) return { ...unavailable, reason: "provider_not_configured" };
     if ((padId === "o1" && !this.config.o1Key) || (isLockedPoolPad(padId) && !this.config.rpcUrl))
       return { ...unavailable, reason: "provider_not_configured" };
     if (
@@ -242,9 +251,9 @@ export class Fees {
         withinReadDeadline(async () => {
           const state = this.cursor(input);
           const result =
-            padId === "o1"
+            padId === "pons" ? await this.pons.list(address) : padId === "o1"
               ? await this.o1(address, chainId, state)
-              : await this.long(address, state, padId);
+              : padId === 'stonks' ? await this.stonks.list(address, state) : await this.long(address, state, padId);
           return {
             address,
             chainId,
@@ -474,6 +483,7 @@ export class Fees {
       throw new ServiceError("quote_expired", 409);
     if (!handle.position.claimable) throw new ServiceError("contract_unverified", 409);
     if (isLockedPoolPad(handle.position.kind)) lockedProfile(this.config, handle.position);
+    if (handle.position.kind === "pons") this.pons.validatePosition(handle.position);
     return this.preflights.get(`claim:${address}:${positionId}`, 10_000, () =>
       withinReadDeadline(async () => {
         let position = handle.position;
@@ -481,7 +491,11 @@ export class Fees {
         const block = await this.rpc.block(chainId);
         let data;
         let escrowVersion;
-        if (isLockedPoolPad(position.kind)) {
+        if (position.kind === "pons") {
+          ({ position, data } = await this.pons.prepare(position, block));
+        } else         if (position.kind === 'stonks') {
+          ({ position, data } = await this.stonks.prepare(position, block));
+        } else if (isLockedPoolPad(position.kind)) {
           const profile = lockedProfile(this.config, position);
           await this.rpc.verify(
             chainId,
@@ -549,6 +563,8 @@ export class Fees {
         ]);
         if (typeof simulation !== "string" || !/^0x(?:[\da-f]{2})*$/i.test(simulation))
           throw new ServiceError("invalid_response");
+        if (position.kind === "pons" && (!/^0x[\da-f]{64}$/i.test(simulation) || BigInt(simulation) !== BigInt(position.payouts[0].claimableRaw)))
+          throw new ServiceError("invalid_response");
         const gas = rpcNumber(gasHex);
         const gasLimit = (gas * 120n + 99n) / 100n;
         const gasPrice = rpcNumber(priceHex);
@@ -593,7 +609,8 @@ export class Fees {
           address,
           target: position.target,
           data,
-          poolId: position.poolId,
+          ...(position.kind !== 'stonks' ? { poolId: position.poolId } : {}),
+          ...(position.kind === 'stonks' ? { collectionToken: position.collectionToken, claimMode: position.claimMode } : {}),
           payouts: position.payouts,
           value: "0",
           gas: gasLimit.toString(),

@@ -869,3 +869,37 @@ await test('a hung wallet read times out after 15 seconds and retries once with 
     });
   }
 });
+
+await test('Pons exact-amount claims reject changed currency, amount, chain and unrelated receipts', async () => {
+  const { ponsClaimAbi, parseFees } = await import('./fee-service.ts');
+  for (const asset of [addr('0'), currency]) {
+    const pons: ClaimQuote = { ...quote(), kind: 'pons', chainId: 4663,
+      payouts: [{ asset, symbol: asset === addr('0') ? 'ETH' : 'TEST', decimals: 18, claimableRaw: '100' }],
+      data: asset === addr('0')
+        ? encodeFunctionData({ abi: ponsClaimAbi, functionName: 'claim', args: [100n] })
+        : encodeFunctionData({ abi: ponsClaimAbi, functionName: 'claimToken', args: [asset, 100n] }),
+    };
+    assert.equal(validateClaim(pons), pons);
+    for (const change of [{ chainId: 8453 }, { data: `${pons.data}00` }, { value: '1' }, { poolId: hash }, { payouts: [{ ...pons.payouts[0], claimableRaw: '101' }] }, { payouts: [{ ...pons.payouts[0], asset: addr('3') }] }, { escrowVersion: 'legacy' }])
+      assert.throws(() => validateClaim({ ...pons, ...change }), /invalid_response/);
+    const eventName = asset === addr('0') ? 'Claimed' : 'ClaimedToken';
+    const log = { address: target, topics: encodeEventTopics({ abi: ponsClaimAbi, eventName, args: { recipient: owner, ...(eventName === 'ClaimedToken' ? { token: asset } : {}) } }) as Hash[], data: encodeAbiParameters([{ type: 'uint256' }], [100n]) };
+    const transfer = { address: asset, topics: encodeEventTopics({ abi: ponsClaimAbi, eventName: 'Transfer', args: { from: target, to: owner } }) as Hash[], data: encodeAbiParameters([{ type: 'uint256' }], [100n]) };
+    const proof = { ...receipt(), logs: asset === addr('0') ? [log] : [log, transfer] };
+    if (asset !== addr('0')) {
+      assert.equal(receiptPayouts({ ...proof, logs: [log] }, pons), null);
+      assert.equal(receiptPayouts({ ...proof, logs: [log, { ...transfer, data: encodeAbiParameters([{ type: 'uint256' }], [90n]) }] }, pons)?.[0].claimableRaw, '90');
+    }
+    assert.equal(receiptPayouts(proof, pons)?.[0].claimableRaw, '100');
+    assert.equal(receiptPayouts({ ...proof, from: addr('b') }, pons), null);
+    assert.equal(receiptPayouts({ ...proof, logs: [{ ...log, address: addr('b') }] }, pons), null);
+    assert.equal(receiptPayouts({ ...proof, logs: [{ ...log, data: encodeAbiParameters([{ type: 'uint256' }], [101n]) }] }, pons), null);
+    assert.equal(receiptPayouts({ ...proof, logs: [log, log] }, pons), null);
+    assert.equal(receiptPayouts(receipt(), pons), null);
+    const source = { address: owner, chainId: 4663, padId: 'pons', coverage: 'configured_escrow', status: 'partial', nextCursor: null, expiresAt: 100,
+      positions: [{ id: pons.positionId, target, payouts: pons.payouts, verification: 'live', claimable: true }] };
+    assert.equal(parseFees(source, owner, 4663, 'pons'), source);
+    assert.throws(() => parseFees({ ...source, status: 'ready' }, owner, 4663, 'pons'), /invalid_response/);
+    assert.throws(() => parseFees({ ...source, coverage: 'wallet_index' }, owner, 4663, 'pons'), /invalid_response/);
+  }
+});

@@ -41,11 +41,12 @@ export function normalizeLaunchDetails(input) {
     !input ||
     typeof input !== "object" ||
     Array.isArray(input) ||
-    Object.keys(input).some((key) => !["name", "ticker", "description"].includes(key))
+    Object.keys(input).some((key) => !["name", "ticker", "description", "launchpad"].includes(key))
   )
     throw new ServiceError("invalid_launch_details", 400);
   const { name, ticker, description = "" } = input;
   if (
+    (input.launchpad !== undefined && input.launchpad !== "longbow") ||
     typeof name !== "string" ||
     !name.trim() ||
     Array.from(name).length > 50 ||
@@ -57,7 +58,7 @@ export function normalizeLaunchDetails(input) {
     /[\p{Cc}\p{Cf}]/u.test(description.replace(/\n/g, ""))
   )
     throw new ServiceError("invalid_launch_details", 400);
-  return Object.freeze({ name: name.trim(), ticker, description: description.trim() });
+  return Object.freeze({ name: name.trim(), ticker, description: description.trim(), ...(input.launchpad ? { launchpad: input.launchpad } : {}) });
 }
 
 export function validatePublishedUri(uri, kind, publicOrigin) {

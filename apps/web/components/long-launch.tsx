@@ -4,13 +4,14 @@ import { useEffect, useLayoutEffect, useRef, useState, useReducer } from 'react'
 import { Button } from '@/components/ui/button';
 import { BulletProgress, LaunchGun } from '@/components/launch-motion';
 import { runLaunchFlow } from '@/lib/launch-flow';
+import { isOutdatedPage } from '@/lib/page-version';
 import { watchLaunch, confirmedLaunchTokenUrl, type LaunchReceipt } from '@/lib/long-recovery';
 import { LaunchSuccessDialog } from '@/components/launch-success-dialog';
 import { launchActivity } from '@/lib/launch-progress';
 import { launchFeedback, emptyLaunchFeedback } from '@/lib/launch-feedback';
 import { useConnectedAccount } from '@/lib/account-context';
 import { useDraftCache } from '@/lib/launch-draft';
-import { LONG_PAIRS, launchpadName, type PadId } from '@/lib/launch-model';
+import { chainName, launchpadName, type ChainId } from '@/lib/launch-model';
 import {
   formatEth,
   formatUsd,
@@ -19,11 +20,11 @@ import {
   type UsdRate,
 } from '@/lib/launch-cost';
 import {
+  launchpadForPair,
+  isEnabledLaunchPair,
   launchMessage,
   launchRequest,
   LaunchError,
-  formatLaunchTokenAmount,
-  isO1LaunchPair,
   readLaunchRecovery,
   saveLaunchRecovery,
   prepareLongWallet,
@@ -43,11 +44,20 @@ import {
 const wei = (value: string) => BigInt(value);
 export type LongCosts = { quote: LaunchCostQuote; usd: UsdRate } | null;
 type LongLaunchProps = {
+  chainId: ChainId;
   enabled: boolean;
   ready: boolean;
-  pairId?: string;
-  padId?: PadId;
   editableMetadata?: boolean;
+  showPadName?: boolean;
+  buttonLabel?: string;
+  autoStart?: boolean;
+  autoShowSuccess?: boolean;
+  onStart?: () => void;
+  onPause?: () => void;
+  onConfirmed?: () => void;
+  locked?: boolean;
+  onBusy?: (busy: boolean) => void;
+  pairId?: string;
   name: string;
   ticker: string;
   description: string;
@@ -58,16 +68,14 @@ type LongLaunchProps = {
 export function LongLaunch(props: LongLaunchProps) {
   const { address } = useConnectedAccount();
   const { hydrated } = useDraftCache();
-  const { name, ticker, description, image, pairId, padId, editableMetadata } = props;
+  const { chainId, name, ticker, description, image, pairId, editableMetadata = false } = props;
   const identity = JSON.stringify([
     address?.toLowerCase(),
     name,
     ticker,
     description,
     image?.url,
-    pairId,
-    padId,
-    padId === 'o1' ? editableMetadata === true : null,
+    pairId, editableMetadata, chainId,
   ]);
   const [resolved, setResolved] = useState<{
     identity: string;
@@ -81,10 +89,9 @@ export function LongLaunch(props: LongLaunchProps) {
       .then((blob) =>
         launchRecoveryScope(
           address,
-          pairId,
+          editableMetadata ? `${pairId}:editable` : pairId,
           { name, ticker, description },
-          blob,
-          padId === 'o1' ? editableMetadata === true : undefined,
+          blob, chainId,
         ),
       )
       .then((scope) => {
@@ -97,7 +104,7 @@ export function LongLaunch(props: LongLaunchProps) {
     return () => {
       active = false;
     };
-  }, [hydrated, address, name, ticker, description, image, pairId, padId, editableMetadata, identity]);
+  }, [hydrated, address, name, ticker, description, image, pairId, editableMetadata, chainId, identity]);
   if (!props.enabled) return null;
   if (!address || !image || !pairId || !hydrated)
     return <ScopedLongLaunch key={identity} {...props} recoveryScope="" />;
@@ -105,7 +112,7 @@ export function LongLaunch(props: LongLaunchProps) {
     return (
       <div className="long-launch">
         <Button className="launch-button" disabled>
-          Launch coin
+          {props.buttonLabel ?? 'Launch coin'}
           <LaunchGun />
         </Button>
         {resolved?.identity === identity && resolved.error && (
@@ -124,11 +131,20 @@ export function LongLaunch(props: LongLaunchProps) {
   );
 }
 function ScopedLongLaunch({
+  chainId,
   enabled,
   ready,
+  editableMetadata = false,
+  showPadName = false,
+  buttonLabel,
+  autoStart = false,
+  autoShowSuccess = true,
+  onStart,
+  onPause,
+  onConfirmed,
+  locked = false,
+  onBusy,
   pairId,
-  padId,
-  editableMetadata,
   name,
   ticker,
   description,
@@ -138,7 +154,11 @@ function ScopedLongLaunch({
   recoveryScope,
 }: LongLaunchProps & { recoveryScope: string }) {
   const account = useConnectedAccount();
-  const padName = padId ? launchpadName(padId) : 'launchpad';
+  const padId = launchpadForPair(pairId);
+  const padName = launchpadName(padId);
+  const explorer = chainId === 8453 ? 'https://basescan.org' : 'https://robinhoodchain.blockscout.com';
+  const launchLabel = buttonLabel ?? (showPadName ? `Launch on ${padName}` : "Launch coin");
+  const draft = { name, ticker, description, ...(padId === "longbow" ? { launchpad: "longbow" as const } : {}) };
   const { published, cachePublication, hydrated } = useDraftCache();
   const [plan, setPlan] = useState<LongPlan | null>(null);
   const [planContext, setPlanContext] = useState('');
@@ -146,6 +166,7 @@ function ScopedLongLaunch({
   const [blocked, setBlocked] = useState(true);
   const [busy, setBusy] = useState('');
   const [notice, setNotice] = useState('');
+  const [pageOutdated, setPageOutdated] = useState(false);
   const [feedback, updateFeedback] = useReducer(launchFeedback, emptyLaunchFeedback);
   const error = feedback.error || feedback.fundingError;
   const feedbackAlert = (feedback.fundingError || feedback.error) && (
@@ -158,6 +179,8 @@ function ScopedLongLaunch({
   const [expired, setExpired] = useState(false);
   const [cooldown, setCooldown] = useState(0);
   const flight = useRef(false);
+  const autoStarted = useRef(false);
+  const reportedReceipt = useRef('');
   const current = useRef(contextKey);
   // The intended network switch is allowed; edited drafts, accounts or destinations cancel the flow.
   const intentKey = JSON.stringify([
@@ -166,9 +189,7 @@ function ScopedLongLaunch({
     description,
     image?.url,
     account.address?.toLowerCase(),
-    pairId,
-    padId,
-    padId === 'o1' ? editableMetadata === true : null,
+    pairId, editableMetadata, chainId,
     ready,
     enabled,
   ]);
@@ -246,13 +267,11 @@ function ScopedLongLaunch({
   }, [recovery, busy, cooldown, recoveryScope]);
   const retryable =
     receipt?.id === recovery?.id && receipt?.status === 'retryable';
-  const eligiblePair = padId === 'long'
-    ? LONG_PAIRS.some((pair) => pair.id === pairId)
-    : padId === 'o1' && isO1LaunchPair(pairId);
+  const eligiblePair = isEnabledLaunchPair(pairId);
   const isReady =
     ready &&
     !!account.address &&
-    account.chainId === 4663 &&
+    account.chainId === chainId &&
     !!account.sendLong &&
     hydrated &&
     !!image &&
@@ -267,7 +286,7 @@ function ScopedLongLaunch({
       return;
     }
     if (
-      flight.current ||
+      flight.current || locked ||
       !ready ||
       !recoveryScope ||
       !image ||
@@ -278,21 +297,23 @@ function ScopedLongLaunch({
     )
       return;
     if (!eligiblePair) {
-      updateFeedback({ type: 'message', message: 'Choose a Long pairing to launch.' });
+      updateFeedback({ type: 'message', message: 'Choose a pairing to launch.' });
       return;
     }
     const walletAddress = account.address;
     flight.current = true;
+    onStart?.();
+    onBusy?.(true);
     setBusy('Preparing launch…');
     updateFeedback({ type: 'clear-error' });
     setNotice('');
     const intent = intentKey;
     const isCurrent = () => mounted.current && currentIntent.current === intent;
     try {
-      if (account.chainId !== 4663) {
+      if (account.chainId !== chainId) {
         if (!account.ensureChain) throw new LaunchError('wrong_chain');
         setBusy('Switch network in wallet…');
-        await account.ensureChain(account.address, 4663, isCurrent);
+        await account.ensureChain(account.address, chainId, isCurrent);
         if (!isCurrent()) return;
       }
       const blob = await draftImageBlob(image);
@@ -300,11 +321,12 @@ function ScopedLongLaunch({
       await runLaunchFlow({
         isCurrent,
         onProgress: setBusy,
+        availability: () => launchRequest('launch-estimate', { chainId, pairId, ...(padId === 'pons' ? { wallet: account.address } : {}) }),
         artwork: () =>
           ensureLaunchArtwork({
             bytes: imageBytes,
             wallet: walletAddress,
-            draft: { name, ticker, description },
+            draft,
             origin: location.origin,
             storage: localStorage,
             cached: published,
@@ -315,18 +337,17 @@ function ScopedLongLaunch({
           }),
         quote: async (artwork) => {
           await cachePublication(artwork);
-          setBusy('Estimating launch fees…');
           const input: LaunchInput = {
-            chainId: 4663,
+            chainId,
             wallet: walletAddress,
-            draft: { name, ticker, description },
+            draft,
             pairId,
+            ...(padId === 'o1' ? { editableMetadata } : {}),
             publication: {
               id: artwork.id,
               imageHash: artwork.imageHash,
               metadataHash: artwork.metadataHash,
             },
-            ...(padId === 'o1' ? { editableMetadata: editableMetadata === true } : {}),
           };
           const prepared = await prepareLongWallet(input, artwork);
           if (prepared.recovery) return { recovery: prepared.recovery };
@@ -342,13 +363,13 @@ function ScopedLongLaunch({
           onCosts({
             quote: {
               contextKey: context,
-              chainId: 4663,
+              chainId,
               quotedAt: observed,
               expiresAt: checked.deadline,
               nativeOnly: true,
               pads: [
                 {
-                  id: padId!,
+                  id: padId,
                   launchFeeSource: checked.launchFeeSource,
                   steps: [longWalletCostStep(checked)],
                 },
@@ -372,6 +393,8 @@ function ScopedLongLaunch({
         },
       });
     } catch (e) {
+      onPause?.();
+      if (isCurrent() && isOutdatedPage(e)) setPageOutdated(true);
       if (isCurrent()) updateFeedback({ type: 'failure', error: e });
       setCooldown(
         e instanceof AssetError
@@ -383,6 +406,7 @@ function ScopedLongLaunch({
       );
     } finally {
       flight.current = false;
+      onBusy?.(false);
       setBusy('');
     }
   }
@@ -418,6 +442,31 @@ function ScopedLongLaunch({
     saveLaunchRecovery(saved, recoveryScope);
     setNotice('');
   }
+  useEffect(() => {
+    if (!autoStart) { autoStarted.current = false; return; }
+    if (autoStarted.current || blocked || busy || cooldown || (recovery && !retryable)) return;
+    if (!ready || !eligiblePair || !account.address || !image || !hydrated || locked) {
+      onPause?.();
+      return;
+    }
+    let active = true;
+    queueMicrotask(() => {
+      if (!active) return;
+      autoStarted.current = true;
+      void startLaunch();
+    });
+    return () => { active = false; };
+  });
+  useEffect(() => {
+    if (!receipt || receipt.id !== recovery?.id || reportedReceipt.current === receipt.id) return;
+    if (receipt.status === 'confirmed') {
+      reportedReceipt.current = receipt.id;
+      onConfirmed?.();
+    } else if (receipt.status === 'failed') {
+      reportedReceipt.current = receipt.id;
+      onPause?.();
+    }
+  }, [receipt, recovery?.id, onConfirmed, onPause]);
   if (!enabled && !recovery) return null;
   const usd: UsdRate | undefined = plan
     ? {
@@ -437,19 +486,16 @@ function ScopedLongLaunch({
   const terminal =
     currentReceipt && ['confirmed', 'failed'].includes(currentReceipt.status);
   const transactionHash = currentReceipt?.hash || recovery?.hash;
-  const tokenUrl = padId ? confirmedLaunchTokenUrl(padId, currentReceipt) : null;
-  const pairingGuidance = padId === 'o1'
-    ? 'Choose an O1 pairing to launch.'
-    : 'Choose a Long pairing to launch.';
+  const tokenUrl = confirmedLaunchTokenUrl(padId, currentReceipt, chainId);
   const guidance = !enabled
-    ? pairingGuidance
+    ? 'Choose a launchpad and pairing to launch.'
     : account.address && !isReady
       ? !eligiblePair
-        ? pairingGuidance
+        ? 'Choose a pairing to launch.'
         : !ready
           ? 'Review your coin details above.'
-          : account.chainId !== 4663
-            ? 'Your wallet will switch to Robinhood Chain.'
+          : account.chainId !== chainId
+            ? `Your wallet will switch to ${chainName(chainId)}.`
             : ''
       : '';
   return (
@@ -458,7 +504,7 @@ function ScopedLongLaunch({
         <div className="launch-recovery">
           {activity.phase === 'confirmed' && (
             <output className="launch-confirmed" data-compatible={!!tokenUrl} key={recovery.id}>
-              <strong>{tokenUrl ? 'Coin deployed' : padId === 'long' ? 'Token deployed · Long incompatible' : `Token deployed · ${padName} link unavailable`}</strong>
+              <strong>{tokenUrl ? (showPadName ? `Deployed on ${padName}` : 'Coin deployed') : 'Token deployed · Long incompatible'}</strong>
               <LaunchGun confirmed />
             </output>
           )}
@@ -468,10 +514,11 @@ function ScopedLongLaunch({
               name={name}
               ticker={ticker}
               imageUrl={image.url}
-              tokenUrl={tokenUrl ?? `https://robinhoodchain.blockscout.com/address/${currentReceipt.asset}`}
+              tokenUrl={tokenUrl ?? `${explorer}/address/${currentReceipt.asset}`}
               longCompatible={!!tokenUrl}
               padName={padName}
-              transactionUrl={`https://robinhoodchain.blockscout.com/tx/${currentReceipt.hash}`}
+              autoOpen={autoShowSuccess}
+              transactionUrl={`${explorer}/tx/${currentReceipt.hash}`}
             />
           )}
           {!terminal && (
@@ -479,7 +526,7 @@ function ScopedLongLaunch({
               type="button"
               className="launch-button"
               disabled={
-                !!busy ||
+                !!busy || locked ||
                 !!cooldown ||
                 !retryable ||
                 !ready ||
@@ -490,10 +537,10 @@ function ScopedLongLaunch({
             >
               <span>
                 {busy
-                  ? 'Launching coin…'
+                  ? (showPadName ? `Launching on ${padName}…` : 'Launching coin…')
                   : retryable
-                    ? 'Launch coin'
-                    : 'Confirming launch…'}
+                    ? launchLabel
+                    : (showPadName ? `Confirming on ${padName}…` : 'Confirming launch…')}
               </span>
               <LaunchGun />
             </Button>
@@ -502,7 +549,7 @@ function ScopedLongLaunch({
           <div className="launch-recovery-links">
             {transactionHash && (
               <a
-                href={`https://robinhoodchain.blockscout.com/tx/${transactionHash}`}
+                href={`${explorer}/tx/${transactionHash}`}
                 target="_blank"
                 rel="noopener noreferrer"
               >
@@ -531,13 +578,16 @@ function ScopedLongLaunch({
             <details>
               <summary>Launch details</summary>
               <p>
-                {name} · ${ticker} · supply:{' '}
-                {formatLaunchTokenAmount(validPlan.review.totalSupply)} tokens ·
-                for sale: {formatLaunchTokenAmount(validPlan.review.tokensForSale)} tokens ·
-                creator allocation:{' '}
-                {formatLaunchTokenAmount(validPlan.review.creatorAllocation)} tokens ·{' '}
-                {validPlan.review.metadataMutable ? 'metadata updates allowed' : 'fixed metadata'}
+                {name} · ${ticker} · {Number(wei(validPlan.review.totalSupply) / 10n ** 18n).toLocaleString()} tokens · no creator allocation ·
+                {padId === 'stonks' ? 'launch details recorded on-chain' : validPlan.review.metadataMutable ? "editable metadata" : "fixed metadata"}
+                {padId === "longbow" && " · 1% Longbow allocation"}
+                {padId === "pons" && " · 0% creator tax · buybacks off"}
               </p>
+              {padId === 'stonks' && <p>
+                Creator share: {validPlan.terms!.creatorBps / 100}% of the 1% trading fee. Liquidity is locked.
+                {!validPlan.condition!.priceFresh && ' The stock price uses its saved anchor.'}
+                {' '}The opening price can change while wallet approval is pending. Cancel old wallet requests before retrying.
+              </p>}
               <p>
                 Maximum gas budget: {formatEth(wei(validPlan.maximumGasWei))} (
                 {formatUsd(wei(validPlan.maximumGasWei), usd, 0)}). Includes a
@@ -545,16 +595,15 @@ function ScopedLongLaunch({
               </p>
               <p>
                 Wallet: {validPlan.transaction.from.slice(0, 6)}…
-                {validPlan.transaction.from.slice(-4)} · value:{' '}
-                {formatEth(wei(validPlan.transaction.value))} · chain:
-                4663
+                {validPlan.transaction.from.slice(-4)} · launch fee: {formatEth(wei(validPlan.launchpadFeeWei))} · chain:
+                {chainId}
               </p>
               <a
-                href={`https://robinhoodchain.blockscout.com/address/${validPlan.transaction.to}?tab=contract`}
+                href={`${explorer}/address/${validPlan.transaction.to}?tab=contract`}
                 target="_blank"
                 rel="noopener noreferrer"
               >
-                Verified {padName} launch contract
+                Verified launch contract
               </a>
               <p>
                 Your wallet displays the full transaction. Gas and availability
@@ -566,20 +615,20 @@ function ScopedLongLaunch({
             type="button"
             className="launch-button"
             disabled={
-              !!busy ||
+              !!busy || locked ||
               !!cooldown ||
               blocked ||
               !hydrated ||
               (Boolean(account.address) &&
                 (!ready || !image || !eligiblePair))
             }
-            onClick={startLaunch}
+            onClick={pageOutdated ? () => location.reload() : startLaunch}
           >
             <span>
-              {busy
-                ? 'Launching coin…'
+              {pageOutdated ? 'Reload saved draft' : busy
+                ? (showPadName ? `Launching on ${padName}…` : 'Launching coin…')
                 : account.address
-                  ? 'Launch coin'
+                  ? launchLabel
                   : 'Connect wallet'}
             </span>
             <LaunchGun />

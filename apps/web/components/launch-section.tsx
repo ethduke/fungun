@@ -42,7 +42,8 @@ import {
 import {
   launchRequest,
   LaunchError,
-  isLongLaunchPair,
+  isEnabledLaunchPair,
+  launchMessage,
 } from '@/lib/long-wallet';
 import './launch-cost.css';
 import './launch-section.css';
@@ -78,18 +79,19 @@ export function LaunchSection({
   usdRate?: UsdRate | null;
   children?: ReactNode;
 }) {
-  const selectedPair = destinations.find((pad) => pad.id === 'long')?.pairId;
-  const estimatePair =
-    chainId === 4663 && isLongLaunchPair(selectedPair) ? selectedPair : null;
-  const supportsEstimate = !!estimatePair;
-  const [approximate, setApproximate] = useState<ApproximateLaunchCost | null>(
-    null,
-  );
-  const [estimateFailed, setEstimateFailed] = useState(false);
+  const estimatePairsKey = JSON.stringify(destinations.map(pad => pad.pairId).filter(isEnabledLaunchPair));
+  const estimatePairs: string[] = JSON.parse(estimatePairsKey);
+  const selectedPair = estimatePairs[0];
+  const supportsEstimate = estimatePairs.length > 0;
+  const [approximate, setApproximate] = useState<ApproximateLaunchCost[] | null>(null);
+  const [estimateFailure, setEstimateFailure] = useState<{ chainId: ChainId; pairs: string } | null>(null);
+  const estimateFailed = estimateFailure?.chainId === chainId && estimateFailure.pairs === estimatePairsKey;
+  const [unavailablePair, setUnavailablePair] = useState<{ chainId: ChainId; pairId: string; message: string } | null>(null);
   const [costTick, setCostTick] = useState(0);
   useEffect(() => {
-    if (!estimatePair) return;
-    const pairId = estimatePair;
+    const pairs: string[] = JSON.parse(estimatePairsKey);
+    if (!pairs.length) return;
+    let pairId = pairs[0];
     let stopped = false;
     let timer: ReturnType<typeof setTimeout>;
     async function refresh() {
@@ -99,23 +101,33 @@ export function LaunchSection({
       }
       let delay = 30000;
       try {
-        const started = performance.now();
-        const raw = await launchRequest('launch-estimate', {
-          chainId: 4663,
-          pairId,
-        });
-        const estimate = parseApproximateLaunchCost(raw, started, pairId);
-        if (estimate.expiresAt <= performance.now())
-          throw new Error('Estimate expired');
-        if (stopped) return;
-        setApproximate(estimate);
-        setEstimateFailed(false);
+        const estimates: ApproximateLaunchCost[] = [];
+        for (const pair of pairs) {
+          pairId = pair;
+          const started = performance.now();
+          const raw = await launchRequest('launch-estimate', { chainId, pairId });
+          if (stopped) return;
+          if (chainId === 8453 && !pairId.startsWith('stonks-')) {
+            if (raw.chainId !== chainId || raw.pairId !== pairId || raw.basis !== 'requires-calldata') throw new Error('Invalid Base estimate');
+            continue;
+          }
+          const estimate = parseApproximateLaunchCost(raw, started, pairId);
+          if (estimate.expiresAt <= performance.now()) throw new Error('Estimate expired');
+          estimates.push(estimate);
+        }
+        setApproximate(estimates);
+        setEstimateFailure(null);
+        setUnavailablePair(null);
         setCostTick(performance.now());
-        delay = Math.max(1000, estimate.expiresAt - performance.now() + 50);
+        delay = chainId === 8453 ? 300000 : Math.max(1000, Math.min(...estimates.map(e => e.expiresAt)) - performance.now() + 50);
       } catch (error) {
         if (stopped) return;
-        setEstimateFailed(true);
+        setEstimateFailure({ chainId, pairs: estimatePairsKey });
         setCostTick(performance.now());
+        if (error instanceof LaunchError && error.message === 'unsupported_pair') {
+          setUnavailablePair({ chainId, pairId, message: launchMessage(error) });
+          return;
+        }
         if (error instanceof LaunchError)
           delay = Math.max(delay, error.retryAfter * 1000);
       }
@@ -126,13 +138,13 @@ export function LaunchSection({
       stopped = true;
       clearTimeout(timer);
     };
-  }, [estimatePair]);
+  }, [estimatePairsKey, chainId]);
   const costNow = Math.max(now, costTick);
   useEffect(() => {
-    if (!approximate) return;
+    if (!approximate?.length) return;
     const timer = setTimeout(
       () => setCostTick(performance.now()),
-      Math.max(0, approximate.expiresAt - performance.now() + 1),
+      Math.max(0, Math.min(...approximate.map(e => e.expiresAt)) - performance.now() + 1),
     );
     return () => clearTimeout(timer);
   }, [approximate]);
@@ -159,10 +171,12 @@ export function LaunchSection({
     },
     costNow,
   );
+  const approximateQuotes = approximate?.length && approximate.every(e => e.chainId === chainId && estimatePairs.includes(e.pairId))
+    ? approximate.map(e => approximateLaunchQuote(e, costContextKey, costNow)) : [];
+  const allApproximate = approximateQuotes.length > 0 && approximateQuotes.every(q => q !== null);
   const fallbackCosts = calculateLaunchCosts(
-    supportsEstimate && approximate?.pairId === estimatePair
-      ? approximateLaunchQuote(approximate, costContextKey, costNow)
-      : null,
+    allApproximate ? { ...approximateQuotes[0]!, pads: approximateQuotes.flatMap(q => q!.pads),
+      expiresAt: Math.min(...approximateQuotes.map(q => q!.expiresAt)) } : null,
     {
       contextKey: costContextKey,
       chainId,
@@ -170,10 +184,10 @@ export function LaunchSection({
     },
     costNow,
   );
-  const useApproximate = !exactCosts.total && !!fallbackCosts.pads.long;
+  const useApproximate = !exactCosts.total && Object.keys(fallbackCosts.pads).length > 0;
   const costs = useApproximate ? fallbackCosts : exactCosts;
   const prefix = useApproximate
-    ? approximate?.basis === 'gas-limit'
+    ? approximate?.some(e => e.basis === 'gas-limit')
       ? 'Up to '
       : '≈ '
     : costs.total ? 'Up to ' : '';
@@ -194,10 +208,14 @@ export function LaunchSection({
   const hasUsd = usdTotal !== 'USD unavailable';
   const costMessage = !destinations.length
     ? 'Select a launchpad to see its fees.'
+    : unavailablePair?.chainId === chainId && unavailablePair.pairId === selectedPair
+      ? unavailablePair.message
+    : chainId === 8453 && !costs.total && !estimateFailed
+      ? 'Launch and network fees are calculated before wallet approval.'
     : useApproximate && !costs.total
-      ? 'Long gas is shown below. Estimates for other launchpads are unavailable.'
+      ? 'Available launch estimates are shown below.'
       : useApproximate
-        ? approximate?.basis === 'gas-limit'
+        ? approximate?.some(e => e.basis === 'gas-limit')
           ? 'Gas limit at the current gas price. Checked again before wallet approval.'
           : 'Approximate gas budget, including a 20% buffer. Checked again before wallet approval.'
         : !costs.total && supportsEstimate
@@ -251,7 +269,7 @@ export function LaunchSection({
         <div className="launch-destinations">
           {destinations.map((pad) => {
             const pairing =
-              (pad.id === 'longbow'
+              (pad.id === 'longbow' || pad.id === 'pons'
                 ? undefined
                 : catalog?.pads[pad.id]?.pairs.find(
                     (pair) => pair.id === pad.pairId,
@@ -287,7 +305,7 @@ export function LaunchSection({
                   ) : (
                     <span>
                       <LockKeyhole size={14} aria-hidden="true" />
-                      Immutable metadata
+                      {pad.id === 'stonks' ? 'Launch details recorded on-chain' : 'Immutable metadata'}
                     </span>
                   )}
                 </div>
@@ -332,6 +350,8 @@ export function LaunchSection({
             >
               {costs.total
                 ? `${prefix}${formatEthBudget(costs.total.totalWei)}`
+                : chainId === 8453 && !estimateFailed
+                  ? 'Calculated at launch'
                 : supportsEstimate &&
                     !estimateFailed &&
                     !fallbackCosts.pads.long
@@ -353,7 +373,7 @@ export function LaunchSection({
               <CollapsibleContent className="launch-fee-panel">
                 {destinations.map((pad) => {
                   const amount = costs.pads[pad.id];
-                  const feeSource = useApproximate && pad.id === 'long' ? approximate?.launchFeeSource
+                  const feeSource = useApproximate ? approximate?.find(estimate => estimate.pairId === pad.pairId)?.launchFeeSource
                     : costQuote?.pads.find(item => item.id === pad.id)?.launchFeeSource;
                   return (
                     <div key={pad.id} className="launch-fee-pad">
@@ -363,12 +383,13 @@ export function LaunchSection({
                           <dt>Launch fee</dt>
                           <dd>
                             {amount && feeSource
-                              ? <a href={`https://robinhoodchain.blockscout.com/address/${feeSource.contract}?tab=contract`}
+                              ? <a href={`${chainId === 8453 ? 'https://basescan.org' : 'https://robinhoodchain.blockscout.com'}/address/${feeSource.contract}`}
                                   target="_blank" rel="noopener noreferrer" title={`Verified contract fee at block ${feeSource.blockNumber}`}>
                                   {formatEth(amount.launchpadWei)} · Verified
                                 </a>
                               : amount ? formatEth(amount.launchpadWei)
-                              : pad.id === 'long' && supportsEstimate
+                              : chainId === 8453 && pad.id === 'o1' && !estimateFailed ? 'Calculated at launch'
+                              : isEnabledLaunchPair(pad.pairId) && supportsEstimate
                                 ? estimateFailed ? 'Unavailable' : 'Checking…'
                                 : 'Unavailable'}
                           </dd>
@@ -378,7 +399,9 @@ export function LaunchSection({
                           <dd>
                             {amount
                               ? `${prefix}${formatEthBudget(amount.networkWei)}`
-                              : supportsEstimate &&
+                              : chainId === 8453 && !estimateFailed
+                  ? 'Calculated at launch'
+                : supportsEstimate &&
                                   pad.id === 'long' &&
                                   !estimateFailed
                                 ? 'Estimating…'

@@ -1,4 +1,6 @@
 const operations = new Set([
+  'o1-token-image',
+  'token-image',
   'fomo',
   'catalog',
   'ticker',

@@ -1,5 +1,5 @@
 import { createConfig, custom } from 'wagmi';
-import { robinhood } from 'viem/chains';
+import { base, robinhood } from 'viem/chains';
 
 export function createPreviewConfig() {
   const offline = custom(
@@ -12,12 +12,12 @@ export function createPreviewConfig() {
   );
 
   return createConfig({
-    chains: [robinhood],
+    chains: [robinhood, base],
     connectors: [],
     multiInjectedProviderDiscovery: true,
     storage: null,
     ssr: false,
-    transports: { [robinhood.id]: offline },
+    transports: { [robinhood.id]: offline, [base.id]: offline },
   });
 }
 

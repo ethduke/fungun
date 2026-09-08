@@ -1,13 +1,14 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import { O1_ROBINHOOD_PAIRS, savedO1Pairs, selectableO1Pairs } from '../apps/web/lib/o1-markets.ts';
+import { BASE_PAIRS } from '../apps/web/lib/base-markets.ts';
 import { DEFAULT_DESTINATIONS, pairingName, validateDraft } from '../apps/web/lib/launch-model.ts';
 
 test('the complete saved Robinhood catalog is chain-bound and resolves every pairing label', () => {
   assert.equal(O1_ROBINHOOD_PAIRS.length, 194);
   assert.equal(new Set(O1_ROBINHOOD_PAIRS.map((p) => p.id)).size, 194);
   assert.equal(new Set(O1_ROBINHOOD_PAIRS.map((p) => p.symbol)).size, 194);
-  assert.deepEqual(savedO1Pairs(8453), []);
+  assert.deepEqual(savedO1Pairs(1), []);
   for (const pair of savedO1Pairs(4663)) {
     assert.match(pair.id, /^rwa-[a-f0-9]{24}$/);
     assert.equal(pairingName(pair.id), pair.symbol);
@@ -34,4 +35,34 @@ test('live catalogs extend and deduplicate the saved pairing choices', () => {
   assert.equal(pairs.length, O1_ROBINHOOD_PAIRS.length + 1);
   assert.deepEqual(pairs.at(-1), added);
   assert.deepEqual(selectableO1Pairs(4663, { status: 'ready', pairs: [] }), O1_ROBINHOOD_PAIRS);
+});
+
+
+test('Base shows only the ready O1 catalog, never saved or third-party choices', () => {
+  assert.deepEqual(savedO1Pairs(8453), []);
+  for (const catalog of [undefined, { status: 'unavailable', pairs: BASE_PAIRS }, { status: 'ready', pairs: [] }])
+    assert.deepEqual(selectableO1Pairs(8453, catalog), []);
+  const live = { status: 'ready', pairs: [BASE_PAIRS[0]] };
+  assert.deepEqual(selectableO1Pairs(8453, live), [BASE_PAIRS[0]]);
+  assert.deepEqual(selectableO1Pairs(8453, { ...live, pairs: [BASE_PAIRS[0], BASE_PAIRS[0]] }), [BASE_PAIRS[0]]);
+  for (const pair of BASE_PAIRS) assert.equal(pairingName(pair.id), pair.symbol);
+});
+
+test('Base choices follow registration removals and new entries without a saved union', () => {
+  const added = { id: 'rwa-111111111111111111111111', symbol: 'NEW' };
+  const live = { status: 'ready', pairs: [BASE_PAIRS[0], added] };
+  assert.deepEqual(selectableO1Pairs(8453, live), live.pairs);
+  assert.deepEqual(selectableO1Pairs(8453, { ...live, pairs: [added] }), [added]);
+});
+
+test('Base drafts require a current matching catalog and reject removed or stale selections', () => {
+  const draft = { name: 'Moon', ticker: 'MOON', description: '', hasImage: true };
+  const pair = BASE_PAIRS[0];
+  const destinations = [{ ...DEFAULT_DESTINATIONS[1], selected: true, chainId: 8453, route: 'rwa', pairId: pair.id }];
+  const catalog = { chainId: 8453, expiresAt: 200, pads: { o1: { status: 'ready', pairs: [pair] } } };
+  assert.deepEqual(validateDraft(draft, destinations, 8453, catalog, 100), {});
+  for (const invalid of [null, { ...catalog, chainId: 4663 }, { ...catalog, pads: { o1: { status: 'unavailable', pairs: [pair] } } }, { ...catalog, pads: { o1: { status: 'ready', pairs: [] } } }])
+    assert.ok(validateDraft(draft, destinations, 8453, invalid, 100).destinations);
+  assert.ok(validateDraft(draft, destinations, 8453, catalog, 200).destinations);
+  assert.deepEqual(validateDraft(draft, [{ ...destinations[0], route: 'standard', pairId: 'native' }], 8453, null, 100), {});
 });

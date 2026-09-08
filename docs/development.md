@@ -59,24 +59,30 @@ external reads default to disabled.
   first snapshot uses feed order rather than claiming historical crossing times.
 - COPY transfers the selected token's name and ticker into the launch form and
   jumps to the coin details immediately. It clears old artwork and invalidates
-  pending uploads so another token's image cannot carry over. The current public
-  source supplies no token image or metadata URL; artwork must be uploaded separately.
+  pending uploads so another token's image cannot carry over. Recognized Robinhood
+  O1 rows fetch artwork through O1's API; other Robinhood/Base rows try compatible
+  Long/Doppler token metadata. Pons v2 rows read their on-chain logo. See
+  [image COPY](doppler-image-copy.md) and [Pons artwork](pons-v2-image-copy.md).
 - Upload/drop a PNG, JPEG, WebP or GIF, preview and remove it. Picture bytes are cached in IndexedDB with the draft.
 - Enter name, ticker and optional description; review per-launchpad validation.
 - Ticker edits auto-fill the coin name unless a custom name has been entered.
-- Robinhood offers Long, O1 and Longbow. Base is temporarily paused in the
-  selector, draft validation, wallet configuration and fee lookup sources.
+- Robinhood offers Long, O1 and Longbow. Base offers O1 with ETH and its live
+  registered stock pairings, plus Stonks Exchange with 13 reviewed stock pairs. Changing chains resets incompatible pairings and
+  separates pending-launch recovery. Base launch configuration is documented in
+  [O1 Base launch setup](o1-base-launch.md) and [Stonks Base setup](stonks-base-launch.md).
+  Stonks creator-fee reads and claims are supported; O1 Base fee lookups remain paused.
 - Select launchpads and pairings; Longbow starts unselected.
-- Long uses a static list of 56 market tickers supplied on 4 September 2026.
+- Long uses a static list of 64 market tickers supplied on 4 September 2026.
   Longbow uses its 194-entry dropdown registry snapshot from 2 September,
   checked on 4 September, with SKYHY corrected to the verified symbol SKHY.
   Only ticker choices are bundled; runtime addresses stay out of source control.
   O1 offers ETH and a complete saved 194-entry Robinhood RWA catalog, verified
   4 September 2026. Live results replace the saved list; opening an expired
   menu checks availability again. No refresh button or periodic background calls.
-- Check Long ticker reservations on click; O1 availability remains unverified.
-  Longbow has no ticker adapter; its ID is excluded from ticker requests. Its
-  separate fee adapter supports reviewed locked pools on Robinhood.
+- Long and Longbow check their shared ticker reservation registry after a typing
+  pause, on focus, or on Enter. Selecting both uses one read. O1 says any ticker
+  is allowed and makes no reservation request. Longbow's separate fee adapter
+  supports reviewed locked pools on Robinhood.
 - Longbow's fee row shows the default LongLauncher route's 95% creator / 5%
   Doppler LP-fee split. Its details distinguish separate hook fees, the 1% launch
   supply allocation, and alternate routes. Sources: [default launch route](https://longbow.gg/launch?route=long)

@@ -13,7 +13,11 @@ import {
   type ClaimQuote,
   type FeeLookupResult,
 } from './fee-service.ts';
-import { disabledClaimMessage, unavailableFeeMessage } from './fee-status.ts';
+import {
+  disabledClaimMessage,
+  disabledFeeSourceMessage,
+  unavailableFeeMessage,
+} from './fee-status.ts';
 
 const addr = (digit: string) => `0x${digit.repeat(40)}` as `0x${string}`;
 const owner = addr('a');
@@ -148,7 +152,7 @@ await test('disabled claims explain unverified balances and feature setup withou
       claimable: false,
       verification: 'indexed',
     })!,
-    /Contract verification/,
+    /not available to claim here/,
   );
   assert.equal(
     disabledClaimMessage({
@@ -158,6 +162,32 @@ await test('disabled claims explain unverified balances and feature setup withou
     }),
     'Claims are not enabled yet.',
   );
+});
+
+await test('an empty currency never hides the claim blocker for a positive fee balance', () => {
+  const empty = {
+    ...position,
+    claimable: false,
+    claimDisabledReason: 'nothing_to_claim' as const,
+    payouts: [{ ...payout, claimableRaw: '0' }],
+  };
+  const blocked = {
+    ...position,
+    claimable: false,
+    verification: 'indexed' as const,
+    claimDisabledReason: 'contract_unverified' as const,
+  };
+  for (const positions of [
+    [empty, blocked],
+    [blocked, empty],
+  ])
+    assert.equal(
+      disabledFeeSourceMessage(positions),
+      disabledClaimMessage(blocked),
+    );
+  assert.equal(disabledFeeSourceMessage([empty]), 'No fees to claim.');
+  assert.equal(disabledFeeSourceMessage([empty, position]), null);
+  assert.equal(disabledFeeSourceMessage([]), null);
 });
 
 await test('escrow versions stay bound across fee pages and fresh claim preparation', async () => {
@@ -445,6 +475,110 @@ await test('provider details are not exposed through the fee client', async () =
       code: 'unavailable',
       message: 'unavailable',
     });
+  } finally {
+    globalThis.fetch = original;
+  }
+});
+
+await test('O1 finishes its wallet index automatically and replaces overlapping balances', async () => {
+  const original = globalThis.fetch;
+  const results: FeeLookupResult[] = [];
+  const cursor = 'c'.repeat(64);
+  const requests: unknown[] = [];
+  globalThis.fetch = async (_url, options) => {
+    const input = JSON.parse(options?.body as string);
+    requests.push(input.cursor);
+    return Response.json({
+      ...source,
+      coverage: 'wallet_index',
+      nextCursor: input.cursor ? null : cursor,
+      status: input.cursor ? 'ready' : 'partial',
+      positions: [
+        {
+          ...position,
+          payouts: [{ ...payout, claimableRaw: input.cursor ? '200' : '123' }],
+        },
+      ],
+      serverTime: Date.now(),
+      expiresAt: Date.now() + 45_000,
+    });
+  };
+  try {
+    await loadFeeSources(
+      owner,
+      [{ padId: 'o1', chainId: 8453 }],
+      (result) => results.push(result),
+      () => true,
+    );
+    assert.deepEqual(requests, [undefined, cursor]);
+    assert.equal(results[0].source && results[0].scanning, true);
+    const final = results.at(-1)!;
+    assert.equal(final.source?.status, 'ready');
+    assert.equal(final.source?.nextCursor, null);
+    assert.equal(final.source?.positions.length, 1);
+    assert.equal(final.source?.positions[0].payouts[0].claimableRaw, '200');
+  } finally {
+    globalThis.fetch = original;
+  }
+});
+
+await test('O1 continuation failures retain discovered fees and stop automatic reads', async () => {
+  const original = globalThis.fetch;
+  const results: FeeLookupResult[] = [];
+  let calls = 0;
+  globalThis.fetch = async () => {
+    calls++;
+    return calls === 1
+      ? Response.json({
+          ...source,
+          coverage: 'wallet_index',
+          nextCursor: 'd'.repeat(64),
+          serverTime: Date.now(),
+          expiresAt: Date.now() + 45_000,
+        })
+      : Response.json({ error: 'scan_limit' }, { status: 409 });
+  };
+  try {
+    await loadFeeSources(
+      owner,
+      [{ padId: 'o1', chainId: 8453 }],
+      (result) => results.push(result),
+      () => true,
+    );
+    const final = results.at(-1)!;
+    assert.equal(final.source?.positions[0].payouts[0].claimableRaw, '123');
+    assert.equal(final.source?.status, 'partial');
+    assert.ok(final.source && final.pageError);
+    assert.equal(calls, 2);
+  } finally {
+    globalThis.fetch = original;
+  }
+});
+
+await test('wallet changes stop O1 continuation before requesting the next page', async () => {
+  const original = globalThis.fetch;
+  let current = true;
+  let calls = 0;
+  globalThis.fetch = async () => {
+    calls++;
+    return Response.json({
+      ...source,
+      coverage: 'wallet_index',
+      nextCursor: 'e'.repeat(64),
+      serverTime: Date.now(),
+      expiresAt: Date.now() + 45_000,
+    });
+  };
+  try {
+    await loadFeeSources(
+      owner,
+      [{ padId: 'o1', chainId: 8453 }],
+      () => {
+        current = false;
+      },
+      () => current,
+    );
+    assert.equal(calls, 1);
   } finally {
     globalThis.fetch = original;
   }

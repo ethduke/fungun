@@ -89,22 +89,10 @@ test("all four Long wallet launch settings stay API-only and are forwarded toget
   );
 });
 
-test("all four O1 wallet launch settings stay API-only and are forwarded together", () => {
-  assert.deepEqual(O1_WALLET_LAUNCH_RUNTIME_NAMES, [
-    "O1_WALLET_LAUNCH",
-    "O1_LAUNCH_PROFILE_JSON",
-    "O1_LAUNCH_TOKENS_JSON",
-    "LONG_EXTRA_QUOTES_JSON",
-  ]);
-  const local = Object.fromEntries(
-    O1_WALLET_LAUNCH_RUNTIME_NAMES.map((name) => [name, `${name}-VALUE`]),
-  );
-  for (const name of O1_WALLET_LAUNCH_RUNTIME_NAMES)
-    local[`NEXT_PUBLIC_${name}`] = "LEAK";
-  assert.deepEqual(
-    apiEnvironment({}, local),
-    Object.fromEntries(
-      O1_WALLET_LAUNCH_RUNTIME_NAMES.map((name) => [name, `${name}-VALUE`]),
-    ),
-  );
+
+test("O1 launch settings for both chains remain API-only", () => {
+  const expected = ["O1_WALLET_LAUNCH", "O1_LAUNCH_PROFILE_JSON", "O1_LAUNCH_TOKENS_JSON", "O1_BASE_WALLET_LAUNCH", "O1_BASE_LAUNCH_PROFILE_JSON"];
+  assert.deepEqual(O1_WALLET_LAUNCH_RUNTIME_NAMES, expected);
+  const local = Object.fromEntries(expected.map(name => [name, "EXAMPLE"]));
+  assert.deepEqual(apiEnvironment({}, { ...local, NEXT_PUBLIC_O1_BASE_LAUNCH_PROFILE_JSON: "LEAK" }), local);
 });

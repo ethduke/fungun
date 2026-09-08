@@ -1,7 +1,7 @@
 # Fungun
 
-A noncustodial launchpad composer for Long, O1 and Longbow on Robinhood Chain.
-Base is temporarily paused in the webview.
+A noncustodial launchpad composer for Long, O1 and Longbow on Robinhood Chain,
+and O1 on Base.
 
 ```sh
 npm run setup
@@ -20,15 +20,17 @@ working controls, deliberate limitations, tests and the Fly backend boundary.
 
 This milestone is a local webview with a guarded read-service backend. Configured
 O1 catalogs load through the read service; Long and Longbow use bundled ticker
-lists (56 and 194 choices). Long ticker reservations can be checked; O1 stays
+lists (64 and 194 choices). Long ticker reservations can be checked; O1 stays
 unverified and Longbow ticker checking is not connected. Configured fee adapters support bounded live reads
 and explicit wallet claims. The Fees tab discovers the connected wallet's beneficiary positions with
 resumable pages and queues all eligible claims for individual wallet confirmation;
 see [fee setup and coverage](docs/fee-claims.md).
 USDG/x402 image generation is implemented and defaults to disabled until its runtime
 settings are configured; see [image setup and recovery](docs/image-generation.md).
-Drafts, images and published metadata survive reloads. Launch transactions remain
-disabled pending their existing verification work. Telegram is out of scope.
+Drafts, images and published metadata survive reloads. Configured launch services
+prepare verified unsigned transactions for the connected wallet. Base O1 supports
+ETH and registered stock pairings; see [Base launch setup](docs/o1-base-launch.md).
+Telegram is out of scope.
 
 ## Agent documentation
 
@@ -54,3 +56,10 @@ Wallet connection does not authorize a signature or transaction. Claims require 
 verified preflight, a separate confirmation and wallet approval; the backend never
 signs or sends. Public on-chain data is not secret, but
 operational copies do not belong in this repository.
+
+
+pons v2 is available in the Robinhood launchpad selector with ETH pairing
+(`pons-native`), immutable metadata, zero creator tax and buybacks off.
+The connected wallet receives creator fees. Live eligibility, fees and launch
+economics are checked before wallet submission. pons fee claims are not yet
+integrated. It can be combined with O1 and either Long or Longbow.

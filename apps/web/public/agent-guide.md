@@ -1,13 +1,13 @@
 # Fungun agent guide
 
 Status: composer with optional guarded fee reads, wallet claims and paid image generation.
-Launch transactions are not enabled. USDG/x402 image generation requires configured runtime services. Provider reads default to disabled; the public
+Configured launch services prepare unsigned transactions for the connected wallet. USDG/x402 image generation requires configured runtime services. Provider reads default to disabled; the public
 market feed updates automatically without provider credentials.
 Start with [llms.txt](/llms.txt) for the site overview.
 
 ## Prepare a draft
 
-1. Open the [launch composer](/). Robinhood Chain is enabled; Base is paused.
+1. Open the [launch composer](/). Choose Robinhood Chain (Long, O1, Longbow) or Base (O1, Stonks Exchange).
 2. Enter a ticker and coin name. Ticker edits auto-fill the name until a custom
    name is entered. Names allow 1–50 characters; tickers allow 1–11 without
    whitespace. Long and Longbow require uppercase letters only.
@@ -15,22 +15,26 @@ Start with [llms.txt](/llms.txt) for the site overview.
    Drafts and picture bytes are saved in this browser. The Grok tab offers a USDG
    quote, a one-time wallet authorization, and a recoverable image job when configured.
    Never sign another authorization to recover an unresolved image request.
-4. Select Long, O1 and/or Longbow on Robinhood. Long uses a static list of 56
+4. Select Long, O1 and/or Longbow on Robinhood. Long uses a static list of 64
    market tickers; Longbow uses its 194-entry stock/RWA dropdown registry,
    with the SKYHY label corrected to SKHY. Both use permanent metadata.
    O1 offers ETH and 194 Robinhood RWA pairings, plus optional metadata updates.
    Current live results extend the saved catalog. All listed pairs are eligible
    for draft selection even when the catalog is unavailable or expired. The saved
    list is dated 4 September 2026; transaction preparation still checks the server configuration.
+   On Base, Stonks offers 13 reviewed stock pairings from its live registry catalog.
+   It uses the same name, ticker, image and description, no dev buy, and permanently locked liquidity.
+   The current creator share is shown before launching; operator changes may follow a 24-hour delay.
 5. Read the inline launch section. Draft validation does not confirm ticker
-   availability, token eligibility, costs or launch readiness. Check ticker is an
-   explicit read: Long reports only its reservation state; O1 stays unverified.
-   Longbow ticker checking is not connected; it is excluded from read requests.
-   Results expire and edits invalidate them. Launch stays disabled.
+   availability, token eligibility, costs or launch readiness. Long and Longbow
+   check their shared reservation registry after a typing pause; focus or Enter
+   checks again. O1 allows any ticker within the form's input rules and makes no
+   reservation request. Mixed selections retain each platform's status.
+   Results expire and edits invalidate them. Launch availability also depends on server configuration.
 
 The launch cost panel separates launchpad fees and complete network fees in ETH,
-with approximate USD when a fresh reference price is available. Live quoting is
-not connected yet: unavailable is not zero. Do not treat draft completion as a
+with approximate USD when a fresh reference price is available. Stonks provides a gas ceiling before preparation; exact Base quotes include execution,
+L1 data and operator fees after simulation. Unavailable is not zero. Do not treat draft completion as a
 cost quote or permission to sign. High network fees will show an explicit warning;
 wait and refresh rather than blindly raising gas limits. Follow the displayed
 retry delay after a failed check. Never repeat a possibly submitted transaction
@@ -62,7 +66,9 @@ Historical scans may take many pages; separate hook fees remain unknown.
 O1 pages through indexed Robinhood positions and verifies every position in a
 reviewed current or legacy escrow. Configured, verified Robinhood claims are supported.
 Longbow has its own profile and Claim all action; never duplicate a Long pool there.
-Base fee lookups are paused.
+Stonks Base fees use the verified locker and current recipients. Discovery is partial;
+custom recipients and old creator changes may be missing. Deferred payouts have separate claims.
+O1 Base fee lookups remain paused.
 Shared escrow balances are by payout asset,
 not individual launched coin; do not merge matching tickers with different addresses.
 Check more reads one page; honor provider retry delays and preserve partial results.
@@ -98,8 +104,12 @@ Popularity counts similarly named distinct contracts by
 chain, ranked by count then inflow, with links to X search. It makes no claim
 about social trends or complete market coverage. This feed cannot trade or sign.
 COPY fills the coin name and ticker and jumps to the launch form immediately.
-It clears prior artwork and pending uploads. This source does not provide a token
-image or metadata URL; upload artwork separately.
+It clears prior artwork and pending uploads. Recognized Robinhood O1 tokens load
+artwork through O1's API. Other Robinhood and Base tokens try compatible on-chain
+metadata, including Long and Longbow artwork. Pons v2 rows fetch their token logo.
+Available still images are saved
+with the draft. Missing or unsupported artwork leaves the copied text usable;
+upload an image instead.
 
 Canonical stablecoins do not appear as tracked tokens, including stable/stable
 and USDG/stock pairs. A nonstable token may still use a stablecoin as its quote.
@@ -157,13 +167,22 @@ Same-origin JSON POSTs use `/api/catalog` with `{ "chainId": 4663 }`, or
 `/api/ticker` with `{ "chainId": 4663, "ticker": "MOON", "pads": ["long", "o1"] }`.
 The `x-fungun-intent` header must match `catalog` or `ticker`. These are bounded
 anonymous read endpoints, not authentication or consent for financial actions.
-The webview only requests Robinhood (4663). Base (8453) remains supported by the
-backend but is paused in the webview. Longbow is excluded from catalog/ticker requests.
+The webview requests Robinhood (4663) and Base (8453). Base supports O1 and Stonks
+launches, plus supported Stonks creator fees. O1 Base fee lookups remain paused. Longbow is excluded from catalog/ticker requests.
 Never send keys, wallet addresses, signatures, images or prompts to these routes.
-Fee lookup supports Long, O1 and Longbow through `/api/fees` with `address`, `chainId`, `padId` and an optional
+Fee lookup supports Long, O1, Longbow and Stonks through `/api/fees` with `address`, `chainId`, `padId` and an optional
 opaque `cursor` returned by the previous page. It returns `nextCursor` and coverage.
 `/api/claim-prepare` takes only `address` and an opaque returned `positionId`;
 it prepares but never sends. Intent headers match the operation. Handles expire,
 quotas apply, and clients cannot supply targets, calldata or provider URLs.
-Only continue fee pages under explicit scan intent. No launch API is available;
-upload and paid-image APIs require configured services and explicit user actions.
+Only continue fee pages under explicit scan intent. Wallet launches use the configured
+`/api/launch-estimate`, `/api/launch-prepare`, `/api/launch-reserve` and `/api/launch-status`
+flow. The server never signs or broadcasts a launch. Upload and paid-image APIs
+require configured services and explicit user actions.
+
+
+pons v2 is available in the Robinhood launchpad selector with ETH pairing
+(`pons-native`), immutable metadata, zero creator tax and buybacks off.
+The connected wallet receives creator fees. Live eligibility, fees and launch
+economics are checked before wallet submission. pons fee claims are not yet
+integrated. It can be combined with O1 and either Long or Longbow.

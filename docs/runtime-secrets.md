@@ -30,14 +30,6 @@ cannot account for another bot or service using the same provider credential.
 Keep `.env` ignored and run the staged, tracked and history security scans before
 committing or pushing. Never include real credentials in tests.
 
-O1 wallet launches additionally use the API-only `O1_WALLET_LAUNCH`,
-`O1_LAUNCH_PROFILE_JSON`, `O1_LAUNCH_TOKENS_JSON`, and optional
-`LONG_EXTRA_QUOTES_JSON` settings. The local launcher forwards these names only
-to the API process and removes them from the web process. The Fly web build starts
-from a fresh allowlist and receives none of them. Configure the O1 switch and
-profile on the API app only; keep the switch `false` until the exact API and web
-revision has passed live verification.
-
 The separate asset launcher also allowlists OpenRouter, x402, USDG and read-only
 settlement RPC settings for [image generation](image-generation.md). Those values
 are never forwarded to the read API, the isolated decoder, or a web build. Only

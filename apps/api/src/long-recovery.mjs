@@ -7,22 +7,23 @@ const same = (a, b) => typeof a === 'string' && typeof b === 'string' && a.toLow
 // Locate a wallet's original nonce using bounded, read-only RPC calls. No explorer,
 // wallet history, signing, or new nonce is needed, including for legacy records.
 export class LongRecovery {
-  constructor(rpc) { this.rpc = rpc; this.searches = new Map(); }
+  constructor(rpc, chainId = 4663) { this.rpc = rpc; this.chainId = chainId; this.searches = new Map(); }
   async find(id, transaction) {
+    if (transaction.chainId !== undefined && rpcNumber(transaction.chainId) !== BigInt(this.chainId)) throw new ServiceError('wrong_chain');
     const from = transaction.from, nonce = rpcNumber(transaction.nonce);
-    const [chain, latest, pending] = await this.rpc.batch(4663, [
+    const [chain, latest, pending] = await this.rpc.batch(this.chainId, [
       { method: 'eth_chainId', params: [] },
       { method: 'eth_getTransactionCount', params: [from, 'latest'] },
       { method: 'eth_getTransactionCount', params: [from, 'pending'] },
     ]);
-    if (rpcNumber(chain) !== 4663n) throw new ServiceError('wrong_chain');
+    if (rpcNumber(chain) !== BigInt(this.chainId)) throw new ServiceError('wrong_chain');
     if (rpcNumber(latest) <= nonce) {
       this.searches.delete(id);
       return { status: rpcNumber(latest) === nonce && rpcNumber(pending) === nonce ? 'retryable' : 'submitted' };
     }
     let search = this.searches.get(id);
     if (!search) {
-      const [head] = await this.rpc.batch(4663, [{ method: 'eth_getBlockByNumber', params: ['latest', false] }]);
+      const [head] = await this.rpc.batch(this.chainId, [{ method: 'eth_getBlockByNumber', params: ['latest', false] }]);
       if (!/^0x[a-f0-9]{64}$/i.test(head?.hash)) throw new ServiceError('invalid_response');
       search = { low: -1n, high: rpcNumber(head.number), anchor: head.number, hash: head.hash };
       if (this.searches.size >= 32) this.searches.delete(this.searches.keys().next().value);
@@ -31,12 +32,12 @@ export class LongRecovery {
     // Continue across polls instead of exceeding the request deadline/read budget.
     for (let i = 0; i < 6 && search.high - search.low > 1n; i++) {
       const mid = (search.low + search.high) / 2n;
-      const [count] = await this.rpc.batch(4663, [{ method: 'eth_getTransactionCount', params: [from, toHex(mid)] }]);
+      const [count] = await this.rpc.batch(this.chainId, [{ method: 'eth_getTransactionCount', params: [from, toHex(mid)] }]);
       if (rpcNumber(count) > nonce) search.high = mid;
       else search.low = mid;
     }
     if (search.high - search.low > 1n) return { status: 'locating' };
-    const [anchor, block] = await this.rpc.batch(4663, [
+    const [anchor, block] = await this.rpc.batch(this.chainId, [
       { method: 'eth_getBlockByNumber', params: [search.anchor, false] },
       { method: 'eth_getBlockByNumber', params: [toHex(search.high), true] },
     ]);

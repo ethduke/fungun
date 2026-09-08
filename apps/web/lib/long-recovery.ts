@@ -1,6 +1,6 @@
 import { LaunchError, launchRequest, type LaunchRecovery } from './long-wallet.ts';
 import { isCanonicalLongAsset } from './long-encoding/long-salt.mjs';
-import type { LaunchpadId } from './launch-model.ts';
+import type { ChainId, LaunchpadId } from './launch-model.ts';
 
 export type LaunchReceipt = {
   id: string; status: string; hash?: string; asset?: string; paidGasWei?: string;
@@ -10,12 +10,14 @@ export function confirmedLongTokenUrl(receipt: LaunchReceipt | null) {
     ? `https://app.long.xyz/tokens/${receipt.asset!.toLowerCase()}`
     : null;
 }
-export function confirmedLaunchTokenUrl(pad: LaunchpadId, receipt: LaunchReceipt | null) {
+export function confirmedLaunchTokenUrl(pad: LaunchpadId, receipt: LaunchReceipt | null, chainId: ChainId = 4663) {
+  if ((chainId === 8453 && !['o1', 'stonks'].includes(pad)) || (pad === 'stonks' && chainId !== 8453)) return null;
   if (pad === 'long') return confirmedLongTokenUrl(receipt);
   if (receipt?.status !== 'confirmed' || !/^0x[a-f0-9]{40}$/i.test(receipt.asset ?? '')) return null;
   const asset = receipt.asset!.toLowerCase();
-  return pad === 'longbow' ? `https://longbow.gg/c/${asset}`
-    : `https://launch.o1.exchange/token/${asset}?chain=4663`;
+  return pad === 'pons' ? `https://www.ponsfamily.com/launchpad/${asset}`
+    : pad === 'stonks' ? `https://www.thestonks.exchange/token/${asset}` : pad === 'longbow' ? `https://longbow.gg/c/${asset}`
+    : `https://launch.o1.exchange/token/${asset}?chain=${chainId}`;
 }
 export function validateLaunchStatus(value: LaunchReceipt, recovery: LaunchRecovery) {
   if (!value || value.id !== recovery.id || !['retryable', 'locating', 'uncertain', 'prepared', 'submitted', 'confirming', 'confirmed', 'failed'].includes(value.status)

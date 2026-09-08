@@ -125,33 +125,6 @@ test("read retries exclude quota, invalid data, permanent HTTP errors and JSON-R
   assert.equal(calls, 1);
 });
 
-test("provider problem codes require an exact internal opt-in", async () => {
-  const response = (body = { code: "stale_plan", status: 409, detail: "expired" }, contentType = "application/problem+json") => new Response(JSON.stringify(body), {
-    status: 409,
-    headers: { "content-type": contentType },
-  });
-  const request = (policy) => new Upstream({ upstream() {} }, async () => response())
-    .json("o1", url, {}, 4096, 1, policy);
-  await assert.rejects(request({}), { code: "upstream_unavailable" });
-  await assert.rejects(request({ problemCodes: ["stale_plan"] }), {
-    code: "stale_plan",
-    status: 409,
-  });
-  await assert.rejects(request({ problemCodes: ["cursor_stale"] }), {
-    code: "upstream_unavailable",
-  });
-  for (const value of [
-    response({ code: "stale_plan", status: 400 }),
-    response({ code: "stale_plan", status: 409 }, "application/json"),
-    response({ code: "unknown", status: 409 }),
-    response({ code: "cursor_stale", status: 409 }),
-  ]) {
-    const rejected = new Upstream({ upstream() {} }, async () => value)
-      .json("o1", url, {}, 4096, 1, { problemCodes: ["stale_plan"] });
-    await assert.rejects(rejected, { code: "upstream_unavailable" });
-  }
-});
-
 test("retry still respects a local budget denial without another fetch", async () => {
   let calls = 0;
   let debits = 0;

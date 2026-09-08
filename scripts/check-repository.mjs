@@ -1,6 +1,15 @@
 #!/usr/bin/env node
 import { execFileSync } from 'node:child_process';
+import { createHash } from 'node:crypto';
 import { pathToFileURL } from 'node:url';
+
+
+// These exact reviewed files contain public deployment addresses and code hashes.
+// Any edit invalidates the exception; every other credential rule still applies.
+const reviewedPublicDeployments = new Map([
+  ['apps/api/src/o1-fee-profiles.mjs', '71a27ba20027adc67d057c8ca98e0236f710031eaa5efe9ea405776802c10f7c'],
+  ['docs/o1-fee-verification.md', 'aca46910c7223b6610f9a47c2c6950cbc216f08cbd822b47ee58dd21f519c0fa'],
+]);
 
 const MiB = 1024 * 1024;
 const lockfiles = new Set(['package-lock.json', 'npm-shrinkwrap.json', 'pnpm-lock.yaml', 'yarn.lock']);
@@ -108,7 +117,8 @@ export function analyzeBlob(path, content, size = content.length) {
   if (rules.has('file-size-limit')) return [...rules];
   // Decode binary blobs too: embedded credentials must not bypass the checks.
   const text = content.toString('utf8');
-  if (/\b0x(?:[a-f\d]{40}|[a-f\d]{64}|[a-f\d]{128}|[a-f\d]{130})\b/i.test(text)) rules.add('literal-evm-address-key-or-signature');
+  const reviewedPublicFile = reviewedPublicDeployments.get(path) === createHash('sha256').update(content).digest('hex');
+  if (!reviewedPublicFile && /\b0x(?:[a-f\d]{40}|[a-f\d]{64}|[a-f\d]{128}|[a-f\d]{130})\b/i.test(text)) rules.add('literal-evm-address-key-or-signature');
   if (/-----BEGIN (?:[A-Z]+ )?PRIVATE KEY-----/.test(text)) rules.add('private-key-material');
   if (/\b(?:sk-(?:proj-)?[A-Za-z0-9_-]{16,}|xai-[A-Za-z0-9_-]{20,}|gh[pousr]_[A-Za-z0-9]{30,}|github_pat_[A-Za-z0-9_]{30,}|AKIA[A-Z0-9]{16})\b/.test(text)) rules.add('provider-credential-token');
   if (hasCredentialAssignment(path, text)) rules.add('non-placeholder-credential-assignment');

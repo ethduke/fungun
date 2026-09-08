@@ -12,7 +12,7 @@ test("purchase strip renders canonical profile, contract link, time and escaped 
     label: "<theunipcs>",
     token,
     symbol: "<EXAMPLE>",
-    last_bought_at: 1_788_599_999,
+    last_bought_at: Date.now() / 1000 - 1,
     buy_alerts: 1,
   };
   const html = fomoHighlightsHTML({ stream_highlights: [row, row] });
@@ -30,15 +30,30 @@ test("purchase strip renders canonical profile, contract link, time and escaped 
         { ...row, token: "javascript:bad" },
       ],
     }),
-    /No confirmed buys recorded yet/,
+    /No confirmed buys in the last 24 hours/,
   );
 });
 
-test("health keeps disconnections, delay and incomplete history honest", () => {
-  assert.match(fomoStatus({ connected: false }), /disconnected.*History incomplete/);
+test("health shows connection and delay without a permanent history label", () => {
+  assert.match(fomoStatus({ connected: false }), /disconnected/);
+  assert.doesNotMatch(fomoStatus({ connected: false, history_complete: false }), /History incomplete/);
+  assert.equal(fomoStatus({ connected: true, history_complete: false }), "Live feed connected");
+  assert.equal(fomoStatus({ state: "budget_exhausted" }), "Reconnect limit reached");
   assert.match(fomoStatus({ connected: true, delay_seconds: 15 }), /15s delay/);
-  assert.match(fomoStatus({}, true), /showing saved buys/);
+  assert.match(fomoStatus({}, true), /showing buys from the last 24 hours/);
   assert.match(fomoStatus({ state: "not_configured" }), /not configured/);
+});
+
+test("cached UI payloads expire while disconnected and status shows the retry without stale delay", () => {
+  const now = 1_788_600_000_000;
+  const payload = {
+    state: "reconnecting", connected: false, delay_seconds: 0,
+    retry_at: now / 1000 + 120,
+    stream_highlights: [{ handle: "unipcs", token, buy_alerts: 1, last_bought_at: now / 1000 - 86_400 + 1 }],
+  };
+  assert.match(fomoHighlightsHTML(payload, now), / bought /);
+  assert.doesNotMatch(fomoHighlightsHTML(payload, now + 1000), / bought /);
+  assert.equal(fomoStatus(payload, false, now), "Feed reconnecting · retry in 2m");
 });
 
 test("backend snapshot hook persists admissions without a browser, before returning success", async (t) => {

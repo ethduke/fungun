@@ -1,20 +1,27 @@
 import {
   LONGBOW_PAIRS,
-  type LONGBOW_MARKET_TICKERS,
+  LONGBOW_MARKET_TICKERS,
 } from './longbow-markets.ts';
 import { O1_ROBINHOOD_PAIRS, selectableO1Pairs } from './o1-markets.ts';
+import { BASE_PAIRS } from './base-markets.ts';
+import { LONG_MARKET_TICKERS } from './long-encoding/long-markets.mjs';
 
-export type PadId = 'long' | 'o1';
-export type LaunchpadId = PadId | 'longbow';
+export { LONG_MARKET_TICKERS };
+
+export type PadId = 'long' | 'o1' | 'stonks';
+export type LaunchpadId = PadId | 'longbow' | 'pons';
 export type ChainId = 4663 | 8453;
 export type PairId =
   | 'native'
+  | 'pons-native'
+  | 'crypto-USDG'
   | 'sample-nvda'
   | 'sample-aapl'
   | 'sample-tsla'
   | `long-${(typeof LONG_MARKET_TICKERS)[number]}`
   | `longbow-${(typeof LONGBOW_MARKET_TICKERS)[number]}`
-  | `rwa-${string}`;
+  | `rwa-${string}`
+  | `stonks-${string}`;
 import type { Catalog } from './read-service';
 export type Route = 'rwa' | 'standard';
 
@@ -73,90 +80,30 @@ export function autofillGrokPrompt(
 export const IMAGE_LIMIT = 2 * 1024 * 1024;
 export const DESCRIPTION_LIMIT = 2000;
 export const DEFAULT_CHAIN_ID: ChainId = 4663;
-// Base remains in the service models but is temporarily paused in the webview.
-export const ENABLED_WEBVIEW_CHAINS: readonly ChainId[] = [4663];
+export const ENABLED_WEBVIEW_CHAINS: readonly ChainId[] = [4663, 8453];
 export function isWebviewChain(chainId: number) {
   return ENABLED_WEBVIEW_CHAINS.includes(chainId as ChainId);
 }
 
 export function launchpadName(id: LaunchpadId) {
-  return { long: 'Long', o1: 'O1', longbow: 'Longbow' }[id];
+  return { long: 'Long', o1: 'O1', longbow: 'Longbow', pons: 'pons', stonks: 'Stonks' }[id];
 }
 
 export function readablePads(pads: LaunchpadId[]): PadId[] {
-  return pads.filter((pad): pad is PadId => pad === 'long' || pad === 'o1');
+  // Long and Longbow use the same on-chain ticker reservation registry.
+  return [...new Set(pads.filter((pad): pad is PadId | 'longbow' => pad !== 'pons').map((pad) => pad === 'longbow' ? 'long' : pad))];
+}
+export function hasSharedTickerConflict(destinations: Destination[]) {
+  return destinations.some(pad => pad.selected && pad.id === 'long')
+    && destinations.some(pad => pad.selected && pad.id === 'longbow');
 }
 
-/**
- * The current wallet flow can dispatch one launch at a time. Keep the existing
- * Long selection when it is part of a multi-pad draft, and expose O1 only when
- * it is the sole selected destination. Longbow has no configured wallet flow.
- */
-export function walletLaunchDestination(destinations: Destination[]) {
-  const active = destinations.filter((pad) => pad.selected);
-  const long = active.find((pad) => pad.id === 'long');
-  if (long) return long;
-  return active.length === 1 && active[0]?.id === 'o1' ? active[0] : null;
+export function selectDestination(destinations: Destination[], destination: Destination) {
+  const sharesTicker = destination.id === 'long' || destination.id === 'longbow';
+  return destinations.map(pad => pad.id === destination.id ? destination
+    : destination.selected && sharesTicker && (pad.id === 'long' || pad.id === 'longbow')
+      ? { ...pad, selected: false } : pad);
 }
-// User-supplied Long market snapshot, 2026-09-04.
-export const LONG_MARKET_TICKERS = [
-  'AAPL',
-  'AI',
-  'AMC',
-  'AMD',
-  'AMZN',
-  'ASML',
-  'BA',
-  'BB',
-  'BE',
-  'CCL',
-  'COIN',
-  'COST',
-  'CRWV',
-  'DELL',
-  'DJT',
-  'ETH',
-  'FIG',
-  'GLD',
-  'GME',
-  'GOOGL',
-  'HIMS',
-  'IBM',
-  'INTC',
-  'LLY',
-  'LULU',
-  'META',
-  'MRNA',
-  'MSFT',
-  'MSTR',
-  'MU',
-  'NET',
-  'NFLX',
-  'NU',
-  'NVDA',
-  'ORCL',
-  'PLTR',
-  'QQQ',
-  'QUBT',
-  'RBLX',
-  'RDDT',
-  'SGOV',
-  'SKHY',
-  'SLV',
-  'SNAP',
-  'SNDK',
-  'SOFI',
-  'SPCX',
-  'SPY',
-  'TSLA',
-  'TSM',
-  'TTWO',
-  'UPS',
-  'USAR',
-  'USDG',
-  'USO',
-  'XLK',
-] as const;
 export const LONG_PAIRS = LONG_MARKET_TICKERS.map((symbol) => ({
   id: `long-${symbol}` as const,
   symbol,
@@ -186,6 +133,8 @@ export const DEFAULT_DESTINATIONS: Destination[] = [
     pairId: 'longbow-NVDA',
     editableMetadata: false,
   },
+  { id: 'stonks', selected: false, chainId: 8453, route: 'rwa', pairId: 'stonks-unselected', editableMetadata: false },
+  { id: 'pons', selected: false, chainId: 4663, route: 'standard', pairId: 'pons-native', editableMetadata: false },
 ];
 
 export function chainName(id: ChainId) {
@@ -193,7 +142,7 @@ export function chainName(id: ChainId) {
 }
 
 export function supportsChain(id: LaunchpadId, chainId: ChainId) {
-  return chainId === 4663 || (id === 'o1' && chainId === 8453);
+  return id === 'stonks' ? chainId === 8453 : chainId === 4663 || (id === 'o1' && chainId === 8453);
 }
 
 export function selectChain(destinations: Destination[], chainId: ChainId) {
@@ -216,9 +165,10 @@ export function selectChain(destinations: Destination[], chainId: ChainId) {
 }
 
 export function pairingName(id: PairId) {
-  return id === 'native'
+  if (id === 'crypto-USDG') return 'USDG';
+  return id === 'native' || id === 'pons-native'
     ? 'ETH'
-    : ([...LONG_PAIRS, ...LONGBOW_PAIRS, ...O1_ROBINHOOD_PAIRS].find(
+    : ([...LONG_PAIRS, ...LONGBOW_PAIRS, ...O1_ROBINHOOD_PAIRS, ...BASE_PAIRS].find(
         (pair) => pair.id === id,
       )?.symbol ?? 'Unselected');
 }
@@ -240,6 +190,8 @@ export function validateDraft(
     errors.description = 'Description must be at most 2,000 UTF-8 bytes.';
   if (!draft.hasImage) errors.image = 'Add a coin image to continue.';
   if (!active.length) errors.destinations = 'Select at least one launchpad.';
+  if (hasSharedTickerConflict(destinations))
+    errors.destinations = 'Choose Long or Longbow. They share a 24-hour ticker reservation.';
   if (new Set(active.map((pad) => pad.chainId)).size > 1)
     errors.destinations = 'Select launchpads on one chain at a time.';
   if (
@@ -250,6 +202,10 @@ export function validateDraft(
   )
     errors.destinations = 'Choose launchpads available on the selected chain.';
   for (const pad of active) {
+    if (pad.id === 'pons' && (pad.chainId !== 4663 || pad.route !== 'standard' || pad.pairId !== 'pons-native' || pad.editableMetadata))
+      errors.destinations = 'pons requires Robinhood Chain, ETH pairing and immutable metadata.';
+    if (pad.id === 'stonks' && (pad.chainId !== 8453 || pad.route !== 'rwa' || pad.editableMetadata))
+      errors.destinations = 'Stonks requires a Base stock pairing and immutable launch details.';
     if (
       (pad.id === 'long' || pad.id === 'longbow') &&
       (pad.chainId !== 4663 || pad.route !== 'rwa' || pad.editableMetadata)
@@ -263,20 +219,22 @@ export function validateDraft(
         ? !LONG_PAIRS.some((pair) => pair.id === pad.pairId)
         : pad.id === 'longbow'
           ? !LONGBOW_PAIRS.some((pair) => pair.id === pad.pairId)
+          : pad.id === 'stonks'
+            ? !(catalog?.chainId === 8453 && catalog.expiresAt > _now && catalog.pads.stonks?.status === 'ready' && catalog.pads.stonks.pairs.some(pair => pair.id === pad.pairId))
           : !selectableO1Pairs(
               pad.chainId,
-              catalog?.chainId === pad.chainId ? catalog.pads.o1 : undefined,
+              catalog?.chainId === pad.chainId && (pad.chainId !== 8453 || catalog.expiresAt > _now) ? catalog.pads.o1 : undefined,
             ).some((pair) => pair.id === pad.pairId))
     )
       errors.destinations = 'Choose an available RWA pairing.';
-    if (pad.route === 'standard' && pad.pairId !== 'native')
-      errors.destinations = 'Standard launches require native pairing.';
+    if (pad.route === 'standard' && !(pad.id === 'pons' && pad.pairId === 'pons-native') && pad.pairId !== 'native' && !(pad.id === 'o1' && pad.chainId === 4663 && pad.pairId === 'crypto-USDG'))
+      errors.destinations = 'Choose an available crypto pairing.';
   }
   if (
     (chainId !== undefined && !isWebviewChain(chainId)) ||
     active.some((pad) => !isWebviewChain(pad.chainId))
   )
-    errors.destinations = 'Base is paused. Choose Robinhood Chain.';
+    errors.destinations = 'Choose a supported launch network.';
   return errors;
 }
 

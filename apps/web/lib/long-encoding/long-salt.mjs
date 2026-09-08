@@ -6,6 +6,15 @@ export function isCanonicalLongAsset(address) {
   return typeof address === 'string' && /^0x[a-f0-9]{36}1e18$/i.test(address);
 }
 const cache = new Map();
+function remember(key, value) {
+  const previous = cache.get(key);
+  // A slower concurrent reader must not erase a completed or newer checkpoint.
+  if (previous?.saltAttempt !== undefined && value.saltAttempt === undefined) return;
+  if (previous?.nextAttempt > value.nextAttempt) return;
+  cache.delete(key);
+  if (cache.size >= 64) cache.delete(cache.keys().next().value);
+  cache.set(key, value);
+}
 
 // Bind the first 28 salt bytes to the launch context; enumerate with the last
 // four. Hash bytes directly, avoiding per-candidate hex/checksum allocations.
@@ -23,7 +32,8 @@ function search(factory, numeraire, binding, suppliedAttempt) {
   const quote = hexToBytes(numeraire);
   const key = `${factory.address}:${factory.initCodeHash}:${numeraire}:${binding}`;
   const known = suppliedAttempt ?? cache.get(key)?.saltAttempt;
-  const start = known ?? 0, end = known === undefined ? LONG_SALT_ATTEMPTS : known + 1;
+  const start = known ?? cache.get(key)?.nextAttempt ?? 0;
+  const end = known === undefined ? LONG_SALT_ATTEMPTS : known + 1;
   function* candidates() {
     for (let attempt = start; attempt < end; attempt++) {
       view.setUint32(49, attempt);
@@ -35,13 +45,16 @@ function search(factory, numeraire, binding, suppliedAttempt) {
         }
         if (lower) {
           const result = { salt: bytesToHex(bytes.slice(21, 53)), predictedAsset: getAddress(bytesToHex(digest.slice(12))), saltAttempt: attempt };
-          if (cache.size >= 64) cache.delete(cache.keys().next().value);
-          cache.set(key, result);
+          remember(key, result);
           return result;
         }
       }
-      if ((attempt - start + 1) % 4096 === 0) yield;
+      if ((attempt - start + 1) % 4096 === 0) {
+        if (known === undefined) remember(key, { nextAttempt: attempt + 1 });
+        yield;
+      }
     }
+    if (known === undefined) remember(key, { nextAttempt: end });
     throw new ServiceError(known === undefined ? 'long_salt_unavailable' : 'invalid_long_salt');
   }
   return candidates();

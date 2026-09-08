@@ -8,12 +8,9 @@ export function canCheckTicker(
   pads: PadId[],
 ) {
   return (
-    [4663, 8453].includes(chainId) &&
-    pads.length > 0 &&
-    ticker.length > 0 &&
-    Array.from(ticker).length <= 11 &&
-    !/[\s\p{C}]/u.test(ticker) &&
-    (!pads.includes('long') || /^[A-Z]{1,11}$/.test(ticker))
+    chainId === 4663 &&
+    pads.includes('long') &&
+    /^[A-Z]{1,11}$/.test(ticker)
   );
 }
 
@@ -27,12 +24,12 @@ export function tickerAvailability(
     !check ||
     check.chainId !== chainId ||
     check.ticker !== ticker ||
-    !pads.length
+    !pads.includes('long')
   )
     return 'unknown';
-  if (pads.some((pad) => check.results[pad]?.status === 'reserved'))
+  if (check.results.long?.status === 'reserved')
     return 'reserved';
-  return pads.every((pad) => check.results[pad]?.status === 'unreserved')
+  return check.results.long?.status === 'unreserved'
     ? 'unreserved'
     : 'unknown';
 }
@@ -70,7 +67,7 @@ export function watchTicker({
     running = true;
     onPending();
     try {
-      const result = await request(chainId, ticker, pads);
+      const result = await request(chainId, ticker, ['long']);
       if (!stopped) onResult(result);
     } catch (error) {
       if (!stopped) {

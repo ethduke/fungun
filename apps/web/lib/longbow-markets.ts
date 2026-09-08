@@ -2,6 +2,7 @@
 // Source: https://longbow.gg/api/pools (stocks[]); https://longbow.gg/stocks.js
 // SKYHY is normalized to the on-chain symbol SKHY, verified at block 54313669.
 // Symbols are draft choices only; live token addresses must be resolved before launch.
+// All canonical stock choices plus the supported crypto quote tokens.
 export const LONGBOW_MARKET_TICKERS = [
   'AAOI',
   'AAPL',
@@ -9,6 +10,7 @@ export const LONGBOW_MARKET_TICKERS = [
   'ADBE',
   'AEHR',
   'AEIS',
+  'AI',
   'ALAB',
   'AMAT',
   'AMBA',
@@ -30,6 +32,7 @@ export const LONGBOW_MARKET_TICKERS = [
   'BABA',
   'BB',
   'BE',
+  'BND',
   'BULL',
   'CBRS',
   'CCL',
@@ -55,6 +58,7 @@ export const LONGBOW_MARKET_TICKERS = [
   'DJT',
   'DOCN',
   'ELF',
+  'ETH',
   'EWT',
   'EWY',
   'F',
@@ -181,6 +185,7 @@ export const LONGBOW_MARKET_TICKERS = [
   'UNH',
   'UPS',
   'USAR',
+  'USDG',
   'USO',
   'VICR',
   'VRT',

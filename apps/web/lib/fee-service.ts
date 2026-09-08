@@ -26,6 +26,8 @@ const claimDisabledReasons = [
 export type FeePosition = {
   id: string;
   target: string;
+  collectionToken?: string;
+  claimMode?: 'collect' | 'claim';
   payouts: FeePayout[];
   verification: 'live' | 'indexed';
   claimable: boolean;
@@ -39,7 +41,7 @@ export type FeeSource = {
   status: 'ready' | 'partial' | 'unavailable';
   reason?: (typeof feeUnavailableReasons)[number];
   nextCursor?: string | null;
-  coverage?: 'wallet_index' | 'configured_pools' | 'beneficiary_events';
+  coverage?: 'wallet_index' | 'configured_pools' | 'beneficiary_events' | 'configured_escrow';
   progress?: { scannedThroughBlock: string | null; toBlock: string };
   positions: FeePosition[];
   expiresAt: number;
@@ -50,6 +52,8 @@ export type ClaimQuote = {
   chainId: ChainId;
   address: string;
   target: string;
+  collectionToken?: string;
+  claimMode?: 'collect' | 'claim';
   escrowVersion?: 'current' | 'legacy';
   data: `0x${string}`;
   poolId?: `0x${string}`;
@@ -64,6 +68,15 @@ export type ClaimQuote = {
   operatorFeeWei: string;
   expiresAt: number;
 };
+
+export const stonksClaimAbi = parseAbi(['function collectAll(address token)', 'function claim(address token)', 'event Transfer(address indexed from,address indexed to,uint256 value)', 'event PayoutClaimed(address indexed to,address indexed token,uint256 amount)']);
+export const ponsClaimAbi = parseAbi([
+  'function claim(uint256 amount) returns (uint256)',
+  'function claimToken(address token, uint256 amount) returns (uint256)',
+  'event Claimed(address indexed recipient, uint256 amount)',
+  'event ClaimedToken(address indexed recipient, address indexed token, uint256 amount)',
+  'event Transfer(address indexed from, address indexed to, uint256 value)',
+]);
 
 export const claimAbi = parseAbi([
   'function claimFor(address recipient, address currency)',
@@ -210,8 +223,10 @@ export function parseFees(
     !equal(result.address, owner) ||
     result.chainId !== chainId ||
     result.padId !== padId ||
-    !['long', 'o1', 'longbow'].includes(padId) ||
+    !['long', 'o1', 'longbow', 'pons', 'stonks'].includes(padId) ||
     !supportsChain(padId, chainId) ||
+    (padId === 'pons' && result.status !== 'unavailable' &&
+      (result.coverage !== 'configured_escrow' || result.status !== 'partial' || result.nextCursor != null)) ||
     !['ready', 'partial', 'unavailable'].includes(result.status) ||
     (result.reason !== undefined &&
       (!feeUnavailableReasons.includes(result.reason) ||
@@ -220,7 +235,7 @@ export function parseFees(
     (result.nextCursor != null && !id(result.nextCursor)) ||
     (result.nextCursor != null && result.status !== 'partial') ||
     (result.coverage !== undefined &&
-      !['wallet_index', 'configured_pools', 'beneficiary_events'].includes(
+      !['wallet_index', 'configured_pools', 'beneficiary_events', 'configured_escrow'].includes(
         result.coverage,
       )) ||
     (result.progress !== undefined &&
@@ -240,6 +255,8 @@ export function parseFees(
         !id(position.id) ||
         !nonzeroAddress(position.target) ||
         !payouts(position.payouts) ||
+        (padId === 'pons' && (position.verification !== 'live' || position.payouts.length !== 1)) ||
+        (padId === 'stonks' && (!nonzeroAddress(position.collectionToken) || !['collect', 'claim'].includes(position.claimMode ?? '') || position.verification !== 'live')) ||
         !['live', 'indexed'].includes(position.verification) ||
         typeof position.claimable !== 'boolean' ||
         (isLockedPoolClaim(padId) &&
@@ -285,7 +302,16 @@ export async function loadFees(
 
 type FeeLookup = { chainId: ChainId; padId: PadId };
 export type FeeLookupResult = FeeLookup &
-  ({ source: FeeSource; error?: never } | { source?: never; error: unknown });
+  (
+    | {
+        source: FeeSource;
+        error?: never;
+        pageError?: unknown;
+        scanning?: boolean;
+        pages?: number;
+      }
+    | { source?: never; error: unknown }
+  );
 
 // Two launchpads can load together without flooding the shared RPC provider.
 // Navigation/account changes stop queued work; shared in-flight reads may finish.
@@ -301,9 +327,38 @@ export async function loadFeeSources(
       const source = sources[next++];
       let result: FeeLookupResult;
       try {
+        let page = await loadFees(owner, source.chainId, source.padId);
+        let pages = 1;
+        let pageError: unknown;
+        const seen = new Set<string>();
+        // Complete O1's bounded wallet index automatically. Long event scans can
+        // span thousands of pages, so their continuation remains explicit.
+        while (source.padId === 'o1' && page.nextCursor && isCurrent()) {
+          onResult({ ...source, source: page, scanning: true, pages });
+          if (!isCurrent()) return;
+          try {
+            if (seen.has(page.nextCursor) || pages >= 512)
+              throw new AppError('scan_limit');
+            seen.add(page.nextCursor);
+            const nextPage = await loadFees(
+              owner,
+              source.chainId,
+              source.padId,
+              page.nextCursor,
+            );
+            if (!isCurrent()) return;
+            page = mergeFeePages(page, nextPage);
+            pages++;
+          } catch (error) {
+            pageError = error;
+            break;
+          }
+        }
         result = {
           ...source,
-          source: await loadFees(owner, source.chainId, source.padId),
+          source: page,
+          pages,
+          ...(pageError ? { pageError } : {}),
         };
       } catch (error) {
         result = { ...source, error };
@@ -334,7 +389,7 @@ export function mergeFeePages(previous: FeeSource, page: FeeSource): FeeSource {
     const existing = positions.get(position.id);
     if (
       existing &&
-      (!equal(existing.target, position.target) ||
+      (!equal(existing.target, position.target) || existing.collectionToken !== position.collectionToken || existing.claimMode !== position.claimMode ||
         (existing.escrowVersion ?? 'current') !==
           (position.escrowVersion ?? 'current') ||
         existing.payouts.length !== position.payouts.length ||
@@ -369,10 +424,11 @@ export function validateClaim(value: unknown): ClaimQuote {
   if (
     !quote ||
     !id(quote.positionId) ||
-    !['long', 'o1', 'longbow'].includes(quote.kind) ||
+    !['long', 'o1', 'longbow', 'pons', 'stonks'].includes(quote.kind) ||
     !(isLockedPoolClaim(quote.kind)
       ? quote.chainId === 4663
-      : [4663, 8453].includes(quote.chainId)) ||
+      : quote.kind === 'stonks' ? quote.chainId === 8453 : [4663, 8453].includes(quote.chainId)) ||
+    (quote.kind === 'pons' && quote.chainId !== 4663) ||
     !nonzeroAddress(quote.address) ||
     !nonzeroAddress(quote.target) ||
     (quote.escrowVersion !== undefined &&
@@ -398,17 +454,35 @@ export function validateClaim(value: unknown): ClaimQuote {
     !/^0x[\da-f]+$/i.test(quote.data)
   )
     throw new AppError('invalid_response');
+  if (quote.kind === 'pons') {
+    if (quote.payouts.length !== 1 || quote.poolId !== undefined) throw new AppError('invalid_response');
+    try {
+      const decoded = decodeFunctionData({ abi: ponsClaimAbi, data: quote.data });
+      const native = /^0x0{40}$/i.test(quote.payouts[0].asset);
+      if (native
+        ? decoded.functionName !== 'claim' || quote.data.length !== 74 || decoded.args[0] !== BigInt(quote.payouts[0].claimableRaw)
+        : decoded.functionName !== 'claimToken' || quote.data.length !== 138 || !equal(decoded.args[0], quote.payouts[0].asset) || decoded.args[1] !== BigInt(quote.payouts[0].claimableRaw))
+        throw new Error();
+    } catch { throw new AppError('invalid_response'); }
+    return quote;
+  }
   let decoded;
   try {
     decoded = decodeFunctionData({
-      abi: quote.escrowVersion === 'legacy' ? legacyClaimAbi : claimAbi,
+      abi: quote.kind === 'stonks' ? stonksClaimAbi : quote.escrowVersion === 'legacy' ? legacyClaimAbi : claimAbi,
       data: quote.data,
     });
   } catch {
     throw new AppError('invalid_response');
   }
   if (
-    isLockedPoolClaim(quote.kind)
+    quote.kind === 'stonks'
+      ? !nonzeroAddress(quote.collectionToken) || !['collect', 'claim'].includes(quote.claimMode ?? '')
+        || quote.data.length !== 74 || decoded.functionName !== (quote.claimMode === 'collect' ? 'collectAll' : 'claim')
+        || !equal(decoded.args[0] as string, quote.collectionToken!)
+        || (quote.claimMode === 'claim' ? quote.payouts.length !== 1 || !equal(quote.collectionToken!, quote.payouts[0].asset)
+          : quote.payouts.length !== 2 || !quote.payouts.some(p => equal(p.asset, quote.collectionToken!)))
+      : isLockedPoolClaim(quote.kind)
       ? quote.payouts.length !== 2 ||
         decoded.functionName !== 'collectFees' ||
         quote.data.length !== 74 ||
@@ -418,7 +492,7 @@ export function validateClaim(value: unknown): ClaimQuote {
           (quote.escrowVersion === 'legacy' ? 'claim' : 'claimFor') ||
         quote.data.length !== 138 ||
         !equal(decoded.args[0], quote.address) ||
-        !equal(decoded.args[1], quote.payouts[0].asset)
+        !equal(decoded.args[1] as string, quote.payouts[0].asset)
   )
     throw new AppError('invalid_response');
   return quote;
@@ -437,6 +511,7 @@ export async function prepareClaim(
     quote.chainId !== source.chainId ||
     quote.kind !== source.padId ||
     quote.positionId !== position.id ||
+    quote.collectionToken !== position.collectionToken || quote.claimMode !== position.claimMode ||
     !equal(quote.target, position.target) ||
     (quote.escrowVersion ?? 'current') !==
       (position.escrowVersion ?? 'current') ||

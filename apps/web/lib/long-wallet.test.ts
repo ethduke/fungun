@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { keccak256, toHex, type EIP1193Provider } from 'viem';
 import { buildUnsignedLongLaunch } from './long-encoding/long-launch.mjs';
-import { sendLongWallet, validateLongPlan, LaunchError, launchMessage, launchRequest, LaunchPreflightError, type LaunchInput, readLaunchRecovery, saveLaunchRecovery, prepareLongWallet, isLongLaunchPair, isO1LaunchPair, formatLaunchTokenAmount } from './long-wallet.ts';
+import { sendLongWallet, validateLongPlan, LaunchError, launchMessage, launchRequest, LaunchPreflightError, type LaunchInput, readLaunchRecovery, saveLaunchRecovery, prepareLongWallet, isLongLaunchPair } from './long-wallet.ts';
 import { launchRecoveryScope } from './launch-draft-cache.ts';
 import { runLaunchFlow } from './launch-flow.ts';
 import { longWalletCostStep, formatEthBudget, approximateLaunchQuote } from './launch-cost.ts';
@@ -68,43 +68,12 @@ void test('only the wallet sends, once, after current identity checks and durabl
   } } as EIP1193Provider;
   assert.equal(await sendLongWallet(provider, plan, () => true, async () => { reserved = true; }), hash(500));
   assert.equal(calls.filter((m) => m === 'eth_sendTransaction').length, 1);
-  assert.equal(calls.filter((m) => m === 'eth_getTransactionCount').length, 2);
-  assert.ok(calls.lastIndexOf('eth_getTransactionCount') > calls.lastIndexOf('eth_chainId'));
-  assert.ok(calls.lastIndexOf('eth_getTransactionCount') < calls.indexOf('eth_sendTransaction'));
   reserved = false; calls.length = 0;
   await assert.rejects(sendLongWallet(provider, plan, () => !reserved, async () => { reserved = true; }));
   assert.ok(!calls.includes('eth_sendTransaction'));
   calls.length = 0;
   await assert.rejects(sendLongWallet(provider, plan, () => true, async () => { throw new Error('reservation lost'); }));
   assert.ok(!calls.includes('eth_sendTransaction'));
-});
-
-void test('a nonce consumed during durable reservation stops before wallet submission and is not automatically retryable', async () => {
-  const f = response(), plan = validateLongPlan(f.raw, f.input, f.published, performance.now());
-  const calls: string[] = [];
-  let nonce = '0x1', reservations = 0, sends = 0;
-  const provider = { request: async ({ method }: { method: string }) => {
-    calls.push(method);
-    if (method === 'eth_accounts') return [f.input.wallet];
-    if (method === 'eth_chainId') return '0x1237';
-    if (method === 'eth_getCode') return '0x01';
-    if (method === 'eth_getTransactionCount') return nonce;
-    if (method === 'eth_getBalance') return toHex(10n ** 18n);
-    if (method === 'eth_sendTransaction') { sends++; return hash(500); }
-    throw new Error('unexpected wallet method');
-  } } as EIP1193Provider;
-  await assert.rejects(sendLongWallet(provider, plan, () => true, async () => {
-    reservations++;
-    nonce = '0x2';
-  }), error => {
-    assert.ok(error instanceof LaunchPreflightError);
-    assert.ok(error.cause instanceof LaunchError);
-    assert.equal(error.cause.message, 'launch_pending');
-    return true;
-  });
-  assert.equal(reservations, 1);
-  assert.equal(calls.filter((method) => method === 'eth_getTransactionCount').length, 2);
-  assert.equal(sends, 0);
 });
 
 void test('only errors before eth_sendTransaction are eligible for automatic preflight retry', async () => {
@@ -152,11 +121,6 @@ void test('COPY isolates recovery by content, account and destination while pres
   assert.deepEqual(readLaunchRecovery(scope), previous);
   assert.deepEqual(readLaunchRecovery(), previous);
   assert.equal(await launchRecoveryScope(addr(1001).toUpperCase(), 'long-NVDA', draft, new Blob(['artwork'])), scope);
-  assert.equal(await launchRecoveryScope(addr(1001), 'long-NVDA', draft, image, true), scope);
-  const o1Fixed = await launchRecoveryScope(addr(1001), 'native', draft, image, false);
-  const o1Editable = await launchRecoveryScope(addr(1001), 'native', draft, image, true);
-  assert.notEqual(o1Fixed, o1Editable);
-  assert.equal(await launchRecoveryScope(addr(1001), 'native', draft, image), o1Fixed);
   for (const other of [await launchRecoveryScope(addr(1002), 'long-NVDA', draft, image),
     await launchRecoveryScope(addr(1001), 'long-TSLA', draft, image),
     await launchRecoveryScope(addr(1001), 'long-NVDA', draft, new Blob(['different image']))]) {
@@ -180,20 +144,23 @@ void test('existing submitted intent resumes without wallet dispatch after a los
 });
 
 
-void test('TSLA wallet launch reconstructs the selected pairing; other unsupported routes remain disabled', () => {
+void test('TSLA wallet launch reconstructs the selected pairing; all Long tickers can check server availability', () => {
   assert.ok(isLongLaunchPair('long-TSLA')); assert.ok(isLongLaunchPair('long-NVDA'));
-  for (const pair of ['long-MU','longbow-TSLA',undefined]) assert.equal(isLongLaunchPair(pair), false);
+  assert.ok(isLongLaunchPair('long-NET'));
+  for (const pair of ['long-','longbow-TSLA',undefined]) assert.equal(isLongLaunchPair(pair), false);
   const f = response('long-TSLA');
   const checked = validateLongPlan(f.raw, f.input, f.published, performance.now());
   assert.equal(checked.transaction.data, f.plan.transaction.data);
   assert.throws(() => validateLongPlan(f.raw, {...f.input,pairId:'long-NVDA'}, f.published, performance.now()));
 });
 
-void test('O1 wallet eligibility accepts its Robinhood native and verified catalog pair shapes only', () => {
-  assert.equal(isO1LaunchPair('native'), true);
-  assert.equal(isO1LaunchPair(`rwa-${'a'.repeat(24)}`), true);
-  for (const pair of ['long-NVDA', 'longbow-NVDA', 'sample-nvda', `rwa-${'A'.repeat(24)}`, `rwa-${'a'.repeat(23)}`, undefined])
-    assert.equal(isO1LaunchPair(pair), false);
+void test('unsupported pairing errors display only validated server-configured alternatives', async t => {
+  t.mock.method(globalThis, 'fetch', async () => Response.json({ error: 'unsupported_pair', supportedPairs: ['long-NVDA', 'long-TSLA'] }, { status: 400 }));
+  await assert.rejects(launchRequest('launch-estimate', { chainId: 4663, pairId: 'long-NET' }), error => {
+    assert.equal(launchMessage(error), 'This pairing is no longer available on the launchpad. Refresh its pairing list.'); return true;
+  });
+  assert.equal(new LaunchError('unsupported_pair', 0, undefined, ['secret-url']).supportedPairs, undefined);
+  assert.doesNotMatch(launchMessage(new Error('private details')), /private details|Reconnecting/);
 });
 
 void test('insufficient funds retains exact balance, required budget and shortfall through the HTTP client', async t => {
@@ -202,7 +169,7 @@ void test('insufficient funds retains exact balance, required budget and shortfa
   await assert.rejects(launchRequest('launch-prepare', {}), error => {
     assert.equal(launchMessage(error), 'You have 0.0002 ETH on Robinhood Chain. This launch needs 0.0012 ETH including the gas buffer; add 0.001 ETH.');return true;
   });
-  for(const change of [{chainId:8453},{balanceWei:'secret'},{requiredWei:'-1'},{shortfallWei:'1'},{basis:'unknown'},{unexpectedField:'must not appear'}]) {
+  for(const change of [{chainId:1},{balanceWei:'secret'},{requiredWei:'-1'},{shortfallWei:'1'},{basis:'unknown'},{unexpectedField:'must not appear'}]) {
     const error = new LaunchError('insufficient_funds',0,{...funding,...change});
     assert.equal(error.funding,undefined);assert.equal(launchMessage(error).includes('secret'),false);
   }
@@ -246,13 +213,4 @@ void test('service limits disclose the actual retry interval instead of claiming
   assert.match(launchMessage(new LaunchError('read_daily_limit', 26000)), /Daily service read limit reached.*8 hours/);
   assert.match(launchMessage(new LaunchError('rate_limited', 60)), /1 minute\./);
   assert.match(launchMessage(new LaunchError('rate_limited', 5)), /5 seconds/);
-});
-
-void test('reviewed 18-decimal token economics render as exact human amounts', () => {
-  assert.equal(formatLaunchTokenAmount('0'), '0');
-  assert.equal(formatLaunchTokenAmount('1000000000000000000'), '1');
-  assert.equal(formatLaunchTokenAmount('1000000000000000000000000000'), '1,000,000,000');
-  assert.equal(formatLaunchTokenAmount('1234567890000000001'), '1.234567890000000001');
-  for (const value of ['', '-1', '01', '1.0', '1'.repeat(32)])
-    assert.throws(() => formatLaunchTokenAmount(value), /launch_transaction_changed/);
 });

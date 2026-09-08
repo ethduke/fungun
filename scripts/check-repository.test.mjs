@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtempSync, mkdirSync, writeFileSync, rmSync } from 'node:fs';
+import { mkdtempSync, mkdirSync, writeFileSync, rmSync, readFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { execFileSync } from 'node:child_process';
@@ -185,5 +185,16 @@ test('CLI reports filenames and rules without credential contents', (t) => {
     assert.ok(output.includes('unsafe.json'));
     assert.ok(!output.includes('synthetic-'));
     assert.ok(!output.includes(credential()));
+  }
+});
+
+
+test('only exact reviewed public deployment files may contain literal contract identities', () => {
+  for (const path of ['apps/api/src/o1-fee-profiles.mjs', 'docs/o1-fee-verification.md']) {
+    const content = readFileSync(new URL('../' + path, import.meta.url));
+    assert.deepEqual(analyzeBlob(path, content), []);
+    assert.ok(analyzeBlob('unreviewed.mjs', content).includes('literal-evm-address-key-or-signature'));
+    assert.ok(analyzeBlob(path, Buffer.concat([content, Buffer.from('\n' + hex(64))])).includes('literal-evm-address-key-or-signature'));
+    assert.ok(analyzeBlob(path, Buffer.from(credential())).includes('non-placeholder-credential-assignment'));
   }
 });

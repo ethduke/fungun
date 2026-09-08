@@ -171,7 +171,7 @@ test("disabled asset publication cannot call the decoder or accept spoofed reque
   const disabled = await post("prepare", input);
   assert.equal(disabled.status, 503);
   assert.equal((await disabled.json()).error, "asset_uploads_disabled");
-  for (let index = 0; index < 29; index++) await post("prepare", input);
+  for (let index = 0; index < 299; index++) await post("prepare", input);
   const limited = await post("prepare", input, {
     "fly-client-ip": "192.0.2.1",
     "x-forwarded-for": "192.0.2.2",

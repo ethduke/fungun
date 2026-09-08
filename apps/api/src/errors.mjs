@@ -9,9 +9,9 @@ export class ServiceError extends Error {
 }
 
 export class InsufficientFundsError extends ServiceError {
-  constructor(balance, required, basis = "simulation") {
+  constructor(balance, required, basis = "simulation", chainId = 4663) {
     super("insufficient_funds", 409);
-    this.funding = { chainId: 4663, balanceWei: balance.toString(), requiredWei: required.toString(),
+    this.funding = { chainId, balanceWei: balance.toString(), requiredWei: required.toString(),
       shortfallWei: (required - balance).toString(), basis };
   }
 }

@@ -42,8 +42,6 @@ volume. Actual Fly architecture, Machine and volume checks remain deployment gat
 - API runtime: the same `APP_ORIGIN`, approved Machine identity and only reviewed
   [API runtime settings](runtime-secrets.md). No wallet private key or bulk `.env`
   import. Claims, launches and payments stay disabled pending separate verification.
-  O1 launch switches, contract profiles and token/extra-quote lists belong only on
-  this API app; never configure them on the web or decoder app.
 
 Existing organization and region defaults can be reused. Do not overwrite the
 existing bot app, use its signing/Telegram secrets or reuse its data volume.

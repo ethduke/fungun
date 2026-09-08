@@ -1,6 +1,6 @@
 import type { ChainId, Destination, LaunchpadId } from './launch-model';
 import { parseLaunchFeeSource, type LaunchFeeSource } from './launch-fee-source.ts';
-import type { LongPlan } from './long-wallet.ts';
+import { launchpadForPair, type LongPlan } from './long-wallet.ts';
 
 const WEI_PER_ETH = 10n ** 18n;
 const MAX_AMOUNT = (1n << 256n) - 1n;
@@ -8,6 +8,7 @@ export const HIGH_NETWORK_FEE_WEI = 10n ** 16n;
 
 export type NetworkEstimate =
   | { chainId: 4663; gasUnits: bigint; gasPriceWei: bigint }
+  | { chainId: 8453; gasUnits: bigint; gasPriceWei: bigint; l1DataFeeWei: bigint; operatorFeeWei: bigint }
   | {
       chainId: 8453;
       gasUnits: bigint;
@@ -26,9 +27,11 @@ export type CostStep = {
 };
 
 /** Display the gas limit actually requested from the wallet, including its buffer. */
-export function longWalletCostStep(plan: Pick<LongPlan, 'transaction' | 'launchpadFeeWei'>): CostStep {
+export function longWalletCostStep(plan: Pick<LongPlan, 'transaction' | 'launchpadFeeWei' | 'baseFees'>): CostStep {
   return { kind: 'launch', valueWei: BigInt(plan.transaction.value), launchpadFeeWei: BigInt(plan.launchpadFeeWei),
-    network: { chainId: 4663, gasUnits: BigInt(plan.transaction.gas), gasPriceWei: BigInt(plan.transaction.gasPrice) } };
+    network: plan.transaction.chainId === '0x2105' ? { chainId: 8453, gasUnits: BigInt(plan.transaction.gas), gasPriceWei: BigInt(plan.transaction.gasPrice),
+      l1DataFeeWei: BigInt(plan.baseFees!.l1DataFeeWei), operatorFeeWei: BigInt(plan.baseFees!.operatorFeeWei) }
+      : { chainId: 4663, gasUnits: BigInt(plan.transaction.gas), gasPriceWei: BigInt(plan.transaction.gasPrice) } };
 }
 
 export type LaunchCostQuote = {
@@ -41,13 +44,13 @@ export type LaunchCostQuote = {
 };
 
 export type ApproximateLaunchCost = {
-  chainId: 4663; pairId: 'long-NVDA' | 'long-TSLA'; gasUnits: bigint; gasPriceWei: bigint;
+  chainId: ChainId; baseFees?: { l1DataFeeWei: bigint; operatorFeeWei: bigint }; pairId: string; gasUnits: bigint; gasPriceWei: bigint;
   basis: 'recent-simulations' | 'gas-limit'; expiresAt: number;
   launchpadFeeWei: bigint; launchFeeSource: LaunchFeeSource;
 };
-export function parseApproximateLaunchCost(raw: unknown, started: number, pairId: 'long-NVDA' | 'long-TSLA' = 'long-NVDA'): ApproximateLaunchCost {
+export function parseApproximateLaunchCost(raw: unknown, started: number, pairId: string = 'long-NVDA'): ApproximateLaunchCost {
   const value = raw as Record<string, unknown>;
-  if (!value || value.chainId !== 4663 || value.pairId !== pairId || value.launchpadFeeWei !== '0'
+  if (!value || (value.chainId !== 4663 && value.chainId !== 8453) || value.pairId !== pairId || typeof value.launchpadFeeWei !== 'string' || !/^(0|[1-9][0-9]{0,16})$/.test(value.launchpadFeeWei)
     || !['recent-simulations', 'gas-limit'].includes(String(value.basis))
     || typeof value.gasUnits !== 'string' || !/^\d{1,7}$/.test(value.gasUnits)
     || typeof value.gasPriceWei !== 'string' || !/^\d{1,13}$/.test(value.gasPriceWei)
@@ -56,19 +59,25 @@ export function parseApproximateLaunchCost(raw: unknown, started: number, pairId
   const launchFeeSource = parseLaunchFeeSource(value.launchFeeSource);
   if (launchFeeSource.amountWei !== value.launchpadFeeWei) throw new Error('Invalid launch fee');
   const quoted = Number(value.quotedAt), expires = Number(value.expiresAt), server = Number(value.serverTime);
-  if (gasUnits < 21000n || gasUnits > 3000000n || gasPriceWei <= 0n || gasPriceWei > 10n ** 12n
+  if (gasUnits < 21000n || gasUnits > (['o1', 'stonks', 'pons'].includes(launchpadForPair(pairId)) ? 8000000n : 3000000n) || gasPriceWei <= 0n || gasPriceWei > 10n ** 12n
     || expires - quoted !== 300000 || server < quoted || server >= expires || !Number.isFinite(started) || started < 0)
     throw new Error('Invalid gas estimate');
-  return { chainId: 4663, pairId, gasUnits, gasPriceWei, launchpadFeeWei: BigInt(value.launchpadFeeWei), launchFeeSource,
+  let baseFees: ApproximateLaunchCost['baseFees'];
+  if (value.chainId === 8453) {
+    const fees = value.baseFees as Record<string, unknown>;
+    if (!fees || ![fees.l1DataFeeWei, fees.operatorFeeWei].every(v => typeof v === 'string' && /^(0|[1-9][0-9]{0,16})$/.test(v))) throw new Error('Invalid Base fees');
+    baseFees = { l1DataFeeWei: BigInt(fees.l1DataFeeWei as string), operatorFeeWei: BigInt(fees.operatorFeeWei as string) };
+  }
+  return { chainId: value.chainId as ChainId, baseFees, pairId, gasUnits, gasPriceWei, launchpadFeeWei: BigInt(value.launchpadFeeWei), launchFeeSource,
     basis: value.basis as ApproximateLaunchCost['basis'], expiresAt: started + expires - server };
 }
 export function approximateLaunchQuote(estimate: ApproximateLaunchCost | null, contextKey: string, now: number): LaunchCostQuote | null {
   if (!estimate || estimate.expiresAt <= now) return null;
   const gasUnits = estimate.basis === 'gas-limit' ? estimate.gasUnits
     : (estimate.gasUnits * 120n + 99n) / 100n;
-  return { contextKey, chainId: 4663, quotedAt: now, expiresAt: now + 30000, nativeOnly: true,
-    pads: [{ id: 'long', launchFeeSource: estimate.launchFeeSource, steps: [{ kind: 'launch', valueWei: estimate.launchpadFeeWei, launchpadFeeWei: estimate.launchpadFeeWei,
-      network: { chainId: 4663, gasUnits, gasPriceWei: estimate.gasPriceWei } }] }] };
+  return { contextKey, chainId: estimate.chainId, quotedAt: now, expiresAt: now + 30000, nativeOnly: true,
+    pads: [{ id: launchpadForPair(estimate.pairId), launchFeeSource: estimate.launchFeeSource, steps: [{ kind: 'launch', valueWei: estimate.launchpadFeeWei, launchpadFeeWei: estimate.launchpadFeeWei,
+      network: estimate.chainId === 8453 ? { chainId: 8453, gasUnits, gasPriceWei: estimate.gasPriceWei, ...estimate.baseFees! } : { chainId: 4663, gasUnits, gasPriceWei: estimate.gasPriceWei } }] }] };
 }
 
 export type UsdRate = {
@@ -171,6 +180,11 @@ export function estimateNetworkFee(input: NetworkEstimate): bigint | null {
     const fee = input.gasUnits * input.gasPriceWei;
     return amount(fee) ? fee : null;
   }
+  if (input.chainId === 8453 && 'gasPriceWei' in input) {
+    if (![input.gasPriceWei, input.l1DataFeeWei, input.operatorFeeWei].every(amount) || input.gasPriceWei === 0n) return null;
+    const fee = input.gasUnits * input.gasPriceWei + input.l1DataFeeWei + input.operatorFeeWei;
+    return amount(fee) ? fee : null;
+  }
   if (
     input.chainId !== 8453 ||
     ![
@@ -246,8 +260,8 @@ export function calculateLaunchCosts(
   padLoop: for (const pad of quote.pads) {
     if (
       !selection.pads.includes(pad.id) ||
-      !['long', 'o1', 'longbow'].includes(pad.id) ||
-      (pad.id !== 'o1' && quote.chainId !== 4663) ||
+      !['long', 'o1', 'longbow', 'stonks', 'pons'].includes(pad.id) ||
+      (pad.id === 'stonks' ? quote.chainId !== 8453 : pad.id !== 'o1' && quote.chainId !== 4663) ||
       !Array.isArray(pad.steps) ||
       pad.steps.length > 8 ||
       pad.steps.some((step) => !step || typeof step !== 'object') ||

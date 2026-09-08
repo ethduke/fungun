@@ -12,7 +12,6 @@ import {
   highGasNotice,
   HIGH_NETWORK_FEE_WEI,
   launchCostKey,
-  longWalletCostStep,
   type CostStep,
   type LaunchCostQuote,
   type NetworkEstimate,
@@ -153,27 +152,6 @@ await test('adding Longbow cannot present a total from only Long and O1 quotes',
   assert.equal(result.reason, 'incomplete');
   assert.equal(result.total, null);
   assert.equal(result.pads.longbow, undefined);
-});
-
-await test('an exact O1 wallet plan is charged to O1 with its payable fee counted once', () => {
-  const quotedAt = 100;
-  const launchFee = 10n ** 15n;
-  const cost = longWalletCostStep({
-    transaction: {
-      chainId: '0x1237', from: '0x1', to: '0x2', data: '0x', nonce: '0x0',
-      value: `0x${launchFee.toString(16)}`, gas: '0x493e0', gasPrice: '0x3b9aca00',
-    },
-    launchpadFeeWei: launchFee.toString(),
-  });
-  const result = calculateLaunchCosts({
-    contextKey: 'o1-draft', chainId: 4663, quotedAt, expiresAt: quotedAt + 30_000,
-    nativeOnly: true, pads: [{ id: 'o1', steps: [cost] }],
-  }, { contextKey: 'o1-draft', chainId: 4663, pads: ['o1'] }, quotedAt + 1);
-  assert.equal(result.pads.long, undefined);
-  assert.equal(result.pads.o1?.launchpadWei, launchFee);
-  assert.equal(result.pads.o1?.otherValueWei, 0n);
-  assert.equal(result.pads.o1?.networkWei, 300_000n * 1_000_000_000n);
-  assert.equal(result.total?.totalWei, launchFee + 300_000n * 1_000_000_000n);
 });
 await test('unknown, expired, future and overlong quotes cannot be used', () => {
   assert.equal(calculateLaunchCosts(null, selection, 150).reason, 'not_ready');

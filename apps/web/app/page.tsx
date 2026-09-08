@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import Image from 'next/image';
 import {
   Check,
@@ -21,22 +21,20 @@ import {
   CollapsibleTrigger,
 } from '@/components/ui/collapsible';
 import { LaunchpadCard } from '@/components/launchpad-card';
-import { LongLaunch, type LongCosts } from '@/components/long-launch';
+import { type LongCosts } from '@/components/long-launch';
+import { LaunchQueue } from '@/components/launch-queue';
 import { LaunchSection } from '@/components/launch-section';
 import { BulletProgress } from '@/components/launch-motion';
 import { ImageGeneration } from '@/components/image-generation';
 import {
   autofillCoinName,
-  IMAGE_LIMIT,
-  imageFileError,
-  imageKind,
   isWebviewChain,
   normalizeTicker,
   readablePads,
   selectChain,
+  selectDestination,
   supportsChain,
   validateDraft,
-  walletLaunchDestination,
   type ChainId,
   type Destination,
 } from '@/lib/launch-model';
@@ -46,10 +44,18 @@ import { useReadService } from '@/lib/use-read-service';
 import { tickerAvailability } from '@/lib/auto-ticker';
 import { launchCostKey } from '@/lib/launch-cost';
 import { useConnectedAccount } from '@/lib/account-context';
+import {
+  COPIED_IMAGE_ERROR,
+  ImageRequests,
+  copiedTokenImage,
+  tokenImageSource,
+  validateDraftImage,
+  type ImageRequest,
+} from '@/lib/copied-token-image';
 
 export default function Home() {
   const account = useConnectedAccount();
-  const [longCosts, setLongCosts] = useState<LongCosts>(null);
+  const [padCosts, setPadCosts] = useState<Record<string, LongCosts>>({});
   const { hydrated, cacheState, cacheError, retryCache } = useDraftCache();
   const [selection, setSelection] = useDraftField('selection');
   const { chainId, destinations } = selection;
@@ -63,9 +69,14 @@ export default function Home() {
   const [dragging, setDragging] = useState(false);
   const [generationOpen, setGenerationOpen] = useState(false);
   const fileInput = useRef<HTMLInputElement>(null);
-  const imageSequence = useRef(0);
+  const imageRequests = useRef(new ImageRequests());
   const active = destinations.filter((pad) => pad.selected);
-  const walletDestination = walletLaunchDestination(destinations);
+  const offered = active.map(pad => padCosts[pad.id]).filter((cost): cost is NonNullable<LongCosts> => !!cost);
+  const longCosts = offered.length === active.length && offered.length ? {
+    quote: { ...offered[0].quote, quotedAt: Math.max(...offered.map(c => c.quote.quotedAt)),
+      expiresAt: Math.min(...offered.map(c => c.quote.expiresAt)), pads: offered.flatMap(c => c.quote.pads) },
+    usd: offered[0].usd,
+  } : null;
   const readPads = readablePads(active.map((pad) => pad.id));
   const reads = useReadService(
     chainId,
@@ -74,6 +85,10 @@ export default function Home() {
   );
   const availability = tickerAvailability(reads.check, chainId, ticker, readPads);
   const tickerReserved = availability === 'reserved';
+  const reservationLabel = active
+    .filter((pad) => pad.id === 'long' || pad.id === 'longbow')
+    .map((pad) => pad.id === 'longbow' ? 'Longbow' : 'Long')
+    .join(' / ');
   const errors = validateDraft(
     { name, ticker, description, hasImage: !!image },
     destinations,
@@ -87,30 +102,83 @@ export default function Home() {
 
   useEffect(
     () => () => {
-      imageSequence.current += 1;
+      imageRequests.current.cancel();
     },
     [],
   );
 
+  const loadImage = useCallback(
+    async (
+      load: () => Promise<Blob>,
+      request: ImageRequest,
+      copied = false,
+    ) => {
+      setImageError('');
+      setImagePending(true);
+      try {
+        const file = await load();
+        if (!request.isCurrent()) return;
+        const source = await validateDraftImage(file);
+        if (request.isCurrent())
+          setImage({
+            url: URL.createObjectURL(source),
+            size: source.size,
+            blob: source,
+          });
+      } catch (error) {
+        if (!request.isCurrent()) return;
+        setImage(null);
+        const safeErrors = [
+          'Choose an image smaller than 2 MiB.',
+          'Choose a valid PNG, JPEG, WebP or GIF image.',
+          'Use an image no larger than 4096 × 4096 pixels.',
+        ];
+        setImageError(
+          copied
+            ? COPIED_IMAGE_ERROR
+            : error instanceof Error && safeErrors.includes(error.message)
+              ? error.message
+              : 'This image could not be decoded. Choose another file.',
+        );
+      } finally {
+        if (request.isCurrent()) setImagePending(false);
+      }
+    },
+    [setImage],
+  );
+
   useEffect(() => {
     function copyTrackedToken(event: Event) {
-      if (!(event instanceof CustomEvent)) return;
+      if (!hydrated || !(event instanceof CustomEvent)) return;
       const { name: copiedName, ticker: copiedTicker } = event.detail ?? {};
-      if (typeof copiedName !== 'string' || typeof copiedTicker !== 'string') return;
+      if (typeof copiedName !== 'string' || typeof copiedTicker !== 'string')
+        return;
       // A pending upload must not attach another token's artwork to this draft.
-      imageSequence.current += 1;
+      const request = imageRequests.current.begin();
       setName(copiedName);
       setTicker(copiedTicker);
       setImage(null);
       setImagePending(false);
       setImageError('');
-      document.querySelector('[aria-labelledby="coin-details-heading"]')
+      document
+        .querySelector('[aria-labelledby="coin-details-heading"]')
         ?.scrollIntoView({ behavior: 'instant', block: 'start' });
       document.getElementById('coin-name')?.focus({ preventScroll: true });
+      const source = tokenImageSource(event.detail.imageSource);
+      if (source)
+        void loadImage(
+          () => copiedTokenImage(source, request.signal),
+          request,
+          true,
+        );
     }
     document.addEventListener('fungun:copy-tracked-token', copyTrackedToken);
-    return () => document.removeEventListener('fungun:copy-tracked-token', copyTrackedToken);
-  }, [setName, setTicker, setImage]);
+    return () =>
+      document.removeEventListener(
+        'fungun:copy-tracked-token',
+        copyTrackedToken,
+      );
+  }, [hydrated, setName, setTicker, setImage, loadImage]);
 
   usePreviewTools(
     () => ({
@@ -138,40 +206,7 @@ export default function Home() {
 
   async function selectImage(file?: File) {
     if (!file || !hydrated) return;
-    const sequence = ++imageSequence.current;
-    setImageError('');
-    setImagePending(true);
-    try {
-      if (!file.size || file.size > IMAGE_LIMIT)
-        throw new Error('Choose an image smaller than 2 MiB.');
-      const header = new Uint8Array(await file.slice(0, 32).arrayBuffer());
-      const error = imageFileError(file.size, file.type, header);
-      if (error) throw new Error(error);
-      const source = file.slice(0, file.size, imageKind(header) ?? '');
-      const bitmap = await createImageBitmap(source);
-      const oversized = bitmap.width > 4096 || bitmap.height > 4096;
-      bitmap.close();
-      if (oversized)
-        throw new Error('Use an image no larger than 4096 × 4096 pixels.');
-      if (sequence === imageSequence.current)
-        setImage({ url: URL.createObjectURL(source), size: file.size, blob: source });
-    } catch (error) {
-      if (sequence === imageSequence.current) {
-        setImage(null);
-        const safeErrors = [
-          'Choose an image smaller than 2 MiB.',
-          'Choose a valid PNG, JPEG, WebP or GIF image.',
-          'Use an image no larger than 4096 × 4096 pixels.',
-        ];
-        setImageError(
-          error instanceof Error && safeErrors.includes(error.message)
-            ? error.message
-            : 'This image could not be decoded. Choose another file.',
-        );
-      }
-    } finally {
-      if (sequence === imageSequence.current) setImagePending(false);
-    }
+    await loadImage(() => Promise.resolve(file), imageRequests.current.begin());
   }
 
   function updateDestination(destination: Destination) {
@@ -183,9 +218,7 @@ export default function Home() {
         return current;
       return {
         ...current,
-        destinations: current.destinations.map((pad) =>
-          pad.id === destination.id ? destination : pad,
-        ),
+        destinations: selectDestination(current.destinations, destination),
       };
     });
   }
@@ -308,7 +341,7 @@ export default function Home() {
                     )}
                     {imagePending && (
                       <span className="image-pending">
-                        <BulletProgress label="Checking image…" />
+                        <BulletProgress label="Loading image…" />
                       </span>
                     )}
                   </button>
@@ -323,7 +356,7 @@ export default function Home() {
                         size="icon-sm"
                         aria-label="Remove coin image"
                         onClick={() => {
-                          imageSequence.current += 1;
+                          imageRequests.current.cancel();
                           setImage(null);
                           setImagePending(false);
                         }}
@@ -431,8 +464,13 @@ export default function Home() {
                     </p>
                   )}
                   {ticker && !errors.ticker && (
-                    <output id="ticker-availability" className="ticker-availability" data-state={availability} aria-live="polite">
-                      {tickerReserved ? 'RESERVED' : reads.checking ? 'Checking…' : availability === 'unreserved' ? 'UNRESERVED' : 'Availability unavailable'}
+                    <output id="ticker-availability" className="ticker-availability" aria-live="polite">
+                      {reservationLabel && (
+                        <span data-state={availability}>
+                          {reservationLabel}: {tickerReserved ? 'Reserved' : reads.checking ? 'Checking…' : availability === 'unreserved' ? 'Available' : 'Couldn’t check availability. Focus the ticker to retry.'}
+                        </span>
+                      )}
+                      {readPads.includes('o1') && <span>O1: Any ticker is allowed.</span>}
                     </output>
                   )}
                 </div>
@@ -488,8 +526,8 @@ export default function Home() {
                     Robinhood
                   </label>
                   <label className="chain-choice" htmlFor="chain-base">
-                    <RadioGroupItem id="chain-base" value="8453" disabled />
-                    Base (paused)
+                    <RadioGroupItem id="chain-base" value="8453" />
+                    Base
                   </label>
                 </RadioGroup>
                 {destinations
@@ -499,11 +537,14 @@ export default function Home() {
                       key={pad.id}
                       destination={pad}
                       onChange={updateDestination}
-                      catalog={pad.id === 'longbow' ? undefined : reads.catalog?.pads[pad.id]}
+                      catalog={pad.id === 'longbow' || pad.id === 'pons' ? undefined : reads.catalog?.pads[pad.id]}
                       loading={reads.catalogLoading}
                       onPairingOpen={reads.ensureCatalog}
                     />
                   ))}
+                {chainId === 4663 && <p className="launch-disclosure">
+                  Long and Longbow share a 24-hour ticker reservation. Choose one; selecting the other switches your choice.
+                </p>}
                 {errors.destinations && (
                   <p role="alert" className="field-error">
                     {errors.destinations}
@@ -538,12 +579,13 @@ export default function Home() {
                 catalog={reads.catalog}
                 now={reads.now}
               >
-                <LongLaunch
-                  enabled={chainId === 4663 && !!walletDestination}
-                  ready={!tickerReserved && active.length === 1 && !!walletDestination && !imagePending && !Object.keys(errors).length}
-                  padId={walletDestination?.id === 'long' || walletDestination?.id === 'o1' ? walletDestination.id : undefined}
-                  pairId={walletDestination?.pairId}
-                  editableMetadata={walletDestination?.id === 'o1' ? walletDestination.editableMetadata : undefined}
+                <LaunchQueue
+                  key={JSON.stringify([chainId, account.address?.toLowerCase(), name, ticker, description, image?.url,
+                    active.map(pad => [pad.id, pad.pairId, pad.editableMetadata])])}
+                  destinations={active}
+                  enabled={isWebviewChain(chainId)}
+                  ready={!imagePending && !Object.keys(errors).length}
+                  tickerReserved={tickerReserved}
                   name={name} ticker={ticker} description={description} image={image}
                   contextKey={launchCostKey({
                   name,
@@ -554,7 +596,7 @@ export default function Home() {
                   walletChainId: account.chainId,
                   destinations,
                 })}
-                  onCosts={setLongCosts}
+                  onCosts={(padId, costs) => setPadCosts(previous => ({ ...previous, [padId]: costs }))}
                 />
               </LaunchSection>
             </div>
@@ -573,7 +615,15 @@ export default function Home() {
           <span className="footer-year">2026</span>
         </footer>
       </main>
-      <ImageGeneration open={generationOpen} onOpenChange={setGenerationOpen} />
+      <ImageGeneration
+        open={generationOpen}
+        onOpenChange={setGenerationOpen}
+        onImageAttach={() => {
+          imageRequests.current.cancel();
+          setImagePending(false);
+          setImageError('');
+        }}
+      />
     </>
   );
 }
