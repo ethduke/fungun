@@ -5,9 +5,14 @@ Node SDK signs locally and submits through the agent owner's RPC. After setup,
 `deploy` and `watch` run without confirmation prompts. Neither the API nor the
 image provider receives the signing key. This release supports Long only.
 
-The implementation is disabled by default and has not been deployed by this
-change. Tests use synthetic contracts and mocked chain responses, not live
-transactions. Enable it against the existing configured Long and artwork services.
+The hosted agent API is disabled by default and has not been rolled out by this
+change. Automated tests use synthetic contracts and mocked chain responses.
+On September 8, 2026, a separate agent completed one live Long/NVDA smoke test
+through the merged SDK and a local authenticated API, using the existing public
+artwork service. Independent chain checks verified the successful receipt, launch
+event, deployed bytecode and token name/symbol. The signer stayed local; the test
+used neutral artwork and no paid image generation. Enable the hosted API against
+the existing configured Long and artwork services using the setup below.
 
 ## 1. Configure the service and access
 

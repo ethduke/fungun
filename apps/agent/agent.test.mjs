@@ -273,6 +273,8 @@ test("retryable reservation refreshes without repeating any prior signing state"
   await agent.journal.lock(async (j) => {
     j.data.intents.a = {
       state: "reserving",
+      day: "2000-01-01",
+      reservedWei: "100",
       plan: { id: "a" },
       draft: { name: "Moon", ticker: "MOON", description: "" },
       image: { mode: "none" },
@@ -284,6 +286,13 @@ test("retryable reservation refreshes without repeating any prior signing state"
   assert.equal(prepareCalls, 1);
   assert.deepEqual(counts(), { signed: 0, sent: 0 });
   await agent.journal.lock(async (j) => {
+    assert.equal(j.data.intents.a.state, "published");
+    assert.equal(j.data.intents.a.plan, undefined);
+    agent.limits.maxTransactionWei = "200";
+    agent.limits.maxSpendWeiPerDay = "200";
+    await agent.reserveDailyBudget(j, j.data.intents.a);
+    assert.equal(j.data.intents.a.reservedWei, "200");
+    assert.equal(j.data.intents.a.day, new Date().toISOString().slice(0, 10));
     j.data.intents.a.state = "signing";
     j.data.intents.a.plan = { id: "a" };
     await j.save();
@@ -375,6 +384,7 @@ test("cursor resets explicitly on changed threshold window scope", async () => {
 });
 test("resumed same-day and overnight reservations obey current daily caps", async () => {
   const { agent } = await fixture();
+  agent.limits.maxTransactionWei = "100";
   for (const day of [new Date().toISOString().slice(0, 10), "2000-01-01"])
     await agent.journal.lock(async (j) => {
       const r = { day, reservedWei: "100", state: "intent" };
@@ -386,4 +396,37 @@ test("resumed same-day and overnight reservations obey current daily caps", asyn
       await agent.reserveDailyBudget(j, r);
       assert.equal(r.day, new Date().toISOString().slice(0, 10));
     });
+});
+test("raising a transaction cap refreshes an unsigned reservation before signing", async () => {
+  const { agent } = await fixture();
+  await agent.journal.lock(async (j) => {
+    const today = new Date().toISOString().slice(0, 10);
+    const r = { day: "2000-01-01", reservedWei: "100", state: "publishing" };
+    j.data.intents = { a: r, b: { day: today, reservedWei: "50", state: "confirmed" } };
+    agent.limits.maxLaunchesPerDay = 2;
+    agent.limits.maxTransactionWei = "200";
+    agent.limits.maxSpendWeiPerDay = "249";
+    await assert.rejects(agent.reserveDailyBudget(j, r), /daily_spend_limit/);
+    assert.equal(r.reservedWei, "100");
+    assert.equal(r.day, "2000-01-01");
+    agent.limits.maxSpendWeiPerDay = "250";
+    await agent.reserveDailyBudget(j, r);
+    assert.equal(r.reservedWei, "200");
+    assert.equal(r.day, today);
+    agent.limits.maxTransactionWei = "150";
+    await agent.reserveDailyBudget(j, r);
+    assert.equal(r.reservedWei, "200");
+  });
+});
+test("signed or uncertain reservations cannot be refreshed", async () => {
+  const { agent } = await fixture();
+  await agent.journal.lock(async (j) => {
+    for (const state of ["signing", "broadcasting", "submitted", "uncertain", "confirmed", "failed"]) {
+      const r = { day: "2000-01-01", reservedWei: "100", state };
+      j.data.intents = { a: r };
+      await assert.rejects(agent.reserveDailyBudget(j, r), /unresolved_intent/);
+      assert.equal(r.reservedWei, "100");
+      assert.equal(r.day, "2000-01-01");
+    }
+  });
 });
