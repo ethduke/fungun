@@ -87,3 +87,50 @@ test('journal rejects symlinks and oversized files',async()=>{
  const other=path+'.large';await writeFile(other,'',{mode:0o600});await truncate(other,67108865);
  await assert.rejects(new Journal(other).lock(()=>{}),/journal_size/);
 });
+test('canonical input accepts reordered equivalent details without duplicating intent',async()=>{
+ const {agent}=await fixture(()=>{throw new Error('stop');});
+ await assert.rejects(agent.deploy({name:' Moon ',ticker:'MOON',pairId:'long-EXAMPLE',intentKey:'ignored'},{intentKey:'same'}),/stop/);
+ await assert.rejects(agent.deploy({pairId:'long-EXAMPLE',description:'',ticker:'MOON',name:'Moon'},{intentKey:'same'}),/stop/);
+ await agent.journal.lock(j=>assert.equal(Object.keys(j.data.intents).length,1));
+});
+test('retryable reservation refreshes without repeating any prior signing state',async()=>{
+ let statusCalls=0,prepareCalls=0;const {agent,counts}=await fixture(url=>{
+  if(url.pathname.endsWith('/status')){statusCalls++;return {status:'retryable'};}
+  prepareCalls++;throw new Error('fresh_artwork_attempt');
+ });
+ await agent.journal.lock(async j=>{j.data.intents.a={state:'reserving',plan:{id:'a'},draft:{name:'Moon',ticker:'MOON',description:''},image:{mode:'none'}};await j.save();});
+ await assert.rejects(agent.resume(),/fresh_artwork_attempt/);assert.equal(statusCalls,1);assert.equal(prepareCalls,1);assert.deepEqual(counts(),{signed:0,sent:0});
+ await agent.journal.lock(async j=>{j.data.intents.a.state='signing';j.data.intents.a.plan={id:'a'};await j.save();});
+ await agent.resume();assert.equal(prepareCalls,1);
+});
+test('explicit expired artwork refreshes and pending artwork reposts only identical approval',async()=>{
+ for(const state of ['expired','pending']){
+  let published=0;const {agent}=await fixture((url,opts)=>{
+   if(url.pathname.endsWith('/artwork-status'))return {status:state,id:'a',imageHash:'i',metadataHash:'m'};
+   if(url.pathname.endsWith('/artwork-publish')){const body=JSON.parse(opts.body);assert.equal(body.id,'a');assert.equal(body.uploadToken,'token');published++;return {status:'processing'};}
+   throw new Error('unexpected');
+  });
+  await agent.journal.lock(async j=>{j.data.intents.a={state:'publishing',draft:{name:'Moon',ticker:'MOON',description:''},imageBase64:'image',approval:{id:'a',imageHash:'i',metadataHash:'m',uploadToken:'token',imageBase64:'normalized'}};await j.save();});
+  await agent.resume();assert.equal(published,state==='pending'?1:0);
+  await agent.journal.lock(j=>assert.equal(Boolean(j.data.intents.a.approval),state==='pending'));
+ }
+});
+test('safe pre-sign ticker rejection frees reservation and tries next theme ticker',async()=>{
+ const {agent}=await fixture(url=>url.pathname.endsWith('/ticker')?{results:{long:{status:'unreserved'}}}:{freshness:{status:'fresh'},themes:[{key:'moon',name:'Moon'}],nextCursor:'next'});
+ let tries=0;agent.advanceIntent=async(j,r)=>{tries++;if(tries===1)throw new Error('ticker_reserved');r.state='confirmed';r.result={status:'confirmed'};await j.save();return r.result;};
+ await agent.tick({searchLaunchpads:['long'],deployLaunchpads:['long'],pairId:'long-EXAMPLE'});
+ assert.equal(tries,2);await agent.journal.lock(j=>{const records=Object.values(j.data.intents);assert.equal(records[0].state,'skipped');assert.equal(records[0].reservedWei,'0');assert.equal(records[1].draft.ticker,'MOONA');});
+});
+test('cursor resets explicitly on changed threshold window scope',async()=>{
+ const paths=[];const {agent}=await fixture(url=>{paths.push(url.search);return {freshness:{status:'fresh'},themes:[],nextCursor:'cursor'};});
+ const config={searchLaunchpads:['long'],deployLaunchpads:['long']};
+ await agent.tick(config);await agent.tick(config);await agent.tick({...config,minimumTokens:4});assert.match(paths[1],/cursor=cursor/);assert.doesNotMatch(paths[2],/cursor=/);
+});
+test('resumed same-day and overnight reservations obey current daily caps',async()=>{
+ const {agent}=await fixture();
+ for(const day of [new Date().toISOString().slice(0,10),'2000-01-01'])await agent.journal.lock(async j=>{
+  const r={day,reservedWei:'100',state:'intent'};j.data.intents={a:r};agent.limits.maxSpendWeiPerDay='99';
+  await assert.rejects(agent.reserveDailyBudget(j,r),/daily_spend_limit/);assert.equal(r.day,day);
+  agent.limits.maxSpendWeiPerDay='100';await agent.reserveDailyBudget(j,r);assert.equal(r.day,new Date().toISOString().slice(0,10));
+ });
+});

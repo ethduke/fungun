@@ -1,5 +1,5 @@
-import { keccak256, parseTransaction } from 'viem';
-import { buildUnsignedLongLaunch, readLongLaunchProfile } from '../web/lib/long-encoding/long-launch.mjs';
+import { keccak256, parseTransaction, decodeFunctionResult, zeroAddress } from 'viem';
+import { buildUnsignedLongLaunch, readLongLaunchProfile, LONG_CREATE_ABI } from '../web/lib/long-encoding/long-launch.mjs';
 import { isCanonicalLongAsset } from '../web/lib/long-encoding/long-salt.mjs';
 const same = (a,b) => typeof a === 'string' && typeof b === 'string' && a.toLowerCase() === b.toLowerCase();
 const check = (ok, code = 'launch_transaction_changed') => { if (!ok) throw new Error(code); };
@@ -10,7 +10,7 @@ export async function preflight(plan, input, published, trustedProfile, rpc, lim
   check(JSON.stringify(readLongLaunchProfile(plan.profile)) === JSON.stringify(profile), 'contract_unverified');
   check(Number.isSafeInteger(plan.expiresAt) && Date.now() < plan.expiresAt && plan.expiresAt - plan.quotedAt === 30000, 'quote_expired');
   check(/^[a-f0-9]{64}$/.test(plan.id) && /^[a-f0-9]{64}$/.test(plan.binding));
-  const rebuilt = buildUnsignedLongLaunch({ ...input, metadataUri: `ipfs://${published.ipfs.metadataCid}`, startingTick: plan.startingTick, intentId: plan.intentId }, profile, undefined, plan.saltAttempt);
+  const rebuilt = buildUnsignedLongLaunch({ chainId:input.chainId,wallet:input.wallet,draft:input.draft,pairId:input.pairId, metadataUri: `ipfs://${published.ipfs.metadataCid}`, startingTick: plan.startingTick, intentId: plan.intentId }, profile, undefined, plan.saltAttempt);
   const tx = plan.transaction;
   check(isCanonicalLongAsset(plan.predictedAsset));
   check(BigInt(tx.nonce)>=0n&&BigInt(tx.nonce)<=BigInt(Number.MAX_SAFE_INTEGER),'nonce_limit');
@@ -27,7 +27,8 @@ export async function preflight(plan, input, published, trustedProfile, rpc, lim
   }
   check(BigInt(await request('eth_getTransactionCount',[input.wallet,'pending']))===BigInt(tx.nonce),'nonce_changed');
   check(BigInt(await request('eth_getBalance',[input.wallet,'pending']))>=cost,'insufficient_funds');
-  await request('eth_call',[tx,'pending']);
+  const simulated=decodeFunctionResult({abi:LONG_CREATE_ABI,functionName:'create',data:await request('eth_call',[tx,'pending'])});
+  check(same(simulated[0],rebuilt.predictedAsset)&&!same(simulated[1],zeroAddress)&&same(simulated[1],plan.predictedPool),'launch_simulation_failed');
   check(Date.now()<plan.expiresAt,'quote_expired');
   return cost;
 }
