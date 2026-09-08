@@ -424,16 +424,23 @@ export class FungunAgent {
     return this.advance(j, r);
   }
   async reserveDailyBudget(j, r) {
+    if (r.hash || !["intent", "publishing", "reserving"].includes(r.state))
+      throw new Error("unresolved_intent");
+    // Resumed unsigned plans use current transaction limits; never refund an older reservation.
+    const previous = BigInt(r.reservedWei);
+    const current = BigInt(this.limits.maxTransactionWei);
+    const reserve = previous > current ? previous : current;
     const day = new Date().toISOString().slice(0, 10);
     const entries = Object.values(j.data.intents).filter(
       (x) => x !== r && x.day === day && x.state !== "skipped",
     );
     if (entries.length >= this.limits.maxLaunchesPerDay) throw new Error("daily_launch_limit");
     if (
-      entries.reduce((n, x) => n + BigInt(x.reservedWei), 0n) + BigInt(r.reservedWei) >
+      entries.reduce((n, x) => n + BigInt(x.reservedWei), 0n) + reserve >
       BigInt(this.limits.maxSpendWeiPerDay)
     )
       throw new Error("daily_spend_limit");
+    r.reservedWei = String(reserve);
     r.day = day;
     await j.save();
   }
