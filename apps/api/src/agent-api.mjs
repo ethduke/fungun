@@ -9,6 +9,7 @@ import { IMAGE_BYTE_LIMIT } from "./launch-image.mjs";
 const assetErrors = new Set([
   "unavailable", "not_found", "invalid_request", "request_too_large", "origin_denied",
   "rate_limited", "image_size", "invalid_wallet", "invalid_asset_image",
+  "invalid_launch_details", "invalid_asset_uri", "metadata_size",
   "invalid_asset_approval", "asset_approval_changed", "asset_approval_expired",
   "asset_busy", "asset_publication_uncertain", "ipfs_approval_pending",
   "asset_history_full", "asset_storage_full", "asset_integrity_failed",
