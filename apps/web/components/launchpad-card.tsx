@@ -1,5 +1,7 @@
 'use client';
 
+import { STONX_PAIRS } from '@/lib/stonx-markets';
+
 import { ArrowUpRight, Crosshair, Info } from 'lucide-react';
 import { Checkbox } from '@/components/ui/checkbox';
 import {
@@ -44,11 +46,12 @@ export function LaunchpadCard({
   const long = pad.id === 'long';
   const o1 = pad.id === 'o1';
   const pons = pad.id === 'pons';
+  const stonx = pad.id === 'stonx';
   const stonks = pad.id === 'stonks';
   const title = launchpadName(pad.id);
-  const live = (o1 || stonks) && catalog?.status === 'ready';
-  const saved = (o1 || stonks) && !live;
-  const pairs = pons ? [] : long
+  const live = (o1 || stonks || stonx) && catalog?.status === 'ready';
+  const saved = (o1 || stonks || stonx) && !live;
+  const pairs = stonx ? (live ? catalog!.pairs : STONX_PAIRS) : pons ? [] : long
     ? LONG_PAIRS
     : pad.id === 'longbow'
       ? LONGBOW_PAIRS
@@ -69,7 +72,7 @@ export function LaunchpadCard({
             <ArrowUpRight size={22} />
           ) : o1 ? (
             'o1'
-          ) : pons ? 'p' : stonks ? 'S' : (
+          ) : stonx ? 'sx' : pons ? 'p' : stonks ? 'S' : (
             <Crosshair size={22} />
           )}
         </span>
@@ -79,7 +82,7 @@ export function LaunchpadCard({
         <Select
           value={pad.pairId}
           onOpenChange={(open) => {
-            if (open && (o1 || stonks)) onPairingOpen?.();
+            if (open && (o1 || stonks || stonx)) onPairingOpen?.();
           }}
           onValueChange={(value) => {
             if (
@@ -133,6 +136,7 @@ export function LaunchpadCard({
           </SelectContent>
         </Select>
       )}
+      {stonx && <p className="pad-pons-details">{STONX_PAIRS.length} wrapped-stock pairs · Doppler · locked liquidity. <a href="https://stonx.ai/docs/instant-launch" target="_blank" rel="noopener noreferrer">Launch terms</a></p>}
       {stonks && <p className="pad-conditions">1% trading fee · LP locked forever · No dev buy<br />
         {catalog?.terms ? `Launch fee: ${Number(catalog.terms.amountWei) / 1e18} ETH + gas` : 'Checking launch fee…'}
         {selectedPair && 'priceFresh' in selectedPair && selectedPair.priceFresh === false && <><br />Stock price uses the last saved anchor.</>}

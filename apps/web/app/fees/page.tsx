@@ -616,6 +616,10 @@ function ConnectedFees({ address }: { address: string }) {
               )}
               {source.padId === 'stonks' && <p>Indexed Stonks creations. Fees pay the current recipients; redirected fees may belong to another wallet. Custom-recipient and older-launch coverage can be incomplete. Undelivered payouts appear separately when supported.</p>}
               {note && <p>{note}</p>}
+              {source.padId === 'stonx' && (
+                <p>Trading fees and LP fees on Base. Each stream is claimed separately; Claim all reviews them in sequence.
+                  {' '}Balances are checked on-chain across indexed stonx pools. Newly launched pools may take time to appear.</p>
+              )}
               {source.padId === 'pons' && (
                 <p>
                   Current pons v2 escrow · ETH and configured payout tokens. Fees awaiting a sweep,
@@ -707,6 +711,9 @@ function ConnectedFees({ address }: { address: string }) {
               {currentQueue.index} / {currentQueue.items.length} confirmed
             </span>
           </div>
+          {queueItem && (
+            <p>{queueItem.source.padId === 'stonx' ? (queueItem.position.feeStream === 'trading' ? 'Trading fee share' : 'LP fee share') : null}</p>
+          )}
           {queueItem && (
             <p className="fee-payout font-mono">
               {(quote?.payouts ?? queueItem.position.payouts)

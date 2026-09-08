@@ -13,6 +13,7 @@ export const FEE_SOURCES = [
   { padId: 'longbow', chainId: 4663 },
   { padId: 'pons', chainId: 4663 },
   { padId: 'stonks', chainId: 8453 },
+  { padId: 'stonx', chainId: 8453 },
 ] as const;
 
 export interface FeeBalance {
@@ -66,7 +67,7 @@ export function groupFeeBalances(balances: FeeBalance[]) {
   >();
   for (const balance of balances) {
     if (
-      !['long', 'o1', 'longbow', 'pons', 'stonks'].includes(balance.padId) ||
+      !['long', 'o1', 'longbow', 'pons', 'stonks', 'stonx'].includes(balance.padId) ||
       !supportsChain(balance.padId, balance.chainId) ||
       (balance.asset !== 'native' &&
         !isAddress(balance.asset, { strict: false })) ||

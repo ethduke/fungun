@@ -4,7 +4,7 @@ import { AppError, retrySeconds } from './user-error.ts';
 const CATALOG_MAX_AGE = 6 * 60 * 60 * 1000;
 
 export type CatalogPair = {
-  id: Extract<PairId, `rwa-${string}` | `long-${string}` | `stonks-${string}`>;
+  id: Extract<PairId, `rwa-${string}` | `long-${string}` | `stonks-${string}` | `stonx-${string}`>;
   symbol: string;
 };
 export type CatalogPad = {
@@ -15,7 +15,7 @@ export type CatalogPad = {
 export type Catalog = {
   chainId: ChainId;
   expiresAt: number;
-  pads: Partial<Record<PadId, CatalogPad>>;
+  pads: Partial<Record<PadId | 'stonx', CatalogPad>>;
 };
 export type TickerResult = {
   status: 'unreserved' | 'reserved' | 'unverified';
@@ -26,7 +26,7 @@ export type TickerResult = {
 export type TickerCheck = {
   chainId: ChainId;
   ticker: string;
-  results: Partial<Record<PadId, TickerResult>>;
+  results: Partial<Record<PadId | 'stonx', TickerResult>>;
 };
 
 export function tickerKey(chainId: ChainId, ticker: string, pads: PadId[]) {
@@ -175,8 +175,8 @@ export function parseCatalog(value: unknown, chainId: ChainId): Catalog {
     throw new AppError('invalid_response');
   for (const [pad, entry] of Object.entries(catalog.pads)) {
     if (
-      !['long', 'o1', 'stonks'].includes(pad) ||
-      (chainId === 8453 && pad === 'long') || (chainId !== 8453 && pad === 'stonks') ||
+      !['long', 'o1', 'stonks', 'stonx'].includes(pad) ||
+      (chainId === 8453 && pad === 'long') || (chainId !== 8453 && ['stonks', 'stonx'].includes(pad)) ||
       !entry ||
       !['ready', 'unavailable'].includes(entry.status) ||
       !Array.isArray(entry.pairs) ||
@@ -187,7 +187,7 @@ export function parseCatalog(value: unknown, chainId: ChainId): Catalog {
           typeof pair.id !== 'string' ||
           !(pad === 'long'
             ? /^long-[A-Z0-9._-]{1,24}$/.test(pair.id)
-            : pad === 'stonks' ? /^stonks-[a-f0-9]{24}$/.test(pair.id) : /^rwa-[a-f0-9]{24}$/.test(pair.id)) ||
+            : pad === 'stonx' ? /^stonx-[a-f0-9]{24}$/.test(pair.id) : pad === 'stonks' ? /^stonks-[a-f0-9]{24}$/.test(pair.id) : /^rwa-[a-f0-9]{24}$/.test(pair.id)) ||
           typeof pair.symbol !== 'string' ||
           !/^[A-Za-z0-9._-]{1,24}$/.test(pair.symbol),
       )

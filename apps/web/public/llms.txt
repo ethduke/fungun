@@ -59,3 +59,21 @@ pons v2 is available in the Robinhood launchpad selector with ETH pairing
 The connected wallet receives creator fees. Live eligibility, fees and launch
 economics are checked before wallet submission. pons fee claims are not yet
 integrated. It can be combined with O1 and either Long or Longbow.
+
+## stonx on Base
+
+stonx uses Doppler multicurve launches with 45 wrapped-stock pairings (`wtNKE`,
+`wtNVDA`, `wtTSLA`, etc.). Pair IDs use the `stonx-` prefix and must come from
+its catalog; never reuse an O1 pairing ID. It uses the shared composer and
+wallet launch queue with immutable metadata, one billion tokens and permanently
+locked liquidity. The integration has no dev buy or token approvals.
+
+After the 10-second anti-snipe period, the fee is 1% hook plus 0.05% LP.
+The creator receives 70% after Doppler's 5% cut (66.5% of total fees).
+Launch preparation verifies the deployment, wrapper beacon and implementation,
+fresh stock pricing, exact calldata and complete Base gas. Quotes can expire.
+The Fees tab discovers stonx pools on Base, checks the wallet's current trading
+and LP shares on-chain, and claims each stream separately. Claim all reviews
+transactions in sequence. New pools may appear after an indexing delay. Each
+claim requires wallet confirmation; there are no token approvals or fee-rights
+transfers in this flow.

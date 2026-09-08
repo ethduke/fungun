@@ -1,3 +1,4 @@
+import { STONX_PAIRS } from './stonx-markets.ts';
 import {
   LONGBOW_PAIRS,
   LONGBOW_MARKET_TICKERS,
@@ -9,7 +10,7 @@ import { LONG_MARKET_TICKERS } from './long-encoding/long-markets.mjs';
 export { LONG_MARKET_TICKERS };
 
 export type PadId = 'long' | 'o1' | 'stonks';
-export type LaunchpadId = PadId | 'longbow' | 'pons';
+export type LaunchpadId = PadId | 'longbow' | 'pons' | 'stonx';
 export type ChainId = 4663 | 8453;
 export type PairId =
   | 'native'
@@ -21,7 +22,8 @@ export type PairId =
   | `long-${(typeof LONG_MARKET_TICKERS)[number]}`
   | `longbow-${(typeof LONGBOW_MARKET_TICKERS)[number]}`
   | `rwa-${string}`
-  | `stonks-${string}`;
+  | `stonks-${string}`
+  | `stonx-${string}`;
 import type { Catalog } from './read-service';
 export type Route = 'rwa' | 'standard';
 
@@ -86,12 +88,12 @@ export function isWebviewChain(chainId: number) {
 }
 
 export function launchpadName(id: LaunchpadId) {
-  return { long: 'Long', o1: 'O1', longbow: 'Longbow', pons: 'pons', stonks: 'Stonks' }[id];
+  return { long: 'Long', o1: 'O1', longbow: 'Longbow', pons: 'pons', stonks: 'Stonks', stonx: 'stonx' }[id];
 }
 
 export function readablePads(pads: LaunchpadId[]): PadId[] {
   // Long and Longbow use the same on-chain ticker reservation registry.
-  return [...new Set(pads.filter((pad): pad is PadId | 'longbow' => pad !== 'pons').map((pad) => pad === 'longbow' ? 'long' : pad))];
+  return [...new Set(pads.filter((pad): pad is PadId | 'longbow' => pad !== 'pons' && pad !== 'stonx').map((pad) => pad === 'longbow' ? 'long' : pad))];
 }
 export function hasSharedTickerConflict(destinations: Destination[]) {
   return destinations.some(pad => pad.selected && pad.id === 'long')
@@ -133,6 +135,7 @@ export const DEFAULT_DESTINATIONS: Destination[] = [
     pairId: 'longbow-NVDA',
     editableMetadata: false,
   },
+  { id: 'stonx', selected: false, chainId: 8453, route: 'rwa', pairId: STONX_PAIRS.find(p => p.symbol === 'wtNVDA')!.id, editableMetadata: false },
   { id: 'stonks', selected: false, chainId: 8453, route: 'rwa', pairId: 'stonks-unselected', editableMetadata: false },
   { id: 'pons', selected: false, chainId: 4663, route: 'standard', pairId: 'pons-native', editableMetadata: false },
 ];
@@ -142,7 +145,7 @@ export function chainName(id: ChainId) {
 }
 
 export function supportsChain(id: LaunchpadId, chainId: ChainId) {
-  return id === 'stonks' ? chainId === 8453 : chainId === 4663 || (id === 'o1' && chainId === 8453);
+  return ['stonks', 'stonx'].includes(id) ? chainId === 8453 : chainId === 4663 || (id === 'o1' && chainId === 8453);
 }
 
 export function selectChain(destinations: Destination[], chainId: ChainId) {
@@ -168,7 +171,7 @@ export function pairingName(id: PairId) {
   if (id === 'crypto-USDG') return 'USDG';
   return id === 'native' || id === 'pons-native'
     ? 'ETH'
-    : ([...LONG_PAIRS, ...LONGBOW_PAIRS, ...O1_ROBINHOOD_PAIRS, ...BASE_PAIRS].find(
+    : ([...LONG_PAIRS, ...LONGBOW_PAIRS, ...O1_ROBINHOOD_PAIRS, ...BASE_PAIRS, ...STONX_PAIRS].find(
         (pair) => pair.id === id,
       )?.symbol ?? 'Unselected');
 }
@@ -204,6 +207,8 @@ export function validateDraft(
   for (const pad of active) {
     if (pad.id === 'pons' && (pad.chainId !== 4663 || pad.route !== 'standard' || pad.pairId !== 'pons-native' || pad.editableMetadata))
       errors.destinations = 'pons requires Robinhood Chain, ETH pairing and immutable metadata.';
+    if (pad.id === 'stonx' && (pad.chainId !== 8453 || pad.route !== 'rwa' || pad.editableMetadata))
+      errors.destinations = 'stonx requires Base, a wrapped-stock pairing and immutable metadata.';
     if (pad.id === 'stonks' && (pad.chainId !== 8453 || pad.route !== 'rwa' || pad.editableMetadata))
       errors.destinations = 'Stonks requires a Base stock pairing and immutable launch details.';
     if (
@@ -219,7 +224,7 @@ export function validateDraft(
         ? !LONG_PAIRS.some((pair) => pair.id === pad.pairId)
         : pad.id === 'longbow'
           ? !LONGBOW_PAIRS.some((pair) => pair.id === pad.pairId)
-          : pad.id === 'stonks'
+          : pad.id === 'stonx' ? !STONX_PAIRS.some(pair => pair.id === pad.pairId) : pad.id === 'stonks'
             ? !(catalog?.chainId === 8453 && catalog.expiresAt > _now && catalog.pads.stonks?.status === 'ready' && catalog.pads.stonks.pairs.some(pair => pair.id === pad.pairId))
           : !selectableO1Pairs(
               pad.chainId,

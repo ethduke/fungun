@@ -1,4 +1,5 @@
-import { decodeFunctionData, isAddress, parseAbi } from 'viem';
+import { decodeFunctionData, encodeAbiParameters, isAddress, keccak256, parseAbi } from 'viem';
+import { readStonxProfile } from './long-encoding/stonx-launch.mjs';
 import type { ChainId, LaunchpadId as PadId } from './launch-model';
 import { supportsChain } from './launch-model.ts';
 import { AppError, retrySeconds } from './user-error.ts';
@@ -31,6 +32,11 @@ export type FeePosition = {
   payouts: FeePayout[];
   verification: 'live' | 'indexed';
   claimable: boolean;
+  feeStream?: 'lp' | 'trading';
+  poolFee?: number;
+  tickSpacing?: number;
+  poolId?: `0x${string}`;
+  launchAsset?: string;
   escrowVersion?: 'current' | 'legacy';
   claimDisabledReason?: (typeof claimDisabledReasons)[number];
 };
@@ -41,7 +47,7 @@ export type FeeSource = {
   status: 'ready' | 'partial' | 'unavailable';
   reason?: (typeof feeUnavailableReasons)[number];
   nextCursor?: string | null;
-  coverage?: 'wallet_index' | 'configured_pools' | 'beneficiary_events' | 'configured_escrow';
+  coverage?: 'wallet_index' | 'configured_pools' | 'beneficiary_events' | 'configured_escrow' | 'beneficiary_index';
   progress?: { scannedThroughBlock: string | null; toBlock: string };
   positions: FeePosition[];
   expiresAt: number;
@@ -52,6 +58,11 @@ export type ClaimQuote = {
   chainId: ChainId;
   address: string;
   target: string;
+  feeStream?: 'lp' | 'trading';
+  poolFee?: number;
+  tickSpacing?: number;
+  launchAsset?: string;
+  stonxProfile?: ReturnType<typeof readStonxProfile>;
   collectionToken?: string;
   claimMode?: 'collect' | 'claim';
   escrowVersion?: 'current' | 'legacy';
@@ -90,6 +101,9 @@ export const legacyClaimAbi = parseAbi([
 ]);
 export const isLockedPoolClaim = (kind: string) =>
   kind === 'long' || kind === 'longbow';
+export const isPoolFeeClaim = (kind: string) => isLockedPoolClaim(kind) || kind === 'stonx';
+const validPoolFee = (value: unknown): value is number => Number.isInteger(value) && typeof value === 'number' && ((value >= 0 && value <= 1000000) || value === 8388608);
+const validTickSpacing = (value: unknown): value is number => Number.isInteger(value) && typeof value === 'number' && value >= 1 && value <= 32767;
 const equal = (a: string, b: string) => a.toLowerCase() === b.toLowerCase();
 const amount = (value: unknown): value is string =>
   typeof value === 'string' &&
@@ -223,7 +237,7 @@ export function parseFees(
     !equal(result.address, owner) ||
     result.chainId !== chainId ||
     result.padId !== padId ||
-    !['long', 'o1', 'longbow', 'pons', 'stonks'].includes(padId) ||
+    !['long', 'o1', 'longbow', 'pons', 'stonks', 'stonx'].includes(padId) ||
     !supportsChain(padId, chainId) ||
     (padId === 'pons' && result.status !== 'unavailable' &&
       (result.coverage !== 'configured_escrow' || result.status !== 'partial' || result.nextCursor != null)) ||
@@ -235,7 +249,7 @@ export function parseFees(
     (result.nextCursor != null && !id(result.nextCursor)) ||
     (result.nextCursor != null && result.status !== 'partial') ||
     (result.coverage !== undefined &&
-      !['wallet_index', 'configured_pools', 'beneficiary_events', 'configured_escrow'].includes(
+      !['wallet_index', 'configured_pools', 'beneficiary_events', 'configured_escrow', 'beneficiary_index'].includes(
         result.coverage,
       )) ||
     (result.progress !== undefined &&
@@ -259,7 +273,9 @@ export function parseFees(
         (padId === 'stonks' && (!nonzeroAddress(position.collectionToken) || !['collect', 'claim'].includes(position.claimMode ?? '') || position.verification !== 'live')) ||
         !['live', 'indexed'].includes(position.verification) ||
         typeof position.claimable !== 'boolean' ||
-        (isLockedPoolClaim(padId) &&
+        (padId === 'stonx' && (!validPoolFee(position.poolFee) || !validTickSpacing(position.tickSpacing) || !['lp', 'trading'].includes(position.feeStream ?? '') || !nonzeroAddress(position.launchAsset)
+          || !/^0x[\da-f]{64}$/i.test(position.poolId ?? '') || !equal(position.payouts[0].asset, position.launchAsset))) ||
+        (isPoolFeeClaim(padId) &&
           (position.verification !== 'live' ||
             position.payouts.length !== 2)) ||
         (position.escrowVersion !== undefined &&
@@ -333,7 +349,7 @@ export async function loadFeeSources(
         const seen = new Set<string>();
         // Complete O1's bounded wallet index automatically. Long event scans can
         // span thousands of pages, so their continuation remains explicit.
-        while (source.padId === 'o1' && page.nextCursor && isCurrent()) {
+        while ((source.padId === 'o1' || source.padId === 'stonx') && page.nextCursor && isCurrent()) {
           onResult({ ...source, source: page, scanning: true, pages });
           if (!isCurrent()) return;
           try {
@@ -392,6 +408,7 @@ export function mergeFeePages(previous: FeeSource, page: FeeSource): FeeSource {
       (!equal(existing.target, position.target) || existing.collectionToken !== position.collectionToken || existing.claimMode !== position.claimMode ||
         (existing.escrowVersion ?? 'current') !==
           (position.escrowVersion ?? 'current') ||
+        existing.feeStream !== position.feeStream || existing.poolFee !== position.poolFee || existing.tickSpacing !== position.tickSpacing || existing.poolId !== position.poolId || existing.launchAsset !== position.launchAsset ||
         existing.payouts.length !== position.payouts.length ||
         existing.payouts.some(
           (payout, index) =>
@@ -424,11 +441,12 @@ export function validateClaim(value: unknown): ClaimQuote {
   if (
     !quote ||
     !id(quote.positionId) ||
-    !['long', 'o1', 'longbow', 'pons', 'stonks'].includes(quote.kind) ||
+    !['long', 'o1', 'longbow', 'pons', 'stonks', 'stonx'].includes(quote.kind) ||
     !(isLockedPoolClaim(quote.kind)
       ? quote.chainId === 4663
-      : quote.kind === 'stonks' ? quote.chainId === 8453 : [4663, 8453].includes(quote.chainId)) ||
+      : [4663, 8453].includes(quote.chainId)) ||
     (quote.kind === 'pons' && quote.chainId !== 4663) ||
+    (['stonks', 'stonx'].includes(quote.kind) && quote.chainId !== 8453) ||
     !nonzeroAddress(quote.address) ||
     !nonzeroAddress(quote.target) ||
     (quote.escrowVersion !== undefined &&
@@ -454,6 +472,19 @@ export function validateClaim(value: unknown): ClaimQuote {
     !/^0x[\da-f]+$/i.test(quote.data)
   )
     throw new AppError('invalid_response');
+  if (quote.kind === 'stonx') {
+    try {
+      const p = readStonxProfile(quote.stonxProfile), q = p.quotes[0];
+      if (p.quotes.length !== 1 || !validPoolFee(quote.poolFee) || !validTickSpacing(quote.tickSpacing) || !['lp', 'trading'].includes(quote.feeStream ?? '') || !nonzeroAddress(quote.launchAsset)
+        || quote.payouts.length !== 2 || !equal(quote.payouts[0].asset, quote.launchAsset) || quote.payouts[0].decimals !== 18
+        || !equal(quote.payouts[1].asset, q.token.address) || quote.payouts[1].symbol !== q.symbol || quote.payouts[1].decimals !== q.decimals
+        || BigInt(quote.launchAsset) >= BigInt(q.token.address)
+        || !equal(quote.target, quote.feeStream === 'lp' ? p.poolInitializer.address : p.dopplerHook.address)) throw Error();
+      const expectedPool = keccak256(encodeAbiParameters([{ type: 'address' }, { type: 'address' }, { type: 'uint24' }, { type: 'int24' }, { type: 'address' }],
+        [quote.launchAsset as `0x${string}`, q.token.address, quote.poolFee, quote.tickSpacing, p.poolInitializer.address]));
+      if (quote.poolId !== expectedPool) throw Error();
+    } catch { throw new AppError('invalid_response'); }
+  }
   if (quote.kind === 'pons') {
     if (quote.payouts.length !== 1 || quote.poolId !== undefined) throw new AppError('invalid_response');
     try {
@@ -482,7 +513,7 @@ export function validateClaim(value: unknown): ClaimQuote {
         || !equal(decoded.args[0] as string, quote.collectionToken!)
         || (quote.claimMode === 'claim' ? quote.payouts.length !== 1 || !equal(quote.collectionToken!, quote.payouts[0].asset)
           : quote.payouts.length !== 2 || !quote.payouts.some(p => equal(p.asset, quote.collectionToken!)))
-      : isLockedPoolClaim(quote.kind)
+      : isPoolFeeClaim(quote.kind)
       ? quote.payouts.length !== 2 ||
         decoded.functionName !== 'collectFees' ||
         quote.data.length !== 74 ||
@@ -513,6 +544,7 @@ export async function prepareClaim(
     quote.positionId !== position.id ||
     quote.collectionToken !== position.collectionToken || quote.claimMode !== position.claimMode ||
     !equal(quote.target, position.target) ||
+    (source.padId === 'stonx' && (quote.feeStream !== position.feeStream || quote.poolFee !== position.poolFee || quote.tickSpacing !== position.tickSpacing || quote.poolId !== position.poolId || quote.launchAsset !== position.launchAsset)) ||
     (quote.escrowVersion ?? 'current') !==
       (position.escrowVersion ?? 'current') ||
     quote.payouts.length !== position.payouts.length ||

@@ -1,4 +1,6 @@
 import { readStonksConfig } from './stonks-live.mjs';
+import { readStonxConfig } from './stonx-live.mjs';
+import { readStonxFeeProfile, readStonxFeeMulticall } from './stonx-fees.mjs';
 import { readO1LiveConfig, readO1BaseLiveConfig } from "./o1-live.mjs";
 import { readPonsFeeProfile } from "./pons-fees.mjs";
 import { readPonsLiveConfig } from "./pons-live.mjs";
@@ -39,7 +41,7 @@ export function readConfig(env = process.env) {
   const rpcUrl = env.ROBINHOOD_RPC || env.ROBINHOOD_RPC_URL || "";
   if (rpcUrl && new URL(rpcUrl).protocol !== "https:")
     throw new ServiceError("invalid_rpc_configuration");
-  const baseRpcUrl = env.BASE_RPC_URL || "";
+  const baseRpcUrl = env.BASE_RPC || env.BASE_RPC_URL || "";
   if (baseRpcUrl && new URL(baseRpcUrl).protocol !== "https:")
     throw new ServiceError("invalid_rpc_configuration");
   const rpcBatchRequests = env.RPC_BATCH_REQUESTS ?? "";
@@ -62,6 +64,9 @@ export function readConfig(env = process.env) {
   return {
     stonksLaunch: readStonksConfig(env),
     longLaunch,
+    stonxLaunch: readStonxConfig(env),
+    stonxFees: readStonxFeeProfile(env.STONX_BASE_PROFILE_JSON),
+    stonxFeeMulticall: readStonxFeeMulticall(env.STONX_FEE_MULTICALL_JSON),
     ponsLaunch: readPonsLiveConfig(env),
     ponsFees: readPonsFeeProfile(env.PONS_FEE_PROFILE_JSON),
     longbowLaunch: readLongLiveConfig(env, "longbow"),

@@ -59,7 +59,7 @@ export function parseApproximateLaunchCost(raw: unknown, started: number, pairId
   const launchFeeSource = parseLaunchFeeSource(value.launchFeeSource);
   if (launchFeeSource.amountWei !== value.launchpadFeeWei) throw new Error('Invalid launch fee');
   const quoted = Number(value.quotedAt), expires = Number(value.expiresAt), server = Number(value.serverTime);
-  if (gasUnits < 21000n || gasUnits > (['o1', 'stonks', 'pons'].includes(launchpadForPair(pairId)) ? 8000000n : 3000000n) || gasPriceWei <= 0n || gasPriceWei > 10n ** 12n
+  if (gasUnits < 21000n || gasUnits > (['o1', 'stonks', 'stonx', 'pons'].includes(launchpadForPair(pairId)) ? 8000000n : 3000000n) || gasPriceWei <= 0n || gasPriceWei > 10n ** 12n
     || expires - quoted !== 300000 || server < quoted || server >= expires || !Number.isFinite(started) || started < 0)
     throw new Error('Invalid gas estimate');
   let baseFees: ApproximateLaunchCost['baseFees'];
@@ -260,8 +260,8 @@ export function calculateLaunchCosts(
   padLoop: for (const pad of quote.pads) {
     if (
       !selection.pads.includes(pad.id) ||
-      !['long', 'o1', 'longbow', 'stonks', 'pons'].includes(pad.id) ||
-      (pad.id === 'stonks' ? quote.chainId !== 8453 : pad.id !== 'o1' && quote.chainId !== 4663) ||
+      !['long', 'o1', 'longbow', 'stonks', 'stonx', 'pons'].includes(pad.id) ||
+      (['stonks', 'stonx'].includes(pad.id) ? quote.chainId !== 8453 : pad.id !== 'o1' && quote.chainId !== 4663) ||
       !Array.isArray(pad.steps) ||
       pad.steps.length > 8 ||
       pad.steps.some((step) => !step || typeof step !== 'object') ||

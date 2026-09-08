@@ -6,6 +6,11 @@ const FEE_INFO = {
     details: 'The current standard split pays creators 70% of the 1% trading fee (0.7% of volume). The live share is shown on the card. The operator can change fee splits or reassign a creator after a 24-hour on-chain delay. Liquidity stays locked. The stock pairing is permanent; stale price feeds use the last saved anchor. Stock assets can restrict transfers. Launch details are recorded in an immutable event; the operator controls the hosted metadata URL. This route launches one billion tokens with no dev buy, and pays fees to your wallet. The contract has no launch deadline; cancel old wallet requests before retrying.',
     sourceLabel: 'Stonks launch and fee conditions', sourceUrl: 'https://www.thestonks.exchange/about',
   },
+  stonx: {
+    label: 'Your fee share', creatorPercent: 66.5, remainder: '28.5% stonx · 5% Doppler',
+    details: 'After the first 10 seconds, trades pay a 1% hook fee plus a 0.05% LP fee. You receive 70% after Doppler’s 5% cut, equivalent to 66.5% of total fees. The hook fee starts at 80% and falls to 1% over 10 seconds. stonx controls fee routing and may change how much is distributed or reinvested.',
+    sourceLabel: 'stonx fee documentation', sourceUrl: 'https://stonx.ai/docs/fees',
+  },
   long: {
     label: 'Your LP fee share',
     creatorPercent: 95,

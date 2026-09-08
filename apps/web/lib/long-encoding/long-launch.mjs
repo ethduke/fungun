@@ -2,6 +2,7 @@ import {
   encodeAbiParameters,
   encodeFunctionData,
   isAddress,
+  keccak256,
   sha256,
   parseAbi,
   parseAbiParameters,
@@ -36,6 +37,18 @@ const roles = [
 ];
 const supply = 10n ** 27n;
 const width = 110432;
+
+// Native currency has no ERC-20 runtime. Only LONG's ETH pairing may use it.
+export const LONG_NATIVE_ETH_QUOTE = Object.freeze({
+  id: 'long-ETH', token: Object.freeze({ address: zeroAddress, codeHash: keccak256('0x') }),
+  decimals: 18, symbol: 'ETH', priceSource: 'market',
+});
+export function isNativeLongQuote(quote) {
+  return quote?.id === 'long-ETH' && quote.symbol === 'ETH' && quote.decimals === 18
+    && quote.priceSource === 'market' && quote.token?.address === zeroAddress
+    && quote.token.codeHash === LONG_NATIVE_ETH_QUOTE.token.codeHash
+    && exactObject(quote.token, ['address', 'codeHash']);
+}
 
 function exactObject(value, keys) {
   return (
@@ -83,7 +96,7 @@ export function readLongLaunchProfile(value) {
       !exactObject(quote, ["robinhood", "market"].includes(quote?.priceSource) ? ["id", "token", "decimals", "symbol", "priceSource"] : ["id", "token", "oracle", "decimals", "oracleDecimals"]) ||
       typeof quote.id !== "string" ||
       !/^(?:(?:long|longbow)-[A-Z0-9._-]{1,24}|rwa-[a-f\d]{24})$/.test(quote.id) ||
-      !contract(quote.token) ||
+      !(contract(quote.token) || (value.launchpad !== 'longbow' && isNativeLongQuote(quote))) ||
       ![6, 18].includes(quote.decimals) ||
       (["robinhood", "market"].includes(quote.priceSource)
         ? typeof quote.symbol !== "string" || !/^[A-Z0-9._-]{1,24}$/.test(quote.symbol)
@@ -178,6 +191,7 @@ export async function buildUnsignedLongLaunchAsync(input, configuredProfile, pub
 }
 
 function assembleLaunch({ profile, quote, draft, metadataUri, wallet, binding, input }, { salt, predictedAsset, saltAttempt }) {
+  const nativeEth = isNativeLongQuote(quote);
   const allocation = profile.launchpad === "longbow" ? supply / 100n : 0n;
   const tokenFactoryData = encodeAbiParameters(LONG_TOKEN_PARAMETERS, [
     draft.name,
@@ -196,7 +210,7 @@ function assembleLaunch({ profile, quote, draft, metadataUri, wallet, binding, i
     quote.token.address,
     profile.integrator,
     800000n,
-    11200n,
+    nativeEth ? 2340n : 11200n,
     10n,
     0n,
     0n,
@@ -215,7 +229,7 @@ function assembleLaunch({ profile, quote, draft, metadataUri, wallet, binding, i
   ].sort((left, right) => (left.beneficiary < right.beneficiary ? -1 : 1));
   const poolInitializerData = encodeAbiParameters(LONG_POOL_PARAMETERS, [
     {
-      fee: 1000,
+      fee: nativeEth ? 7000 : 1000,
       tickSpacing: 8,
       farTick: 887256,
       curves: [

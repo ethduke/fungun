@@ -46,7 +46,7 @@ export function useReadService(
     catalogRequest?.chainId === chainId
       ? `${chainId}:${catalogRequest.sequence}`
       : '';
-  const needsCatalog = pads.some(pad => ['o1', 'stonks'].includes(pad));
+  const needsCatalog = pads.some(pad => ['o1', 'stonks', 'stonx'].includes(pad));
 
   useEffect(() => {
     if (

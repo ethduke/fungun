@@ -278,5 +278,5 @@ await test('production four-pad drafts gain pons without losing existing choices
   assert.equal(restored.selection.destinations.find(pad => pad.id === 'pons')?.selected, false);
   const legacy = { ...saved, selection: { ...saved.selection, destinations: saved.selection.destinations.filter(pad => pad.id !== 'stonks') } };
   const oldest = await decodeLaunchDraft(legacy);
-  assert.equal(oldest?.selection.destinations.length, 5);
+  assert.equal(oldest?.selection.destinations.length, 6);
 });

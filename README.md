@@ -63,3 +63,5 @@ pons v2 is available in the Robinhood launchpad selector with ETH pairing
 The connected wallet receives creator fees. Live eligibility, fees and launch
 economics are checked before wallet submission. pons fee claims are not yet
 integrated. It can be combined with O1 and either Long or Longbow.
+
+stonx on Base supports all 45 wrapped-stock pairs and wallet fee claims. See [launch integration](docs/stonx-base-launch.md) and [fees](docs/stonx-fees.md).

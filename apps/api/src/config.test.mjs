@@ -1,6 +1,16 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { readConfig } from "./config.mjs";
+import { apiEnvironment } from "./runtime-env.mjs";
+
+test("Base RPC from local environment reaches API config and takes precedence over the legacy alias", () => {
+  const primary = "https://base.example.invalid", legacy = "https://legacy.example.invalid";
+  const env = apiEnvironment({}, { BASE_RPC: primary, BASE_RPC_URL: legacy, NEXT_PUBLIC_BASE_RPC: primary });
+  assert.deepEqual(env, { BASE_RPC: primary, BASE_RPC_URL: legacy });
+  assert.equal(readConfig(env).baseRpcUrl, primary);
+  assert.equal(readConfig({ BASE_RPC_URL: legacy }).baseRpcUrl, legacy);
+  assert.throws(() => readConfig({ BASE_RPC: "http://base.example.invalid", BASE_RPC_URL: legacy }), { code: "invalid_rpc_configuration" });
+});
 
 test("RPC request transport defaults to batches and accepts only explicit boolean settings", () => {
   assert.equal(readConfig({}).rpcBatchRequests, true);

@@ -103,7 +103,7 @@ test('Stonks runtime settings remain API-only and require a reviewed Base profil
 
 test('Base offers O1 and Stonks while Robinhood keeps its existing destinations', () => {
   const pads = selectChain(DEFAULT_DESTINATIONS, 8453);
-  assert.deepEqual(pads.filter(p => supportsChain(p.id, 8453)).map(p => p.id), ['o1', 'stonks']);
+  assert.deepEqual(pads.filter(p => supportsChain(p.id, 8453)).map(p => p.id), ['o1', 'stonx', 'stonks']);
   assert.deepEqual(pads.filter(p => p.selected).map(p => p.id), ['o1']);
   const q = profileFixture().quotes[0], destination = { ...pads.find(p => p.id === 'stonks'), selected: true, pairId: q.id };
   const draft = { name: 'Test', ticker: 'TEST', description: '', hasImage: true };

@@ -19,7 +19,8 @@ function remember(key, value) {
 // Bind the first 28 salt bytes to the launch context; enumerate with the last
 // four. Hash bytes directly, avoiding per-candidate hex/checksum allocations.
 function search(factory, numeraire, binding, suppliedAttempt) {
-  if (BigInt(numeraire) <= 0x1e18n) throw new ServiceError('long_salt_unavailable');
+  const native = BigInt(numeraire) === 0n;
+  if (!native && BigInt(numeraire) <= 0x1e18n) throw new ServiceError('long_salt_unavailable');
   if (suppliedAttempt !== undefined && (!Number.isInteger(suppliedAttempt)
     || suppliedAttempt < 0 || suppliedAttempt >= LONG_SALT_ATTEMPTS))
     throw new ServiceError('invalid_long_salt');
@@ -43,7 +44,8 @@ function search(factory, numeraire, binding, suppliedAttempt) {
         for (let i = 0; i < 20; i++) {
           if (digest[i + 12] !== quote[i]) { lower = digest[i + 12] < quote[i]; break; }
         }
-        if (lower) {
+        // Native ETH is currency0; the initializer mirrors the asset's curves.
+        if (native || lower) {
           const result = { salt: bytesToHex(bytes.slice(21, 53)), predictedAsset: getAddress(bytesToHex(digest.slice(12))), saltAttempt: attempt };
           remember(key, result);
           return result;

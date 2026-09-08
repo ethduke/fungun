@@ -2,6 +2,9 @@ import {
   createWalletClient,
   custom,
   decodeEventLog,
+  decodeFunctionResult,
+  encodeFunctionData,
+  keccak256,
   toHex,
   type EIP1193Provider,
   type Hash,
@@ -12,12 +15,13 @@ import {
   claimAbi,
   ponsClaimAbi,
   legacyClaimAbi,
-  isLockedPoolClaim,
+  isPoolFeeClaim,
   validateClaim,
   type ClaimQuote,
   type FeePayout,
 } from './fee-service.ts';
 import { AppError } from './user-error.ts';
+import { STONX_ABI, STONX_ROLES, readStonxProfile } from './long-encoding/stonx-launch.mjs';
 
 function hasWalletError(error: unknown, code: number, name?: string) {
   const seen = new Set<unknown>();
@@ -189,6 +193,18 @@ export async function sendWalletClaim(
     await identity(provider, quote);
     if (performance.now() >= quote.expiresAt)
       throw new AppError('quote_expired');
+    if (quote.kind === 'stonx') {
+      const p = readStonxProfile(quote.stonxProfile), q = p.quotes[0];
+      const pins = [...STONX_ROLES.map((role: string) => p[role as keyof typeof p]), q.token, q.beacon, q.implementation] as { address: `0x${string}`; codeHash: string }[];
+      const codes = await Promise.all(pins.map(pin => provider.request({ method: 'eth_getCode', params: [pin.address, 'latest'] })));
+      if (codes.some((code, i) => code === '0x' || keccak256(code).toLowerCase() !== pins[i].codeHash.toLowerCase())) throw new AppError('contract_unverified');
+      const raw = await provider.request({ method: 'eth_call', params: [{ to: q.beacon.address, data: encodeFunctionData({ abi: STONX_ABI, functionName: 'implementation' }) }, 'latest'] });
+      if (decodeFunctionResult({ abi: STONX_ABI, functionName: 'implementation', data: raw }).toLowerCase() !== q.implementation.address) throw new AppError('contract_unverified');
+      const simulated = await provider.request({ method: 'eth_call', params: [{ from: quote.address as `0x${string}`, to: quote.target as `0x${string}`, data: quote.data, value: '0x0' }, 'pending'] });
+      decodeFunctionResult({ abi: claimAbi, functionName: 'collectFees', data: simulated });
+      await identity(provider, quote);
+      if (performance.now() >= quote.expiresAt) throw new AppError('quote_expired');
+    }
     const client = createWalletClient({
       chain: quote.chainId === 4663 ? robinhood : base,
       transport: custom(provider, { retryCount: 0 }),
@@ -248,8 +264,17 @@ export function receiptPayouts(
   )
     return null;
   const amounts = quote.payouts.map(() => 0n);
+  const stonxTransfers = quote.payouts.map(() => 0n);
   let ponsTransferred = 0n;
   for (const log of receipt.logs) {
+    if (quote.kind === 'stonx') {
+      try {
+        const event = decodeEventLog({ abi: ponsClaimAbi, data: log.data, topics: log.topics as [`0x${string}`, ...`0x${string}`[]] });
+        const index = quote.payouts.findIndex(p => p.asset.toLowerCase() === log.address.toLowerCase());
+        if (index >= 0 && event.eventName === 'Transfer' && event.args.from.toLowerCase() === quote.target.toLowerCase()
+          && event.args.to.toLowerCase() === quote.address.toLowerCase()) stonxTransfers[index] += event.args.value;
+      } catch { /* Only matching ERC-20 transfers prove receipt of the release. */ }
+    }
     if (quote.kind === 'pons') {
       try {
         const event = decodeEventLog({ abi: ponsClaimAbi, data: log.data, topics: log.topics as [`0x${string}`, ...`0x${string}`[]] });
@@ -299,7 +324,7 @@ export function receiptPayouts(
     )
       amounts[0] += event.args.amount;
     if (
-      isLockedPoolClaim(quote.kind) &&
+      isPoolFeeClaim(quote.kind) &&
       event.eventName === 'Release' &&
       event.args.poolId === quote.poolId &&
       event.args.beneficiary.toLowerCase() === quote.address.toLowerCase()
@@ -307,6 +332,10 @@ export function receiptPayouts(
       amounts[0] += event.args.fees0;
       amounts[1] += event.args.fees1;
     }
+  }
+  if (quote.kind === 'stonx') {
+    if (amounts.some((amount, i) => stonxTransfers[i] > amount || (amount > 0n && stonxTransfers[i] === 0n))) return null;
+    amounts.splice(0, amounts.length, ...stonxTransfers);
   }
   if (quote.kind === 'pons') {
     if (amounts[0] !== BigInt(quote.payouts[0].claimableRaw)) return null;

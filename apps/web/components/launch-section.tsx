@@ -388,7 +388,7 @@ export function LaunchSection({
                                   {formatEth(amount.launchpadWei)} · Verified
                                 </a>
                               : amount ? formatEth(amount.launchpadWei)
-                              : chainId === 8453 && pad.id === 'o1' && !estimateFailed ? 'Calculated at launch'
+                              : chainId === 8453 && ['o1', 'stonx'].includes(pad.id) && !estimateFailed ? 'Calculated at launch'
                               : isEnabledLaunchPair(pad.pairId) && supportsEstimate
                                 ? estimateFailed ? 'Unavailable' : 'Checking…'
                                 : 'Unavailable'}

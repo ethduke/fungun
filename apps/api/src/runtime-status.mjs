@@ -77,6 +77,12 @@ export function runtimeStatus(env) {
         ["PONS_LAUNCH_PROFILE_JSON", present(env.PONS_LAUNCH_PROFILE_JSON)],
         ["LAUNCH_ASSET_SERVICE_ORIGIN", present(env.LAUNCH_ASSET_SERVICE_ORIGIN)],
       ], ["READ_UPSTREAMS", "PONS_WALLET_LAUNCH"]),
+      feature("stonx_base_wallet_launch", [
+        ["BASE_RPC", present(config.baseRpcUrl)],
+        ["STONX_BASE_PROFILE_JSON", present(env.STONX_BASE_PROFILE_JSON)],
+        ["LAUNCH_ASSET_SERVICE_ORIGIN", present(env.LAUNCH_ASSET_SERVICE_ORIGIN)],
+        ["FEE_CONTRACTS_JSON.baseOracle", !!config.feeContracts.baseOracle],
+      ], ["READ_UPSTREAMS", "STONX_BASE_WALLET_LAUNCH"]),
       feature("o1_base_wallet_launch", [
         o1,
         ["BASE_RPC_URL", present(config.baseRpcUrl)],
@@ -87,6 +93,9 @@ export function runtimeStatus(env) {
       feature("o1_indexed_fees", [o1], fees),
       feature("pons_escrow_fees", [rpc, ["PONS_FEE_PROFILE_JSON", !!config.ponsFees]], fees),
       feature("pons_escrow_claims", [rpc, ["PONS_FEE_PROFILE_JSON", !!config.ponsFees]], claims),
+      feature("stonx_creator_fees", [["BASE_RPC", present(config.baseRpcUrl)], ["STONX_BASE_PROFILE_JSON", !!config.stonxFees], ["STONX_FEE_MULTICALL_JSON", !!config.stonxFeeMulticall]], fees),
+      feature("stonx_creator_claims", [["BASE_RPC", present(config.baseRpcUrl)], ["STONX_BASE_PROFILE_JSON", !!config.stonxFees], ["STONX_FEE_MULTICALL_JSON", !!config.stonxFeeMulticall],
+        ["FEE_CONTRACTS_JSON.baseOracle", !!config.feeContracts.baseOracle]], claims),
       ...["long", "longbow"].flatMap((padId) => [
         feature(`${padId}_locked_pool_fees`, [rpc, lockedFees(padId)], fees),
         feature(`${padId}_locked_pool_claims`, [rpc, lockedFees(padId)], claims),

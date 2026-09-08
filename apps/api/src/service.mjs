@@ -29,8 +29,8 @@ export function validateInput(kind, input) {
     if (
       kind === "fees"
         ? ![4663, 8453].includes(input.chainId) ||
-          !["long", "o1", "longbow", "pons", "stonks"].includes(input.padId) ||
-          (input.padId === 'stonks' ? input.chainId !== 8453 : input.padId !== 'o1' && input.chainId !== 4663) ||
+          !["long", "o1", "longbow", "pons", "stonks", "stonx"].includes(input.padId) ||
+          (['stonks', 'stonx'].includes(input.padId) ? input.chainId !== 8453 : input.padId !== 'o1' && input.chainId !== 4663) ||
           (Object.hasOwn(input, "cursor") &&
             (typeof input.cursor !== "string" || !/^[a-f0-9]{64}$/.test(input.cursor)))
         : typeof input.positionId !== "string" || !/^[a-f0-9]{64}$/.test(input.positionId)

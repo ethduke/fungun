@@ -49,6 +49,7 @@ await test('preview fee lookups never request RPC, invent zero balances or enabl
       { padId: 'longbow', chainId: 4663 },
       { padId: 'pons', chainId: 4663 },
       { padId: 'stonks', chainId: 8453 },
+      { padId: 'stonx', chainId: 8453 },
     ]);
   } finally {
     globalThis.fetch = original;

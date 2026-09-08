@@ -35,14 +35,14 @@ await test('selecting Long or Longbow switches the shared ticker destination and
   let selected = destinations().map(pad => pad.id === 'o1' ? { ...pad, selected: true } : pad);
   const original = structuredClone(selected);
   selected = selectDestination(selected, { ...selected[2], selected: true });
-  assert.deepEqual(selected.map(pad => pad.selected), [false, true, true, false, false]);
+  assert.deepEqual(selected.map(pad => pad.selected), [false, true, true, false, false, false]);
   assert.deepEqual(validateDraft(draft, selected, 4663), {});
   selected = selectDestination(selected, { ...selected[0], selected: true });
-  assert.deepEqual(selected.map(pad => pad.selected), [true, true, false, false, false]);
+  assert.deepEqual(selected.map(pad => pad.selected), [true, true, false, false, false, false]);
   assert.deepEqual(selected.map(pad => pad.pairId), original.map(pad => pad.pairId));
   selected = selectDestination(selected, { ...selected[0], selected: false });
-  assert.deepEqual(selected.map(pad => pad.selected), [false, true, false, false, false]);
-  assert.deepEqual(original.map(pad => pad.selected), [true, true, false, false, false]);
+  assert.deepEqual(selected.map(pad => pad.selected), [false, true, false, false, false, false]);
+  assert.deepEqual(original.map(pad => pad.selected), [true, true, false, false, false, false]);
 });
 
 await test('a restored legacy selection with both ticker-sharing pads cannot launch', () => {
@@ -255,7 +255,7 @@ await test('multi-launch validates every selected destination', () => {
 await test('Robinhood is the default chain with all four Robinhood launchpads available', () => {
   assert.equal(DEFAULT_CHAIN_ID, 4663);
   assert.ok(
-    destinations().filter(pad => pad.id !== 'stonks').every((pad) => supportsChain(pad.id, DEFAULT_CHAIN_ID)),
+    destinations().filter(pad => !['stonks', 'stonx'].includes(pad.id)).every((pad) => supportsChain(pad.id, DEFAULT_CHAIN_ID)),
   );
   assert.deepEqual(
     destinations()

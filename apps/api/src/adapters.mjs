@@ -111,6 +111,12 @@ export class Adapters {
     this.catalogs = budget ? new CatalogSnapshots(budget.db, now) : null;
   }
 
+  withStonx(catalog) {
+    if (catalog.chainId !== 8453 || !this.config.stonxLaunch) return catalog;
+    const ready = this.config.readsEnabled;
+    return { ...catalog, expiresAt: Math.min(catalog.expiresAt, this.now() + 300000), pads: { ...catalog.pads,
+      stonx: { status: ready ? 'ready' : 'unavailable', pairs: ready ? this.config.stonxLaunch.profile.quotes.map(q => ({ id: q.id, symbol: q.symbol })) : [] } } };
+  }
   async catalog(chainId) {
     const stonks = chainId === 8453 && this.stonks ? await this.stonks.catalog().catch(() => ({ status: 'unavailable', pairs: [] })) : null;
     const unavailable = { status: "unavailable", pairs: [] };
@@ -119,14 +125,14 @@ export class Adapters {
       : unavailable;
     if (!this.config.readsEnabled || !this.config.o1Key || !this.catalogs) {
       this.catalogs?.prune(chainId);
-      return {
+      return this.withStonx({
         chainId,
         expiresAt: this.now() + (chainId === 8453 ? Math.max(0, (stonks?.expiresAt ?? this.now() + 60000) - this.now()) : 300_000),
         pads: chainId === 4663 ? { long, o1: unavailable } : { o1: unavailable, stonks: stonks ?? unavailable },
-      };
+      });
     }
     const catalog = this.catalogs.catalog(chainId);
-    return chainId === 4663 ? { ...catalog, pads: { ...catalog.pads, long } } : { ...catalog, expiresAt: Math.min(catalog.expiresAt, stonks?.expiresAt ?? this.now() + 60000), pads: { ...catalog.pads, stonks: stonks ?? unavailable } };
+    return chainId === 4663 ? { ...catalog, pads: { ...catalog.pads, long } } : this.withStonx({ ...catalog, expiresAt: Math.min(catalog.expiresAt, stonks?.expiresAt ?? this.now() + 60000), pads: { ...catalog.pads, stonks: stonks ?? unavailable } });
   }
 
   async refreshCatalog(chainId) {
