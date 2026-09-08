@@ -4,8 +4,64 @@ import {
   childShutdownSignal,
   resolveDevSettings,
   signalChild,
+  startWebProcess,
   waitForHealth,
+  webEnvironment,
 } from "./dev.mjs";
+
+test("the web child receives exactly the reviewed environment, never shell secrets", () => {
+  const settings = resolveDevSettings({}, {
+    APP_ORIGIN: "http://localhost:3100", READ_SERVICE_PORT: "8888",
+  });
+  const publicSettings = {
+    PATH: "/usr/bin", HOME: "/synthetic-home", TMPDIR: "/tmp", TMP: "/tmp",
+    TEMP: "/tmp", LANG: "en_US.UTF-8", LC_ALL: "C", TZ: "UTC",
+    CODEX_SANDBOX: "seatbelt", READ_SERVICE_ORIGIN: "http://127.0.0.1:8888",
+    ASSET_SERVICE_ORIGIN: "http://127.0.0.1:8788",
+    ASSET_PUBLIC_ORIGIN: "https://assets.example.invalid", ASSET_UPLOADS: "enabled",
+    ASSET_STORAGE: "ipfs", PINATA_GATEWAY: "example.mypinata.cloud",
+    IMAGE_USDG_ADDRESS: `0x${"11".repeat(20)}`,
+  };
+  const forbidden = [
+    "PINATA_JWT", "OPENROUTER_KEY", "OPENROUTER_API_KEY", "XAI_API_KEY",
+    "TELEGRAM_BOT_TOKEN", "FOMO_RELAY_TOKEN", "FOMO_API_KEY", "O1_API_KEY",
+    "BASE_RPC_URL", "ROBINHOOD_RPC_URL", "PRIVATE_KEY", "MNEMONIC",
+    "X402_FACILITATOR_TOKEN", "X402_FACILITATOR_PRIVATE_KEY", "UNKNOWN_SECRET",
+    "NEXT_PUBLIC_PINATA_JWT", "NEXT_PUBLIC_CUSTOM", "VITE_CUSTOM",
+    "NODE_OPTIONS", "NODE_DEBUG", "DEBUG", "FUNGUN_WEB_TARGET",
+    "WRANGLER_LOG", "WRANGLER_WRITE_LOGS", "CLOUDFLARE_API_TOKEN",
+  ];
+  const canary = ["synthetic", "shell", "credential"].join("-");
+  const inherited = { ...publicSettings,
+    ...Object.fromEntries(forbidden.map(name => [name, canary])),
+    NODE_ENV: "production", APP_ORIGIN: "https://wrong.example.invalid",
+    READ_SERVICE_PORT: "9999",
+  };
+  const calls = [];
+  const child = {};
+  assert.equal(startWebProcess(settings, inherited, (...args) => {
+    calls.push(args);
+    return child;
+  }), child);
+  assert.equal(calls.length, 1);
+  const [command, args, options] = calls[0];
+  assert.equal(command, process.execPath);
+  assert.deepEqual(args, ["node_modules/vinext/dist/cli.js", "dev", "--hostname", "localhost", "--port", "3100"]);
+  assert.deepEqual(options.env, { NODE_ENV: "development",
+    APP_ORIGIN: settings.appOrigin, READ_SERVICE_PORT: "8888", ...publicSettings });
+  assert.ok(!JSON.stringify(calls).includes(canary));
+  assert.equal(inherited.PINATA_JWT, canary, "Filtering does not mutate the parent environment");
+});
+
+test("web environment ignores inherited properties and non-string values", () => {
+  const inherited = Object.assign(Object.create({ PATH: "/inherited", ASSET_STORAGE: "ipfs" }), {
+    HOME: "/synthetic-home", TMPDIR: undefined, LANG: 42, PINATA_GATEWAY: null,
+  });
+  assert.deepEqual(webEnvironment(inherited, resolveDevSettings()), {
+    NODE_ENV: "development", APP_ORIGIN: "http://127.0.0.1:3000",
+    READ_SERVICE_PORT: "8787", HOME: "/synthetic-home",
+  });
+});
 
 test("dev settings keep the web origin and API proxy port aligned", () => {
   assert.deepEqual(resolveDevSettings(), {

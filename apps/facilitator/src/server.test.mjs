@@ -60,7 +60,7 @@ function body() {
   };
 }
 
-async function fixture(facilitator = {}) {
+async function fixture(facilitator = {}, logger = { info() {}, error() {} }) {
   const server = createFacilitatorServer({
     facilitator: {
       verify: async () => ({ isValid: true, payer }),
@@ -74,13 +74,14 @@ async function fixture(facilitator = {}) {
     },
     config: { bearerToken: facilitatorCredential, asset, payTo, maxAmount: 100_000n },
     relayerAddress: `0x${"88".repeat(20)}`,
-    logger: { info() {}, error() {} },
+    logger,
   });
   server.listen(0, "127.0.0.1");
   await once(server, "listening");
   const origin = `http://127.0.0.1:${server.address().port}`;
   return {
     server,
+    origin,
     get: path =>
       fetch(`${origin}${path}`, {
         headers: { ["authorization"]: `Bearer ${facilitatorCredential}` },
@@ -96,6 +97,93 @@ async function fixture(facilitator = {}) {
       }),
   };
 }
+
+function captureLogs() {
+  const info = [];
+  const error = [];
+  return { info, error, logger: {
+    info: entry => info.push(entry), error: entry => error.push(entry),
+  } };
+}
+
+function assertSafeLogs(logs, canaries) {
+  const serialized = JSON.stringify([logs.info, logs.error]);
+  for (const canary of canaries) assert.ok(!serialized.includes(canary));
+  for (const entry of logs.info) {
+    assert.deepEqual(Object.keys(entry).sort(), ["durationMs", "event", "route", "status"]);
+    assert.equal(entry.event, "facilitator_request");
+    assert.ok(["unknown", "/healthz", "/supported", "/verify", "/settle"].includes(entry.route));
+    assert.ok(Number.isInteger(entry.durationMs) && entry.durationMs >= 0);
+  }
+  for (const entry of logs.error) {
+    assert.deepEqual(Object.keys(entry).sort(), ["code", "event", "route"]);
+    assert.equal(entry.event, "facilitator_request_failed");
+    assert.equal(entry.code, "unexpected_error");
+  }
+}
+
+test("request logs exclude credentials in rejected paths, queries, headers and bodies", async t => {
+  const logs = captureLogs();
+  const f = await fixture({}, logs.logger);
+  t.after(() => f.server.close());
+  const markers = ["path", "query", "header", "body"].map(part => ["synthetic", part, "credential"].join("_"));
+  const [pathValue, queryValue, headerValue, bodyValue] = markers;
+  const authHeaders = { ["authorization"]: `Bearer ${facilitatorCredential}` };
+  const jsonHeaders = { ...authHeaders, "content-type": "application/json" };
+  const cases = [
+    { path: `/${pathValue}`, status: 401, route: "unknown" },
+    { path: `/%73${pathValue}`, status: 401, route: "unknown" },
+    { path: `/verify?key=${queryValue}`, status: 404, route: "/verify" },
+    { path: "/supported", options: { headers: {
+      ["authorization"]: `Bearer ${headerValue}`, cookie: headerValue,
+      "x-api-key": headerValue, "user-agent": headerValue, referer: headerValue,
+    } }, status: 401, route: "/supported" },
+    { path: `/unknown/${pathValue}`, options: { headers: authHeaders }, status: 404, route: "unknown" },
+    { path: "/verify", options: { method: "POST", headers: jsonHeaders,
+      body: JSON.stringify({ note: bodyValue }) }, status: 200, route: "/verify" },
+    { path: "/verify", options: { method: "POST", headers: jsonHeaders,
+      body: JSON.stringify({ note: bodyValue }).slice(0, -1) }, status: 400, route: "/verify" },
+    { path: "/healthz", status: 200, route: "/healthz" },
+    { path: "/supported", options: { headers: authHeaders }, status: 200, route: "/supported" },
+    ...["/verify", "/settle"].map(path => ({ path,
+      options: { method: "POST", headers: jsonHeaders, body: JSON.stringify(body()) },
+      status: 200, route: path,
+    })),
+  ];
+  for (const item of cases) {
+    const count = logs.info.length;
+    const response = await fetch(`${f.origin}${item.path}`, item.options);
+    assert.equal(response.status, item.status);
+    await response.arrayBuffer();
+    assert.equal(logs.info.length, count + 1);
+    assert.equal(logs.info.at(-1).route, item.route);
+    assert.equal(logs.info.at(-1).status, item.status);
+  }
+  assert.equal(logs.error.length, 0);
+  assertSafeLogs(logs, [...markers, facilitatorCredential]);
+});
+
+test("unexpected provider errors use a fixed log code, never a message or stack", async t => {
+  const logs = captureLogs();
+  // This deliberately satisfies the old error-message character whitelist.
+  const marker = ["synthetic", "provider", "credential"].join("_");
+  const fail = async () => {
+    const error = new Error(marker, { cause: marker });
+    error.stack = marker;
+    throw error;
+  };
+  const f = await fixture({ verify: fail, settle: fail }, logs.logger);
+  t.after(() => f.server.close());
+  for (const route of ["/verify", "/settle"]) {
+    const response = await f.post(route);
+    assert.equal(response.status, 500);
+    assert.deepEqual(await response.json(), { error: "unexpected_error" });
+    assert.equal(logs.error.at(-1).route, route);
+  }
+  assert.equal(logs.info.length, 2);
+  assert.equal(logs.error.length, 2);
+  assertSafeLogs(logs, [marker, facilitatorCredential]);
+});
 
 test("keeps health public and every x402 endpoint bearer protected", async t => {
   const f = await fixture();
