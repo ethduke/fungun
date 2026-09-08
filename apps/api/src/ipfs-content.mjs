@@ -48,6 +48,8 @@ export async function prepareLongIpfsAssets(processedImage, input) {
     name: draft.name, symbol: draft.ticker, description: draft.description,
     image: imageUri, image_hash: imageUri,
     ...(draft.launchpad === "longbow" ? { categories: ["longbow"] } : {}),
+    ...(draft.website !== undefined ? { website: draft.website } : {}),
+    ...(draft.twitter !== undefined ? { twitter: draft.twitter } : {}),
   }));
   if (metadataBytes.length > METADATA_BYTE_LIMIT) throw new ServiceError("metadata_size", 400);
   const metadataCid = await ipfsContentId(metadataBytes);

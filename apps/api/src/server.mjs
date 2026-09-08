@@ -1,3 +1,4 @@
+import { createAgentHandler } from './agent-api.mjs';
 import { Launches } from "./launches.mjs";
 import { createServer } from "node:http";
 import { mkdirSync } from "node:fs";
@@ -33,8 +34,9 @@ try {
   const tokenImages = new O1TokenImages(config, upstream);
   const server = createServer(
     { maxHeaderSize: 8192 },
+    createAgentHandler({ config, budget, adapters, launches },
     createFomoRelayHandler(fomo, process.env.FOMO_RELAY_TOKEN,
-      createHandler(config, budget, adapters, fees, trackedPrices, launches, fomo, tokenImages)),
+      createHandler(config, budget, adapters, fees, trackedPrices, launches, fomo, tokenImages))),
   );
   server.requestTimeout = 10_000;
   server.headersTimeout = 5000;
