@@ -63,3 +63,14 @@ pons v2 is available in the Robinhood launchpad selector with ETH pairing
 The connected wallet receives creator fees. Live eligibility, fees and launch
 economics are checked before wallet submission. pons fee claims are not yet
 integrated. It can be combined with O1 and either Long or Longbow.
+
+
+## Agent deployments and themes
+
+The optional authenticated agent API and local Node SDK support Long deployments,
+exact-name trending-theme subscriptions and configured automatic launches. The
+signer stays local; artwork can be supplied, generated with Grok/x402 or replaced
+with a neutral placeholder. See [agent setup](docs/agent-launches.md) for runtime
+access, spending limits, CLI commands and recovery. Run `npm run test:agent` for
+agent, payment, subscription and integration checks. This feature is disabled by
+default and requires deployment configuration before use.

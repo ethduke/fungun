@@ -59,3 +59,25 @@ pons v2 is available in the Robinhood launchpad selector with ETH pairing
 The connected wallet receives creator fees. Live eligibility, fees and launch
 economics are checked before wallet submission. pons fee claims are not yet
 integrated. It can be combined with O1 and either Long or Longbow.
+
+
+## Optional Long agent API
+
+Configured deployments can expose an authenticated Long-only agent API at the
+operator-provided API origin. It is disabled by default. The companion Node SDK
+can deploy without per-launch prompts after its owner configures access, signing
+and spending limits. Keys stay in the local signer; the API prepares unsigned
+transactions and verifies recovery. The experimental browser preview tools remain
+limited to drafting.
+
+`GET /v1/agent/launchpads` lists configured Long pairings. `GET /v1/agent/themes`
+provides exact normalized-name trends, distinct contract counts, threshold-crossing
+events and opaque cursors. Threshold and observation-window settings are configurable;
+freshness must be checked before automatic deployment. The SDK searches Long ticker
+availability and remembers handled themes across restarts.
+
+Image modes are provided, Grok through USDG/x402, or none (a neutral placeholder
+required by the publication protocol). Optional website and Twitter HTTPS links
+are included in token metadata. API credentials, public wallet bindings and
+runtime configuration must be provisioned by the operator; do not invent addresses
+or copy secrets into requests. [Agent guide](/agent-guide.md) explains access.
