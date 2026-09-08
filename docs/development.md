@@ -59,9 +59,9 @@ external reads default to disabled.
   first snapshot uses feed order rather than claiming historical crossing times.
 - COPY transfers the selected token's name and ticker into the launch form and
   jumps to the coin details immediately. It clears old artwork and invalidates
-  pending uploads so another token's image cannot carry over. On this test branch,
-  recognized Robinhood O1 rows also fetch artwork through O1's API after COPY.
-  Other launchpads still need a separate image. See [the O1 experiment](o1-copy-image-test.md).
+  pending uploads so another token's image cannot carry over. Recognized Robinhood
+  O1 rows fetch artwork through O1's API; other Robinhood/Base rows try compatible
+  Long/Doppler token metadata. See [image COPY](doppler-image-copy.md).
 - Upload/drop a PNG, JPEG, WebP or GIF, preview and remove it. Picture bytes are cached in IndexedDB with the draft.
 - Enter name, ticker and optional description; review per-launchpad validation.
 - Ticker edits auto-fill the coin name unless a custom name has been entered.
