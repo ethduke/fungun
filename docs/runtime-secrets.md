@@ -7,12 +7,22 @@ not remove or modify your local file.
 
 `npm run dev` parses the ignored root `.env`, passes only the API's named
 configuration to the read-service process, waits for it, then starts the web app
-without those provider settings. `npm run dev:api` uses the same API allowlist when
+with a separate explicit allowlist. `npm run dev:api` uses the same API allowlist when
 the service is debugged separately. Unknown names, private keys, seed phrases,
 Telegram credentials, public build variables and unused image-provider credentials
 are not forwarded to the API. Existing shell configuration takes precedence. Only
 selected operating-system settings come from the shell, never the local file. The
 launchers do not print values or pass them as arguments.
+
+The web child receives only basic OS settings (`PATH`, `HOME`, temporary-directory
+and locale settings, `TZ`), the sandbox watcher flag, validated development origin
+and ports, and these named public settings from the shell: `READ_SERVICE_ORIGIN`,
+`ASSET_SERVICE_ORIGIN`, `ASSET_PUBLIC_ORIGIN`, `ASSET_UPLOADS`, `ASSET_STORAGE`,
+`PINATA_GATEWAY`, and `IMAGE_USDG_ADDRESS`. Do not put credentials in public URLs.
+Unknown shell variables, provider and wallet credentials, `NODE_OPTIONS`,
+`NODE_DEBUG`, `DEBUG`, and arbitrary `NEXT_PUBLIC_*`/`VITE_*` variables are excluded.
+Adding a new web setting requires an explicit allowlist change and test review.
+This boundary applies to `npm run dev`, not a directly launched `dev:web` process.
 
 This protects the normal local API startup path, not every process on the machine.
 The launcher briefly holds the parsed file in memory; it is not a secure wallet.

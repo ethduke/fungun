@@ -4,7 +4,7 @@ import { readFileSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { parseEnv } from "node:util";
-import { API_RUNTIME_NAMES, apiEnvironment } from "../apps/api/src/runtime-env.mjs";
+import { apiEnvironment } from "../apps/api/src/runtime-env.mjs";
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const defaultOrigin = "http://127.0.0.1:3000";
@@ -111,17 +111,37 @@ function loadLocalEnvironment() {
   }
 }
 
-function webEnvironment(inherited, settings) {
+export function webEnvironment(inherited, settings) {
   const environment = {
-    ...inherited,
     NODE_ENV: "development",
     APP_ORIGIN: settings.appOrigin,
     READ_SERVICE_PORT: String(settings.apiPort),
   };
-  for (const name of API_RUNTIME_NAMES)
-    if (!["NODE_ENV", "APP_ORIGIN", "READ_SERVICE_PORT"].includes(name))
-      delete environment[name];
+  // Add only reviewed public settings. Never inherit arbitrary shell variables,
+  // public-prefix variables, Node injection options, or provider credentials.
+  for (const name of [
+    "PATH", "HOME", "TMPDIR", "TMP", "TEMP", "LANG", "LC_ALL", "TZ",
+    "CODEX_SANDBOX",
+    "READ_SERVICE_ORIGIN", "ASSET_SERVICE_ORIGIN", "ASSET_PUBLIC_ORIGIN",
+    "ASSET_UPLOADS", "ASSET_STORAGE", "PINATA_GATEWAY", "IMAGE_USDG_ADDRESS",
+  ])
+    if (Object.hasOwn(inherited, name) && typeof inherited[name] === "string")
+      environment[name] = inherited[name];
   return environment;
+}
+
+export function startWebProcess(settings, inherited = process.env, spawnProcess = spawn) {
+  return spawnProcess(
+    process.execPath,
+    ["node_modules/vinext/dist/cli.js", "dev", "--hostname", settings.webHost,
+      "--port", String(settings.webPort)],
+    {
+      cwd: resolve(root, "apps/web"),
+      env: webEnvironment(inherited, settings),
+      detached: isolateProcessGroups,
+      stdio: "inherit",
+    },
+  );
 }
 
 export function signalChild(
@@ -253,23 +273,7 @@ export async function runDev() {
 
     if (!stopping) {
       console.log(`Read service ready; starting web app at ${settings.appOrigin}…`);
-      const web = spawn(
-        process.execPath,
-        [
-          "node_modules/vinext/dist/cli.js",
-          "dev",
-          "--hostname",
-          settings.webHost,
-          "--port",
-          String(settings.webPort),
-        ],
-        {
-          cwd: resolve(root, "apps/web"),
-          env: webEnvironment(process.env, settings),
-          detached: isolateProcessGroups,
-          stdio: "inherit",
-        },
-      );
+      const web = startWebProcess(settings);
       watch(web, "Web app");
     }
 
