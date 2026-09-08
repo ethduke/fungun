@@ -4,6 +4,7 @@ COPY immediately fills the name and ticker, clears old artwork, and loads a new
 image when available. Long, Longbow and other compatible EVM tokens are supported
 on Robinhood (4663) and Base (8453), including rows with generic pool labels.
 Recognized Robinhood O1 tokens continue to use the O1 provider and original route.
+Pons v2 rows use their dedicated [tokenLogo provider](pons-v2-image-copy.md).
 A missing or unsupported image leaves text COPY usable with an upload prompt.
 
 ## Resolution

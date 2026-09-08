@@ -13,8 +13,8 @@ const require = createRequire(new URL('../apps/api/package.json', import.meta.ur
 const { encodeAbiParameters } = require('viem');
 const sharp = require('sharp');
 
-test('Doppler COPY crosses the production proxy, route, RPC resolver and launch decoder', async t => {
-  const source = { chainId: 4663, address: `0x${'a'.repeat(40)}`, provider: 'doppler' };
+for (const provider of ['doppler', 'pons-v2']) test(`${provider} COPY crosses the production proxy, route, RPC resolver and launch decoder`, async t => {
+  const source = { chainId: 4663, address: `0x${'a'.repeat(40)}`, provider };
   const png = await sharp({ create: { width: 3, height: 4, channels: 3, background: 'blue' } }).png().toBuffer();
   const imageCid = await ipfsContentId(png);
   const metadata = Buffer.from(JSON.stringify({ image_hash: `ipfs://${imageCid}` }));
@@ -29,7 +29,10 @@ test('Doppler COPY crosses the production proxy, route, RPC resolver and launch 
     if (options.method === 'POST') {
       const request = JSON.parse(options.body);
       return Response.json({ jsonrpc: '2.0', id: request.id, result: request.method === 'eth_chainId'
-        ? '0x1237' : encodeAbiParameters([{ type: 'string' }], [`ipfs://${metadataCid}`]) });
+        ? '0x1237' : provider === 'doppler' ? encodeAbiParameters([{ type: 'string' }], [`ipfs://${metadataCid}`])
+          : encodeAbiParameters([{ type: 'address' }, { type: 'string' }, { type: 'string' },
+            { type: 'tuple', components: Array.from({ length: 5 }, () => ({ type: 'string' })) }],
+            [source.address, `ipfs://${imageCid}`, '', ['', '', '', '', '']]) });
     }
     imageReads++;
     return new Response(String(url).endsWith(imageCid) ? png : metadata);
@@ -60,7 +63,7 @@ test('Doppler COPY crosses the production proxy, route, RPC resolver and launch 
   const decoded = await sharp(Buffer.from(await blob.arrayBuffer())).metadata();
   assert.deepEqual([decoded.width, decoded.height], [3, 4]);
   assert.equal(blob.type, 'image/webp');
-  assert.equal(imageReads, 2);
+  assert.equal(imageReads, provider === 'doppler' ? 2 : 1);
   for (const body of [{ ...source, chainId: 1 }, { ...source, url: 'http://localhost/' }, { ...source, provider: 'anything' }]) {
     const invalid = await browserFetch('/api/token-image', { method: 'POST',
       headers: { 'content-type': 'application/json', 'x-fungun-intent': 'token-image' }, body: JSON.stringify(body) });
@@ -69,5 +72,5 @@ test('Doppler COPY crosses the production proxy, route, RPC resolver and launch 
   const denied = await browserFetch('/api/token-image', { method: 'POST',
     headers: { 'content-type': 'application/json', 'x-fungun-intent': 'o1-token-image' }, body: JSON.stringify(source) });
   assert.equal(denied.status, 403);
-  assert.equal(imageReads, 2);
+  assert.equal(imageReads, provider === 'doppler' ? 2 : 1);
 });

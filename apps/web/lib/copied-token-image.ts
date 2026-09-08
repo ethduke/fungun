@@ -3,7 +3,8 @@ import { IMAGE_LIMIT, imageFileError, imageKind } from './launch-model.ts';
 export const COPIED_IMAGE_ERROR = 'Image unavailable—upload one.';
 export type TokenImageSource =
   | { chainId: 4663; address: string; provider?: undefined }
-  | { chainId: 4663 | 8453; address: string; provider: 'doppler' };
+  | { chainId: 4663 | 8453; address: string; provider: 'doppler' }
+  | { chainId: 4663; address: string; provider: 'pons-v2' };
 export type ImageRequest = { signal: AbortSignal; isCurrent: () => boolean };
 
 export class ImageRequests {
@@ -33,6 +34,8 @@ export function tokenImageSource(value: unknown): TokenImageSource | null {
   const address = source.address.toLowerCase();
   if (source.provider === 'doppler' && (source.chainId === 4663 || source.chainId === 8453))
     return { chainId: source.chainId, address, provider: 'doppler' };
+  if (source.provider === 'pons-v2' && source.chainId === 4663)
+    return { chainId: 4663, address, provider: 'pons-v2' };
   return source.provider === undefined && source.chainId === 4663
     ? { chainId: 4663, address }
     : null;
@@ -43,7 +46,7 @@ export async function copiedTokenImage(
   signal: AbortSignal,
   fetcher: typeof fetch = fetch,
 ): Promise<Blob> {
-  const operation = source.provider === 'doppler' ? 'token-image' : 'o1-token-image';
+  const operation = source.provider ? 'token-image' : 'o1-token-image';
   const response = await fetcher(`/api/${operation}`, {
     method: 'POST',
     credentials: 'omit',

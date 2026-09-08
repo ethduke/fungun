@@ -106,7 +106,8 @@ about social trends or complete market coverage. This feed cannot trade or sign.
 COPY fills the coin name and ticker and jumps to the launch form immediately.
 It clears prior artwork and pending uploads. Recognized Robinhood O1 tokens load
 artwork through O1's API. Other Robinhood and Base tokens try compatible on-chain
-metadata, including Long and Longbow artwork. Available still images are saved
+metadata, including Long and Longbow artwork. Pons v2 rows fetch their token logo.
+Available still images are saved
 with the draft. Missing or unsupported artwork leaves the copied text usable;
 upload an image instead.
 

@@ -29,8 +29,18 @@ test('COPY preserves O1 dispatch and probes supported chains even with generic f
     { ...source, chainId: 1, provider: 'doppler' }]) assert.equal(tokenImageSource(bad), null);
 });
 
-test('Doppler COPY posts to the generic route with source identity and provider', async () => {
-  const doppler = { ...source, provider: 'doppler' };
+test('Pons v2 COPY selects its provider and keeps the feed name/ticker', () => {
+  for (const launchpad of ['pons-v2', 'Pons V2', 'pons v2']) {
+    const draft = trackedTokenDraft({ meme: address, name: 'Pons coin', sym: 'PONS', launchpad });
+    assert.deepEqual(draft, { name: 'Pons coin', ticker: 'PONS', imageSource: { ...source, provider: 'pons-v2' } });
+    assert.deepEqual(tokenImageSource(draft.imageSource), draft.imageSource);
+  }
+  assert.equal(trackedTokenDraft({ meme: address, launchpad: 'pons-v2', chain_id: 8453 }).imageSource, undefined);
+  assert.equal(tokenImageSource({ ...source, provider: 'pons-v2', chainId: 8453 }), null);
+});
+
+for (const provider of ['doppler', 'pons-v2']) test(`${provider} COPY posts to the generic route with source identity and provider`, async () => {
+  const doppler = { ...source, provider };
   const blob = await copiedTokenImage(doppler, new AbortController().signal, async (url, options) => {
     assert.equal(url, '/api/token-image');
     assert.equal(options.headers['x-fungun-intent'], 'token-image');
@@ -64,11 +74,11 @@ test('wrong token, wrong chain, invalid bytes and oversized responses cannot att
     async () => new Response(new Uint8Array(3 * 1024 * 1024 + 1), { headers: { 'content-type': 'application/json' } })));
 });
 
-test('a later COPY/upload or removal/unmount invalidates even a request that ignores abort', async () => {
+for (const provider of ['doppler', 'pons-v2']) test(`${provider}: a later COPY/upload or removal/unmount invalidates even a request that ignores abort`, async () => {
   const requests = new ImageRequests();
   let resolve;
   const first = requests.begin();
-  const pending = copiedTokenImage({ ...source, provider: 'doppler' }, first.signal, () => new Promise(r => { resolve = r; }));
+  const pending = copiedTokenImage({ ...source, provider }, first.signal, () => new Promise(r => { resolve = r; }));
   const upload = requests.begin();
   assert.equal(first.signal.aborted, true);
   resolve(Response.json(payload));

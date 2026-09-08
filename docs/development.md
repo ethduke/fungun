@@ -61,7 +61,8 @@ external reads default to disabled.
   jumps to the coin details immediately. It clears old artwork and invalidates
   pending uploads so another token's image cannot carry over. Recognized Robinhood
   O1 rows fetch artwork through O1's API; other Robinhood/Base rows try compatible
-  Long/Doppler token metadata. See [image COPY](doppler-image-copy.md).
+  Long/Doppler token metadata. Pons v2 rows read their on-chain logo. See
+  [image COPY](doppler-image-copy.md) and [Pons artwork](pons-v2-image-copy.md).
 - Upload/drop a PNG, JPEG, WebP or GIF, preview and remove it. Picture bytes are cached in IndexedDB with the draft.
 - Enter name, ticker and optional description; review per-launchpad validation.
 - Ticker edits auto-fill the coin name unless a custom name has been entered.

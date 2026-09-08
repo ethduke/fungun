@@ -22,7 +22,8 @@ Popularity counts similarly named distinct token
 contracts in the source's selected tracked cohort, not social trends.
 COPY fills the launch form with the selected token's name and ticker and retrieves
 available artwork for Robinhood O1 tokens and compatible Long/Doppler tokens on
-Robinhood or Base. Missing or unsupported artwork leaves text COPY usable.
+Robinhood or Base, plus Pons v2 logos on Robinhood. Missing or unsupported artwork
+leaves text COPY usable.
 Compact venue labels include O1 RWA, UniV3 and UniV4. O1 hooks are recognized
 using a daily server cache of the official current and historical suite registry,
 with no RPC enrichment. Migration labels require explicit upstream provenance.

@@ -1,3 +1,4 @@
+import { parseAbi } from "viem";
 import { CID } from "multiformats/cid";
 import { ServiceError } from "./errors.mjs";
 import { validAddress } from "./fee-contracts.mjs";
@@ -8,6 +9,10 @@ import { ReadCache, withinReadDeadline } from "./upstream.mjs";
 
 const unavailable = () => { throw new ServiceError("image_unavailable", 404); };
 const metadataLimit = 128 * 1024;
+const ponsTokenAbi = parseAbi([
+  "struct Socials { string twitter; string telegram; string discord; string website; string farcaster; }",
+  "function getTokenInfo() view returns (address tokenDeployer, string tokenLogo, string tokenDescription, Socials tokenSocials)",
+]);
 const tokenAbi = [{ type: "function", name: "tokenURI", stateMutability: "view", inputs: [],
   outputs: [{ type: "string" }] }];
 
@@ -16,8 +21,8 @@ export function validateCopiedTokenImageInput(input) {
   if (!input || typeof input !== "object" || Array.isArray(input)
     || Object.keys(input).length !== 3 || !validAddress(address)
     || ![4663, 8453].includes(input.chainId)
-    || !["o1", "doppler"].includes(input.provider)
-    || (input.provider === "o1" && input.chainId !== 4663))
+    || !["o1", "doppler", "pons-v2"].includes(input.provider)
+    || (input.provider !== "doppler" && input.chainId !== 4663))
     throw new ServiceError("invalid_request", 400);
   return { chainId: input.chainId, address, provider: input.provider };
 }
@@ -67,6 +72,7 @@ async function readContent(response) {
 }
 
 export class DopplerTokenImages {
+  provider = "doppler";
   constructor(config, upstream, fetcher = fetch, now = Date.now) {
     Object.assign(this, { config, upstream, fetcher });
     this.rpc = new FeeRpc(config, upstream);
@@ -76,8 +82,11 @@ export class DopplerTokenImages {
     this.chains = new ReadCache(now, 2);
   }
 
-  async fetchContent(cid, signal) {
-    const urls = gatewayUrls(cid);
+  fetchContent(cid, signal) {
+    return this.fetchUrls(gatewayUrls(cid), signal);
+  }
+
+  async fetchUrls(urls, signal) {
     const visited = new Set();
     for (const initial of urls) {
       let url = initial;
@@ -95,7 +104,8 @@ export class DopplerTokenImages {
           if ([301, 302, 303, 307, 308].includes(response.status)) {
             const location = response.headers.get("location");
             await response.body?.cancel();
-            // Only another canonical gateway URL for this exact CID is allowed.
+            // Only an explicitly supplied canonical URL is allowed. Gateway lists
+            // contain the same CID; a Pons HTTPS logo supplies just its exact URL.
             if (!urls.includes(location)) unavailable();
             url = location;
             continue;
@@ -115,10 +125,7 @@ export class DopplerTokenImages {
     return this.content.get(`${metadataAllowed ? "document" : "image"}:${cid}`, 3_600_000, async () => {
       const bytes = await this.fetchContent(cid, signal);
       if (rasterFormat(bytes)) {
-        signal.throwIfAborted();
-        const image = await this.processor.process(bytes);
-        signal.throwIfAborted();
-        return { mime: image.mime, size: image.bytes.length, base64: image.bytes.toString("base64") };
+        return this.decode(bytes, signal);
       }
       if (!metadataAllowed || bytes.length > metadataLimit) unavailable();
       let metadata;
@@ -136,8 +143,21 @@ export class DopplerTokenImages {
     });
   }
 
+  async decode(bytes, signal) {
+    signal.throwIfAborted();
+    const image = await this.processor.process(bytes);
+    signal.throwIfAborted();
+    return { mime: image.mime, size: image.bytes.length, base64: image.bytes.toString("base64") };
+  }
+
+  async loadImage(input, signal) {
+    const [uri] = await this.rpc.calls(input.chainId, [{ address: input.address,
+      abi: tokenAbi, functionName: "tokenURI" }]);
+    return this.resolve(imageCid(uri), true, signal);
+  }
+
   get(raw) {
-    const input = validateCopiedTokenImageInput({ ...raw, provider: "doppler" });
+    const input = validateCopiedTokenImageInput({ ...raw, provider: this.provider });
     if (!this.config.readsEnabled) throw new ServiceError("not_configured");
     // tokenURI can change; only immutable IPFS content gets the longer TTL.
     return this.tokens.get(`${input.chainId}:${input.address}`, 60_000, () => withinReadDeadline(async () => {
@@ -147,12 +167,42 @@ export class DopplerTokenImages {
         if (chain !== `0x${input.chainId.toString(16)}`) throw new ServiceError("wrong_chain");
         return true;
       });
-      const [uri] = await this.rpc.calls(input.chainId, [{ address: input.address,
-        abi: tokenAbi, functionName: "tokenURI" }]);
-      const image = await this.resolve(imageCid(uri), true, signal);
+      const image = await this.loadImage(input, signal);
       signal.throwIfAborted();
       return { chainId: input.chainId, address: input.address, ...image };
     }, 18_000));
+  }
+}
+
+// Pons stores an image URI directly in getTokenInfo().tokenLogo. These static
+// CDN paths were verified on live v2 tokens; no arbitrary HTTP proxy is exposed.
+export function ponsLogoUrl(value) {
+  if (typeof value !== "string" || value.length > 512) unavailable();
+  let url;
+  try { url = new URL(value); } catch { unavailable(); }
+  if (url.protocol !== "https:" || url.username || url.password || url.port
+    || url.search || url.hash || url.href !== value) unavailable();
+  const axiom = url.hostname === "axiomtrading-v2.axiom-cdn.io"
+    && /^\/[a-zA-Z0-9_-]{16,128}\.(?:webp|png|jpe?g)$/.test(url.pathname);
+  const twitter = url.hostname === "pbs.twimg.com"
+    && /^\/profile_images\/\d{1,24}\/[a-zA-Z0-9_-]{1,128}\.(?:webp|png|jpe?g)$/.test(url.pathname);
+  if (!axiom && !twitter) unavailable();
+  return url.href;
+}
+
+export class PonsTokenImages extends DopplerTokenImages {
+  provider = "pons-v2";
+
+  async loadImage(input, signal) {
+    const [info] = await this.rpc.calls(input.chainId, [{ address: input.address,
+      abi: ponsTokenAbi, functionName: "getTokenInfo" }]);
+    const logo = info?.[1];
+    if (typeof logo === "string" && logo.startsWith("ipfs://"))
+      return this.resolve(imageCid(logo), false, signal);
+    const url = ponsLogoUrl(logo);
+    // HTTPS resources can change independently of the token's metadata.
+    return this.content.get(`https:${url}`, 60_000, async () =>
+      this.decode(await this.fetchUrls([url], signal), signal));
   }
 }
 
@@ -160,12 +210,14 @@ export class TokenImages {
   constructor(config, upstream, fetcher = fetch, now = Date.now) {
     this.o1 = new O1TokenImages(config, upstream, fetcher, now);
     this.doppler = new DopplerTokenImages(config, upstream, fetcher, now);
+    this.pons = new PonsTokenImages(config, upstream, fetcher, now);
   }
 
   get(raw) {
     // Preserve the original endpoint for clients still running the O1 release.
     if (!Object.hasOwn(raw, "provider")) return this.o1.get(raw);
     const { provider, ...input } = validateCopiedTokenImageInput(raw);
-    return provider === "o1" ? this.o1.get(input) : this.doppler.get(input);
+    return provider === "o1" ? this.o1.get(input)
+      : provider === "pons-v2" ? this.pons.get(input) : this.doppler.get(input);
   }
 }
