@@ -83,3 +83,12 @@ test("invalid content and URI forms cannot become upload destinations", async ()
   for (const bad of [null, "", `${cid}/file`, `${cid}?key=EXAMPLE`, `${cid}#fragment`,
     `https://example.com/${cid}`, `ipfs://${cid}`, cid.toUpperCase()]) assert.throws(() => ipfsUri(bad));
 });
+
+test('optional public links are bound into IPFS metadata in canonical order',async()=>{
+  const result=await prepareLongIpfsAssets(image(),{...draft,website:'https://example.com',twitter:'https://x.com/example'});
+  const value=JSON.parse(result.metadata.bytes);
+  assert.equal(value.website,'https://example.com');
+  assert.equal(value.twitter,'https://x.com/example');
+  assert.deepEqual(Object.keys(value),['name','symbol','description','image','image_hash','website','twitter']);
+  assert.notEqual(result.metadata.cid,(await prepareLongIpfsAssets(image(),draft)).metadata.cid);
+});

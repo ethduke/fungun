@@ -186,3 +186,37 @@ pons v2 is available in the Robinhood launchpad selector with ETH pairing
 The connected wallet receives creator fees. Live eligibility, fees and launch
 economics are checked before wallet submission. pons fee claims are not yet
 integrated. It can be combined with O1 and either Long or Longbow.
+
+
+## Configured Long agent API
+
+The optional server API supports Long on Robinhood Chain (4663). Its Node SDK
+runs locally with an owner-configured signer and can submit without repeated
+approval prompts. This is separate from browser preview tools; it does not add
+signing to `document.modelContext`. The operator must enable the agent API and
+provision a bearer credential bound to the agent's public wallet, with scopes
+`long:deploy` and/or `themes:read`. Private keys never belong in API payloads.
+
+At the operator-provided API origin, `GET /v1/agent/launchpads` lists configured
+Long pairings. JSON POSTs under `/v1/agent/long/` expose `ticker`, `artwork-prepare`,
+`artwork-publish`, `artwork-status`, `prepare`, `reserve` and `status`. These routes
+retain contract checks, independent client validation and durable recovery. The
+SDK accepts name, ticker, artwork and optional description/website/Twitter links.
+Website/Twitter are HTTPS metadata fields, not instructions or fetched resources.
+
+`GET /v1/agent/themes?minimumTokens=3&windowSeconds=3600` returns `themes`,
+`events`, `nextCursor` and `freshness`. Append the opaque cursor on the next poll.
+Count thresholds range from 2 to 100 and windows from 60 to 86,400 seconds. Counts
+refer to distinct contracts first observed by the service within that window,
+not deployment timestamps. Names match after Unicode, whitespace and case
+normalization; this differs from fuzzy popularity groups in the visual feed.
+
+Automatic deployment acts only on fresh data and the configured Long search and
+deployment targets. Preserve journals across restarts to prevent duplicates.
+Image modes are provided, Grok through USDG/x402, and none; none uses a neutral
+placeholder because current Long publication still requires an image. Grok
+payments have separate owner-configured USDG limits and recover the existing
+request after an uncertain outcome, without another charge.
+
+Repository operators can find full setup and CLI commands in
+`docs/agent-launches.md`; that repository path is not a public HTTP endpoint.

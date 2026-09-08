@@ -257,6 +257,7 @@ export function createAssetProxy(
           expected.imageUrl = `${publicOrigin}/launch-assets/${expected.imageHash}.webp`;
           expected.metadataHash = await assetHash(new TextEncoder().encode(JSON.stringify({
             name: draft.name, symbol: draft.ticker, description: draft.description, image: expected.imageUrl,
+            ...(draft.website !== undefined ? { website: draft.website } : {}), ...(draft.twitter !== undefined ? { twitter: draft.twitter } : {}),
           })));
           expected.metadataUrl = `${publicOrigin}/launch-assets/${expected.metadataHash}.json`;
         }

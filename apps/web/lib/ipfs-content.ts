@@ -18,10 +18,12 @@ export async function ipfsContentId(bytes: Uint8Array) {
   throw new AssetError('invalid_asset_response');
 }
 
-export function ipfsMetadata(draft: { name: string; ticker: string; description: string; launchpad?: 'longbow' }, imageCid: string) {
+export function ipfsMetadata(draft: { name: string; ticker: string; description: string; launchpad?: 'longbow'; website?: string; twitter?: string }, imageCid: string) {
   const image = `ipfs://${imageCid}`;
   return new TextEncoder().encode(JSON.stringify({
     name: draft.name, symbol: draft.ticker, description: draft.description, image, image_hash: image,
     ...(draft.launchpad === 'longbow' ? { categories: ['longbow'] } : {}),
+    ...(draft.website !== undefined ? { website: draft.website } : {}),
+    ...(draft.twitter !== undefined ? { twitter: draft.twitter } : {}),
   }));
 }

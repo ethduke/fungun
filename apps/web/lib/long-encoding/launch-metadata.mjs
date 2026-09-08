@@ -41,10 +41,20 @@ export function normalizeLaunchDetails(input) {
     !input ||
     typeof input !== "object" ||
     Array.isArray(input) ||
-    Object.keys(input).some((key) => !["name", "ticker", "description", "launchpad"].includes(key))
+    Object.keys(input).some((key) => !["name", "ticker", "description", "launchpad", "website", "twitter"].includes(key))
   )
     throw new ServiceError("invalid_launch_details", 400);
   const { name, ticker, description = "" } = input;
+  const links = {};
+  for (const key of ['website', 'twitter']) {
+    if (input[key] === undefined) continue;
+    try {
+      const value = input[key];
+      const url = new URL(value);
+      if (typeof value !== 'string' || value.length > 512 || /[\s\p{Cc}\p{Cf}]/u.test(value) || url.protocol !== 'https:' || url.username || url.password) throw Error();
+      links[key] = value;
+    } catch { throw new ServiceError('invalid_launch_details', 400); }
+  }
   if (
     (input.launchpad !== undefined && input.launchpad !== "longbow") ||
     typeof name !== "string" ||
@@ -58,7 +68,7 @@ export function normalizeLaunchDetails(input) {
     /[\p{Cc}\p{Cf}]/u.test(description.replace(/\n/g, ""))
   )
     throw new ServiceError("invalid_launch_details", 400);
-  return Object.freeze({ name: name.trim(), ticker, description: description.trim(), ...(input.launchpad ? { launchpad: input.launchpad } : {}) });
+  return Object.freeze({ name: name.trim(), ticker, description: description.trim(), ...links, ...(input.launchpad ? { launchpad: input.launchpad } : {}) });
 }
 
 export function validatePublishedUri(uri, kind, publicOrigin) {
@@ -92,9 +102,9 @@ export function validatePublishedUri(uri, kind, publicOrigin) {
 }
 
 export function buildLongMetadata(input, publishedImageUri, publicOrigin) {
-  const { name, ticker, description } = normalizeLaunchDetails(input);
+  const { name, ticker, description, website, twitter } = normalizeLaunchDetails(input);
   const image = validatePublishedUri(publishedImageUri, "image", publicOrigin);
-  const bytes = Buffer.from(JSON.stringify({ name, symbol: ticker, description, image }), "utf8");
+  const bytes = Buffer.from(JSON.stringify({ name, symbol: ticker, description, image, ...(website !== undefined ? { website } : {}), ...(twitter !== undefined ? { twitter } : {}) }), "utf8");
   if (bytes.length > METADATA_BYTE_LIMIT) throw new ServiceError("metadata_size", 400);
   return Object.freeze({
     bytes,

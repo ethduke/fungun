@@ -1,3 +1,5 @@
+import { createAgentHandler, readAgentConfig } from './agent-api.mjs';
+import { AgentThemes } from './agent-themes.mjs';
 import { Launches } from "./launches.mjs";
 import { createServer } from "node:http";
 import { mkdirSync } from "node:fs";
@@ -31,10 +33,18 @@ try {
   const fomo = createFomoService(budget.db);
   const trackedPrices = new TrackedPrices(config, upstream);
   const tokenImages = new TokenImages(config, upstream);
+  const agent = readAgentConfig();
+  const themes = agent.enabled ? new AgentThemes(budget.db) : undefined;
   const server = createServer(
     { maxHeaderSize: 8192 },
-    createFomoRelayHandler(fomo, process.env.FOMO_RELAY_TOKEN,
-      createHandler(config, budget, adapters, fees, trackedPrices, launches, fomo, tokenImages)),
+    createAgentHandler(
+      { config, budget, adapters, launches, agent, themes },
+      createFomoRelayHandler(
+        fomo,
+        process.env.FOMO_RELAY_TOKEN,
+        createHandler(config, budget, adapters, fees, trackedPrices, launches, fomo, tokenImages),
+      ),
+    ),
   );
   server.requestTimeout = 10_000;
   server.headersTimeout = 5000;

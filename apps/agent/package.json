@@ -1,0 +1,21 @@
+{
+  "name": "@fungun/agent",
+  "private": true,
+  "bin": {
+    "fungun-agent": "./cli.mjs"
+  },
+  "type": "module",
+  "exports": "./index.mjs",
+  "scripts": {
+    "test": "node --experimental-strip-types --test *.test.mjs"
+  },
+  "dependencies": {
+    "viem": "2.56.0"
+  },
+  "devDependencies": {
+    "sharp": "0.35.4"
+  },
+  "engines": {
+    "node": ">=24.4.0"
+  }
+}

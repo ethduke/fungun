@@ -227,7 +227,9 @@ export class LongLive {
     const imageUri = ipfsUri(publication.ipfs.imageCid);
     const bytes = Buffer.from(JSON.stringify({ name: input.draft.name, symbol: input.draft.ticker,
       description: input.draft.description, image: imageUri, image_hash: imageUri,
-      ...(input.draft.launchpad === "longbow" ? { categories: ["longbow"] } : {}) }));
+      ...(input.draft.launchpad === "longbow" ? { categories: ["longbow"] } : {}),
+      ...(input.draft.website !== undefined ? { website: input.draft.website } : {}),
+      ...(input.draft.twitter !== undefined ? { twitter: input.draft.twitter } : {}) }));
     if (digest(bytes) !== input.publication.metadataHash || await ipfsContentId(bytes) !== publication.ipfs.metadataCid) fail("launch_assets_unverified");
     const block = await this.rpc.block(4663);
     const g = this.live.guards[q.id];
