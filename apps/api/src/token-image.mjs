@@ -47,6 +47,19 @@ function gatewayUrls(cid) {
   ];
 }
 
+// Some Long metadata points to GMGN's raster CDN instead of another IPFS CID.
+// Keep this limited to the observed asset route; never proxy arbitrary HTTPS.
+export function gmgnImageUrl(value) {
+  if (typeof value !== "string" || value.length > 256) unavailable();
+  let url;
+  try { url = new URL(value); } catch { unavailable(); }
+  if (url.origin !== "https://gmgn.ai" || url.username || url.password
+    || url.search || url.hash || url.href !== value
+    || !/^\/external-res\/[a-f0-9]{32}(?:_v[1-9][0-9]{0,2})?\.(?:webp|png|jpe?g|gif)$/.test(url.pathname))
+    unavailable();
+  return url.href;
+}
+
 async function readContent(response) {
   if (!response.ok || response.redirected || !response.body
     || Number(response.headers.get("content-length")) > IMAGE_BYTE_LIMIT) {
@@ -101,6 +114,10 @@ export class DopplerTokenImages {
             signal: AbortSignal.any([signal, AbortSignal.timeout(4000)]),
             headers: { accept: "application/json,image/png,image/jpeg,image/webp,image/gif,application/octet-stream" },
           });
+          if (response.status === 403 && url.startsWith("https://gmgn.ai/external-res/")) {
+            await response.body?.cancel();
+            throw new ServiceError("gmgn_image_blocked", 404);
+          }
           if ([301, 302, 303, 307, 308].includes(response.status)) {
             const location = response.headers.get("location");
             await response.body?.cancel();
@@ -112,7 +129,7 @@ export class DopplerTokenImages {
           }
           return await readContent(response);
         } catch (error) {
-          if (error?.status === 429) throw error;
+          if (error?.status === 429 || error?.code === "gmgn_image_blocked") throw error;
           signal.throwIfAborted();
           break;
         } finally { release(); }
@@ -121,26 +138,48 @@ export class DopplerTokenImages {
     unavailable();
   }
 
-  resolve(cid, metadataAllowed, signal) {
-    return this.content.get(`${metadataAllowed ? "document" : "image"}:${cid}`, 3_600_000, async () => {
+  async resolve(cid, metadataAllowed, signal) {
+    // Cache the immutable document's references, not the result of resolving a
+    // potentially mutable HTTPS image referenced by that document.
+    const content = await this.content.get(`${metadataAllowed ? "document" : "image"}:${cid}`, 3_600_000, async () => {
       const bytes = await this.fetchContent(cid, signal);
       if (rasterFormat(bytes)) {
-        return this.decode(bytes, signal);
+        return { image: await this.decode(bytes, signal) };
       }
       if (!metadataAllowed || bytes.length > metadataLimit) unavailable();
       let metadata;
       try { metadata = JSON.parse(bytes.toString("utf8")); } catch { unavailable(); }
       const candidates = new Set();
       for (const field of [metadata?.image, metadata?.image_hash]) {
-        try { candidates.add(imageCid(field)); } catch { /* Try the other supported field. */ }
+        try { candidates.add(`ipfs://${imageCid(field)}`); }
+        catch {
+          try { candidates.add(gmgnImageUrl(field)); } catch { /* Try the other supported field. */ }
+        }
       }
-      for (const candidate of candidates) {
-        signal.throwIfAborted();
-        try { return await this.resolve(candidate, false, signal); }
-        catch (error) { if (error?.status === 429) throw error; }
-      }
-      unavailable();
+      if (!candidates.size) unavailable();
+      return { candidates: [...candidates] };
     });
+    if (content.image) return content.image;
+    let blocked;
+    for (const candidate of content.candidates) {
+      signal.throwIfAborted();
+      try {
+        if (candidate.startsWith("ipfs://")) return await this.resolve(imageCid(candidate), false, signal);
+        return await this.resolveHttps(candidate, signal);
+      }
+      catch (error) {
+        if (error?.status === 429) throw error;
+        if (error?.code === "gmgn_image_blocked") blocked = error;
+      }
+    }
+    if (blocked) throw blocked;
+    unavailable();
+  }
+
+  resolveHttps(url, signal) {
+    // A content-addressed document does not make its HTTPS image immutable.
+    return this.content.get(`https:${url}`, 60_000, async () =>
+      this.decode(await this.fetchUrls([url], signal), signal));
   }
 
   async decode(bytes, signal) {

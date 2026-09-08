@@ -310,6 +310,8 @@ function ScopedLongLaunch({
     const intent = intentKey;
     const isCurrent = () => mounted.current && currentIntent.current === intent;
     try {
+      await account.checkAccount?.(walletAddress);
+      if (!isCurrent()) return;
       if (account.chainId !== chainId) {
         if (!account.ensureChain) throw new LaunchError('wrong_chain');
         setBusy('Switch network in wallet…');
@@ -320,6 +322,7 @@ function ScopedLongLaunch({
       const imageBytes = new Uint8Array(await blob.arrayBuffer());
       await runLaunchFlow({
         isCurrent,
+        checkAccount: () => account.checkAccount?.(walletAddress) ?? Promise.resolve(),
         onProgress: setBusy,
         availability: () => launchRequest('launch-estimate', { chainId, pairId, ...(padId === 'pons' ? { wallet: account.address } : {}) }),
         artwork: () =>
@@ -537,7 +540,7 @@ function ScopedLongLaunch({
             >
               <span>
                 {busy
-                  ? (showPadName ? `Launching on ${padName}…` : 'Launching coin…')
+                  ? (busy === 'Approve launch in wallet…' ? 'Approve in wallet…' : 'Preparing launch…')
                   : retryable
                     ? launchLabel
                     : (showPadName ? `Confirming on ${padName}…` : 'Confirming launch…')}
@@ -626,7 +629,7 @@ function ScopedLongLaunch({
           >
             <span>
               {pageOutdated ? 'Reload saved draft' : busy
-                ? (showPadName ? `Launching on ${padName}…` : 'Launching coin…')
+                ? (busy === 'Approve launch in wallet…' ? 'Approve in wallet…' : 'Preparing launch…')
                 : account.address
                   ? launchLabel
                   : 'Connect wallet'}

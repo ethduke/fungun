@@ -45,7 +45,7 @@ import { tickerAvailability } from '@/lib/auto-ticker';
 import { launchCostKey } from '@/lib/launch-cost';
 import { useConnectedAccount } from '@/lib/account-context';
 import {
-  COPIED_IMAGE_ERROR,
+  copiedImageError,
   ImageRequests,
   copiedTokenImage,
   tokenImageSource,
@@ -135,7 +135,7 @@ export default function Home() {
         ];
         setImageError(
           copied
-            ? COPIED_IMAGE_ERROR
+            ? copiedImageError(error)
             : error instanceof Error && safeErrors.includes(error.message)
               ? error.message
               : 'This image could not be decoded. Choose another file.',

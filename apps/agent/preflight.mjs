@@ -4,6 +4,7 @@ import {
   buildUnsignedLongLaunch,
   readLongLaunchProfile,
   LONG_CREATE_ABI,
+  isNativeLongQuote,
 } from "../web/lib/long-encoding/long-launch.mjs";
 import { isCanonicalLongAsset } from "../web/lib/long-encoding/long-salt.mjs";
 const same = (a, b) =>
@@ -87,7 +88,7 @@ async function preflightPlan(plan, input, published, trustedProfile, rpc, limits
     ].map((k) => profile[k]),
     ...profile.quotes
       .filter((q) => q.id === input.pairId)
-      .flatMap((q) => [q.token, ...(q.oracle ? [q.oracle] : [])]),
+      .flatMap((q) => [...(isNativeLongQuote(q) ? [] : [q.token]), ...(q.oracle ? [q.oracle] : [])]),
   ]) {
     const code = await request("eth_getCode", [contract.address, "latest"]);
     check(code && code !== "0x" && same(keccak256(code), contract.codeHash), "contract_unverified");

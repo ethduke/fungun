@@ -5,6 +5,7 @@ import { connect, disconnect, getConnection, reconnect } from 'wagmi/actions';
 import { injected } from 'wagmi/connectors';
 import type { EIP1193Provider } from 'viem';
 import { hasPreviousWalletConnection, walletStorage } from './connection-session.ts';
+import { refreshWalletSession, observeWalletSession } from './injected-session.ts';
 
 await test('every preview chain rejects app RPC without attempting fetch', async () => {
   const previous = globalThis.fetch;
@@ -128,4 +129,85 @@ await test('wallet persistence tolerates unavailable browser storage', (t) => {
   assert.equal(hasPreviousWalletConnection(), false);
   assert.doesNotThrow(() => walletStorage.setItem('test', 'value'));
   assert.doesNotThrow(() => walletStorage.removeItem('test'));
+});
+
+await test('wallet switches update the connection with events and recover silently when an event is missed', async (t) => {
+  const browser = Object.assign(new EventTarget(), { localStorage: {
+    getItem: () => null, setItem() {}, removeItem() {},
+  } });
+  const previousWindow = Object.getOwnPropertyDescriptor(globalThis, 'window');
+  Object.defineProperty(globalThis, 'window', { configurable: true, value: browser });
+  const config = createPreviewConfig();
+  t.after(() => {
+    config._internal.mipd?.destroy();
+    if (previousWindow) Object.defineProperty(globalThis, 'window', previousWindow);
+    else Reflect.deleteProperty(globalThis, 'window');
+  });
+  const first = `0x${'11'.repeat(20)}`, second = `0x${'22'.repeat(20)}`;
+  let accounts = [first];
+  let delayed: Promise<string[]> | undefined;
+  const requests: string[] = [];
+  const listeners = new Map<string, Set<(value: unknown) => void>>();
+  const emit = (event: string, value: unknown) => {
+    for (const listener of listeners.get(event) ?? []) listener(value);
+  };
+  const provider = {
+    on(event: string, listener: (value: unknown) => void) {
+      if (!listeners.has(event)) listeners.set(event, new Set());
+      listeners.get(event)!.add(listener);
+    },
+    removeListener(event: string, listener: (value: unknown) => void) { listeners.get(event)?.delete(listener); },
+    async request({ method }: { method: string }) {
+      requests.push(method);
+      if (method === 'eth_accounts') return delayed ?? accounts;
+      if (method === 'eth_requestAccounts') return accounts;
+      if (method === 'eth_chainId') return '0x1237';
+      throw new Error('Unsupported');
+    },
+  } as unknown as EIP1193Provider;
+  await connect(config, { connector: injected({ target: { id: 'rabby-test', name: 'Rabby Test', provider } }) });
+  const walletConnector = getConnection(config).connector!;
+  requests.length = 0;
+
+  accounts = [second]; emit('accountsChanged', accounts);
+  assert.equal(getConnection(config).address, second);
+  accounts = [first]; // Reproduce an extension switch without accountsChanged.
+  assert.equal(getConnection(config).address, second);
+  await refreshWalletSession(config);
+  assert.equal(getConnection(config).address, first);
+  assert.deepEqual(requests, ['eth_accounts']);
+
+  let release!: (accounts: string[]) => void;
+  delayed = new Promise(resolve => { release = resolve; });
+  const stale = refreshWalletSession(config);
+  accounts = [second]; emit('accountsChanged', accounts);
+  release([first]); await stale;
+  delayed = undefined;
+  assert.equal(getConnection(config).address, second, 'late reads cannot overwrite a newer account event');
+
+  const page = Object.assign(new EventTarget(), { visibilityState: 'visible' });
+  const stop = observeWalletSession(config, browser as unknown as Window, page as unknown as Document);
+  await refreshWalletSession(config);
+  accounts = [first]; browser.dispatchEvent(new Event('focus'));
+  await refreshWalletSession(config);
+  assert.equal(getConnection(config).address, first, 'returning to the page reconciles the account');
+  stop();
+  const before = requests.length;
+  browser.dispatchEvent(new Event('focus'));
+  page.dispatchEvent(new Event('visibilitychange'));
+  assert.equal(requests.length, before, 'unmount removes listeners');
+
+  delayed = new Promise(resolve => { release = resolve; });
+  const disconnecting = refreshWalletSession(config);
+  await disconnect(config);
+  release([first]); await disconnecting;
+  delayed = undefined;
+  assert.equal(getConnection(config).isConnected, false, 'late reads cannot undo an explicit disconnect');
+  requests.length = 0;
+  await refreshWalletSession(config);
+  assert.deepEqual(requests, [], 'never reconnect a deliberately disconnected wallet');
+  await connect(config, { connector: walletConnector });
+  accounts = [];
+  await refreshWalletSession(config);
+  assert.equal(getConnection(config).isConnected, false, 'revoked access clears the old address');
 });

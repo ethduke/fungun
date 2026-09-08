@@ -1,6 +1,13 @@
 import { IMAGE_LIMIT, imageFileError, imageKind } from './launch-model.ts';
 
-export const COPIED_IMAGE_ERROR = 'Image unavailable—upload one.';
+export const COPIED_IMAGE_ERROR = 'Couldn’t copy this token’s image automatically. Save the image from its source and upload it here.';
+export const GMGN_IMAGE_BLOCKED_ERROR = 'Couldn’t copy the image—GMGN blocked the automatic download. Save the image from GMGN and upload it here.';
+
+export function copiedImageError(error: unknown): string {
+  return error instanceof Error && error.message === GMGN_IMAGE_BLOCKED_ERROR
+    ? GMGN_IMAGE_BLOCKED_ERROR
+    : COPIED_IMAGE_ERROR;
+}
 export type TokenImageSource =
   | { chainId: 4663; address: string; provider?: undefined }
   | { chainId: 4663 | 8453; address: string; provider: 'doppler' }
@@ -59,10 +66,9 @@ export async function copiedTokenImage(
     signal: AbortSignal.any([signal, AbortSignal.timeout(20_000)]),
   });
   if (
-    !response.ok ||
     response.headers.get('content-type')?.split(';')[0] !==
       'application/json' ||
-    Number(response.headers.get('content-length')) > 3 * 1024 * 1024 ||
+    Number(response.headers.get('content-length')) > (response.ok ? 3 * 1024 * 1024 : 4096) ||
     !response.body
   ) {
     await response.body?.cancel();
@@ -76,7 +82,7 @@ export async function copiedTokenImage(
       const { done, value } = await reader.read();
       if (done) break;
       size += value.length;
-      if (size > 3 * 1024 * 1024) throw new Error(COPIED_IMAGE_ERROR);
+      if (size > (response.ok ? 3 * 1024 * 1024 : 4096)) throw new Error(COPIED_IMAGE_ERROR);
       chunks.push(value);
     }
   } finally {
@@ -89,6 +95,9 @@ export async function copiedTokenImage(
     offset += chunk.length;
   }
   const data = JSON.parse(new TextDecoder().decode(payload));
+  if (!response.ok)
+    throw new Error(data?.error === 'gmgn_image_blocked'
+      ? GMGN_IMAGE_BLOCKED_ERROR : COPIED_IMAGE_ERROR);
   if (
     data.chainId !== source.chainId ||
     data.address !== source.address ||

@@ -100,6 +100,8 @@ export function launchMessage(error: unknown) {
     launch_context_locked: 'Coin details changed while preparing. Launch again with the current details.',
     quote_expired: 'The gas estimate expired. Refresh it before opening your wallet.',
     wrong_account: 'The connected account changed. Restore the account used for this launch.',
+    wallet_changed: 'Your wallet changed. Launch again with the account now shown in the header.',
+    wallet_unavailable: 'Could not read your wallet account. Unlock your wallet and try again.',
     wrong_chain: 'Switch your wallet to the selected launch network before continuing.',
     launch_eoa_required: 'This launch currently supports ordinary wallet accounts only.',
     busy: 'Another launch check is running. Try again shortly.',
