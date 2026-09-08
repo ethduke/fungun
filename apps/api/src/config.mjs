@@ -1,5 +1,6 @@
 import { readStonksConfig } from './stonks-live.mjs';
 import { readO1LiveConfig, readO1BaseLiveConfig } from "./o1-live.mjs";
+import { readPonsFeeProfile } from "./pons-fees.mjs";
 import { readPonsLiveConfig } from "./pons-live.mjs";
 import { readLongLiveConfig } from "./long-live.mjs";
 import { resolve } from "node:path";
@@ -62,6 +63,7 @@ export function readConfig(env = process.env) {
     stonksLaunch: readStonksConfig(env),
     longLaunch,
     ponsLaunch: readPonsLiveConfig(env),
+    ponsFees: readPonsFeeProfile(env.PONS_FEE_PROFILE_JSON),
     longbowLaunch: readLongLiveConfig(env, "longbow"),
     o1Launch: readO1LiveConfig(env, longLaunch),
     o1BaseLaunch: readO1BaseLiveConfig(env),

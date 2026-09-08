@@ -562,7 +562,9 @@ function ConnectedFees({ address }: { address: string }) {
             ),
           );
           const incomplete = data?.status === 'partial' || !!data?.nextCursor;
-          const note =
+          const note = source.padId === 'pons' && entry && !entry.scanning && !unavailable
+            ? !eligible.length ? (claimUnavailable && positions.some(p => p.payouts.some(a => BigInt(a.claimableRaw) > 0n)) ? claimUnavailable : 'No fees ready to withdraw from this escrow.') : null
+            :
             !entry || entry.scanning
               ? 'Checking your fees…'
               : unavailable
@@ -604,7 +606,7 @@ function ConnectedFees({ address }: { address: string }) {
                     unverified ? 'Reported creator fees' : 'Creator fees'
                   }
                 >
-                  <p>{unverified ? 'Reported creator fees' : 'Creator fees'}</p>
+                  <p>{source.padId === 'pons' ? 'Ready to withdraw' : unverified ? 'Reported creator fees' : 'Creator fees'}</p>
                   {balances.map((balance) => (
                     <div className="fee-payout font-mono" key={balance.key}>
                       {balance.claimable} {balance.symbol}
@@ -614,6 +616,15 @@ function ConnectedFees({ address }: { address: string }) {
               )}
               {source.padId === 'stonks' && <p>Indexed Stonks creations. Fees pay the current recipients; redirected fees may belong to another wallet. Custom-recipient and older-launch coverage can be incomplete. Undelivered payouts appear separately when supported.</p>}
               {note && <p>{note}</p>}
+              {source.padId === 'pons' && (
+                <p>
+                  Current pons v2 escrow · ETH and configured payout tokens. Fees awaiting a sweep,
+                  locked buybacks and older escrows are not included.{' '}
+                  <a href="https://www.ponsfamily.com/launchpad" target="_blank" rel="noopener noreferrer" className="underline">
+                    Manage sweeps and vesting on pons ↗
+                  </a>
+                </p>
+              )}
               {entry?.pageError && (
                 <p className="field-error" role="alert">
                   {entry.pageError}

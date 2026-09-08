@@ -233,3 +233,74 @@ the two independently verified pools and retains partial coverage. Additional Lo
 fee rights require configured pools or completion of the beneficiary-event scan;
 the app must not claim automatic wallet-wide Long discovery from this setup. Private
 wallet captures, runtime pins and RPC credentials are excluded from this repository.
+
+## pons v2 escrow claims
+
+The pons card shows **ready to withdraw**, not total earnings. It reads the
+connected wallet's native `balanceOf(wallet)` and each explicitly reviewed payout
+token's `balanceOfToken(wallet, token)` from one pinned v2 escrow. Balances are
+shared across all launches using that escrow; they are not summed per launch.
+Coverage is always `partial` / `configured_escrow`, without a continuation cursor.
+Historical escrows, other tokens, unswept fees and unreleased buybacks are outside
+that coverage. The card links to pons for sweep and vesting management.
+
+Set `READ_FEES=true`, `WALLET_CLAIMS=true`, `ROBINHOOD_RPC` (or its existing alias),
+and server-only `PONS_FEE_PROFILE_JSON`. This is independent of launching and
+`READ_UPSTREAMS`; disabling new launches does not disable existing fee claims.
+Use a reviewed profile, with no production addresses committed to the repository:
+
+```json
+{
+  "chainId": 4663,
+  "escrow": { "address": "<reviewed-v2-escrow>", "codeHash": "<runtime-keccak256>" },
+  "assets": []
+}
+```
+
+ETH is included automatically. `assets` optionally includes up to eight reviewed
+ERC-20 payout assets as `{ "address": "<token>", "symbol": "QUOTE", "decimals": 18 }`.
+Only add tokens after checking their identity, metadata and transfer behavior.
+An empty list is native-only coverage, matching Fungun's current pons launches.
+The profile is not inferred from a new launch profile: rotating a launch stack
+must never silently redirect an existing fee withdrawal.
+
+Preparation rechecks runtime bytecode and the live balance and emits
+`claim(amount)` for ETH or `claimToken(token, amount)` for an ERC-20. Both pay
+`msg.sender` only and use zero native transaction value. The existing preflight
+simulates the exact call, estimates gas, checks wallet gas funds and expires the
+quote after 20 seconds. No approvals, arbitrary destinations, swaps or sweeps
+are included. The browser validates chain 4663, exact amount, currency, method,
+calldata length, wallet and escrow identity. Receipt proof requires the escrow's
+`Claimed(recipient, amount)` or `ClaimedToken(recipient, token, amount)` matching
+the exact debit. ERC-20 claims additionally require a matching token `Transfer`
+from escrow to wallet and display that transferred amount; an escrow debit
+alone is not proof of net tokens received.
+
+### Investigation, 7 September 2026
+
+The [official v2 documentation](https://docs.ponsfamily.com/v2) describes two
+stages. Curve/hook fees must be swept before they reach the escrow. A native
+escrow balance of zero says nothing about unswept earnings. Curve fees are read
+with `quoteFeeBalance` and `creatorTaxBalance`; pool fees with `pendingFees` and
+`pendingCreatorTax`. Those include amounts allocated to protocol and potentially
+buybacks, so raw pending balances are not added to the creator's withdrawable ETH.
+
+Sweeps requiring conversion or buybacks are restricted to the sweep operator;
+creator calls can revert with `InternalSwapRequiresOperator`. Buyback tokens have
+separate vesting and require release before an escrow token claim. Transferring
+creator fee rights redirects future credits, not balances already in the escrow.
+
+The docs show full-balance claim methods while the official app uses
+amount-specific overloads. Sourcify's verified `PonsV2FeeEscrow.sol` contains both,
+and its runtime matches the deployed bytecode fetched with read-only `cast`.
+The escrow has no upgrade/admin withdrawal route in the reviewed source. Both
+claim paths debit the caller before transfer under a reentrancy guard; a failed
+transfer reverts the debit. Token credits account for the actual received delta.
+Anyone can fund a credit, which is why escrow totals are not attributed to a
+single launch. This source review covers escrow withdrawals, not an audit of
+Pons' entire launch, hook, sweep or vesting stack.
+
+A read-only `eth_call` against the deployed escrow, with a synthetic wallet's
+ledger and escrow balance overridden, returned the exact requested native amount.
+No transaction was signed or sent. Ignored `local/pons-fees-release/` contains the
+reviewed deployment profile, source reference, simulation result and rollout record.

@@ -10,7 +10,8 @@ sets creator tax to zero, disables buybacks, supplies no social links or extra
 snipe exemptions, and performs no opening buy. Artwork uses the existing IPFS
 publication flow; logo and description go directly into the launch parameters.
 There is no ticker reservation: token addresses identify launches. Fees accrue
-in pons; discovery and claims in Fungun's Fees tab are not implemented for pons.
+in pons. The Fees tab reads the configured v2 escrow and prepares exact-amount
+wallet withdrawals. See [fee claims](fee-claims.md) for coverage and setup.
 
 ## Runtime configuration
 

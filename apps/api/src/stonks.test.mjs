@@ -107,7 +107,7 @@ test('Base offers O1 and Stonks while Robinhood keeps its existing destinations'
   assert.deepEqual(pads.filter(p => p.selected).map(p => p.id), ['o1']);
   const q = profileFixture().quotes[0], destination = { ...pads.find(p => p.id === 'stonks'), selected: true, pairId: q.id };
   const draft = { name: 'Test', ticker: 'TEST', description: '', hasImage: true };
-  const catalog = { chainId: 8453, pads: { stonks: { status: 'ready', pairs: [{ id: q.id, symbol: 'NVDA' }] } } };
+  const catalog = { chainId: 8453, expiresAt: performance.now() + 60_000, pads: { stonks: { status: 'ready', pairs: [{ id: q.id, symbol: 'NVDA' }] } } };
   assert.deepEqual(validateDraft(draft, [destination], 8453, catalog), {});
   for (const changed of [{ chainId: 4663 }, { route: 'standard', pairId: 'native' }, { editableMetadata: true }])
     assert.ok(validateDraft(draft, [{ ...destination, ...changed }], 8453, catalog).destinations);
