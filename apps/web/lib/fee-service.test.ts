@@ -17,6 +17,7 @@ import {
   disabledClaimMessage,
   disabledFeeSourceMessage,
   unavailableFeeMessage,
+  feeCheckResult,
 } from './fee-status.ts';
 
 const addr = (digit: string) => `0x${digit.repeat(40)}` as `0x${string}`;
@@ -42,6 +43,24 @@ const source = {
   positions: [position],
   expiresAt: 1000,
 };
+
+await test('completed fee checks have only claimable or empty outcomes', () => {
+  assert.equal(feeCheckResult(source), 'claimable');
+  for (const padId of ['long', 'o1', 'longbow', 'pons', 'stonx'] as const) {
+    const empty = { ...source, padId, positions: [] };
+    assert.equal(feeCheckResult(empty), 'empty');
+    assert.equal(feeCheckResult({ ...empty, status: 'ready' }), 'empty');
+    assert.equal(feeCheckResult({ ...empty, nextCursor: 'a'.repeat(64) }), null);
+    assert.equal(feeCheckResult({ ...empty, status: 'unavailable' }), null);
+    assert.equal(feeCheckResult(empty, true), null);
+    assert.equal(feeCheckResult(empty, false, true), null);
+  }
+  assert.equal(feeCheckResult(undefined), null);
+  assert.equal(feeCheckResult({ ...source, positions: [{ ...position, claimable: false }] }), null);
+  assert.equal(feeCheckResult({ ...source, positions: [{ ...position, verification: 'indexed', claimable: false }] }), null);
+  assert.equal(feeCheckResult({ ...source, nextCursor: 'a'.repeat(64) }, true), 'claimable',
+    'verified fees remain claimable while additional pages are checked');
+});
 const quote = (): ClaimQuote => ({
   positionId: position.id,
   kind: 'o1',
@@ -520,6 +539,36 @@ await test('O1 finishes its wallet index automatically and replaces overlapping 
   } finally {
     globalThis.fetch = original;
   }
+});
+
+await test('Long and Longbow automatically finish every fee page before reporting no fees', async () => {
+  const original = globalThis.fetch;
+  const results: FeeLookupResult[] = [];
+  const requests: { padId: string; cursor?: string }[] = [];
+  globalThis.fetch = async (_url, options) => {
+    const input = JSON.parse(options?.body as string);
+    requests.push(input);
+    return Response.json({
+      ...source, address: owner, chainId: 4663, padId: input.padId,
+      coverage: 'beneficiary_events', positions: [],
+      nextCursor: input.cursor ? null : 'c'.repeat(64),
+      status: input.cursor ? 'ready' : 'partial',
+      serverTime: Date.now(), expiresAt: Date.now() + 45_000,
+    });
+  };
+  try {
+    await loadFeeSources(owner,
+      [{ padId: 'long', chainId: 4663 }, { padId: 'longbow', chainId: 4663 }],
+      (result) => results.push(result), () => true);
+    for (const padId of ['long', 'longbow']) {
+      assert.equal(requests.filter((r) => r.padId === padId).length, 2);
+      const stages = results.filter((r) => r.padId === padId);
+      const first = stages[0];
+      assert.equal(feeCheckResult(first.source, first.source ? !!first.scanning : false), null);
+      assert.equal(stages.at(-1)?.source?.nextCursor, null);
+      assert.equal(feeCheckResult(stages.at(-1)?.source), 'empty');
+    }
+  } finally { globalThis.fetch = original; }
 });
 
 await test('O1 continuation failures retain discovered fees and stop automatic reads', async () => {

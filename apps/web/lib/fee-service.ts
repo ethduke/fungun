@@ -347,9 +347,9 @@ export async function loadFeeSources(
         let pages = 1;
         let pageError: unknown;
         const seen = new Set<string>();
-        // Complete O1's bounded wallet index automatically. Long event scans can
-        // span thousands of pages, so their continuation remains explicit.
-        while ((source.padId === 'o1' || source.padId === 'stonx') && page.nextCursor && isCurrent()) {
+        // Complete every supported source under this explicit check intent.
+        // Repeated cursors, the page cap and navigation still stop the scan.
+        while (page.nextCursor && isCurrent()) {
           onResult({ ...source, source: page, scanning: true, pages });
           if (!isCurrent()) return;
           try {

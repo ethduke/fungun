@@ -1,4 +1,20 @@
 import type { FeePosition, FeeSource } from './fee-service.ts';
+import { claimQueueItems } from './claim-queue.ts';
+
+// Loading and failed requests are not fee outcomes. Only verified amounts can
+// produce the two completed results shown in the fee list.
+export function feeCheckResult(source?: FeeSource, checking = false, failed = false) {
+  const claimable = source ? claimQueueItems([source]) : [];
+  if (claimable.length) return 'claimable' as const;
+  if (checking) return null;
+  if (!source || failed || source.status === 'unavailable' || source.nextCursor)
+    return null;
+  if (source.positions.some((position) => position.verification !== 'live' ||
+    position.payouts.some((payout) => BigInt(payout.claimableRaw) > 0n))) return null;
+  // `partial` without a cursor describes the supported coverage (for example
+  // the current Pons escrow), not an unfinished check of those balances.
+  return 'empty' as const;
+}
 
 export function unavailableFeeMessage(source?: FeeSource) {
   switch (source?.reason) {

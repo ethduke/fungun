@@ -6,13 +6,24 @@ import {
 } from './launch-model.ts';
 
 export const FEE_LOOKUP_DELAY = 500;
+
+// Format the exact decimal string without converting large token amounts to a
+// floating-point number. Positive dust must never appear as zero.
+export function compactFeeAmount(value: string) {
+  const [whole, fraction = ''] = value.split('.');
+  const grouped = whole.replace(/\B(?=(\d{3})+(?!\d))/g, ',');
+  const digits = whole === '0' ? 6 : 4;
+  const trimmed = fraction.slice(0, digits).replace(/0+$/, '');
+  if (whole === '0' && !trimmed && /[1-9]/.test(fraction))
+    return '<0.000001';
+  return trimmed ? `${grouped}.${trimmed}` : grouped;
+}
 const MAX_FEE_RAW = (BigInt(1) << BigInt(256)) - BigInt(1);
 export const FEE_SOURCES = [
   { padId: 'long', chainId: 4663 },
   { padId: 'o1', chainId: 4663 },
   { padId: 'longbow', chainId: 4663 },
   { padId: 'pons', chainId: 4663 },
-  { padId: 'stonks', chainId: 8453 },
   { padId: 'stonx', chainId: 8453 },
 ] as const;
 
@@ -67,7 +78,7 @@ export function groupFeeBalances(balances: FeeBalance[]) {
   >();
   for (const balance of balances) {
     if (
-      !['long', 'o1', 'longbow', 'pons', 'stonks', 'stonx'].includes(balance.padId) ||
+      !['long', 'o1', 'longbow', 'pons', 'stonx'].includes(balance.padId) ||
       !supportsChain(balance.padId, balance.chainId) ||
       (balance.asset !== 'native' &&
         !isAddress(balance.asset, { strict: false })) ||

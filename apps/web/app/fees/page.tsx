@@ -22,17 +22,15 @@ import {
   FEE_LOOKUP_DELAY,
   FEE_SOURCES,
   groupFeeBalances,
+  compactFeeAmount,
   normalizeFeeAddress,
 } from '@/lib/fees-model';
 import {
-  loadFees,
   loadFeeSources,
-  mergeFeePages,
   prepareClaim,
   type ClaimQuote,
   type FeeSource,
   type FeePosition,
-  type FeePayout,
 } from '@/lib/fee-service';
 import {
   acknowledgeClaim,
@@ -44,7 +42,6 @@ import {
 import {
   claimQueueItems,
   claimQueueActivities,
-  queueClaimAttempt,
   reconcileClaimQueue,
   startClaimQueue,
   type ClaimQueue,
@@ -52,10 +49,10 @@ import {
 import { formatEth, HIGH_NETWORK_FEE_WEI } from '@/lib/launch-cost';
 import { describeError } from '@/lib/user-error';
 import {
-  disabledFeeSourceMessage,
-  unavailableFeeMessage,
+  feeCheckResult,
 } from '@/lib/fee-status';
 import { formatGasUsd } from '@/lib/fee-usd';
+import { runClaimAction } from '@/lib/claim-action';
 
 type SourceResult = {
   key: string;
@@ -67,8 +64,6 @@ type SourceResult = {
 };
 const label = launchpadName;
 const short = (value: string) => `${value.slice(0, 6)}…${value.slice(-4)}`;
-const payoutText = (payout: FeePayout) =>
-  `${formatUnits(BigInt(payout.claimableRaw), payout.decimals)} ${payout.symbol}`;
 const ethText = (value: string) => formatEth(BigInt(value));
 const highGas = (value: string) => BigInt(value) >= HIGH_NETWORK_FEE_WEI;
 const localNow = () => performance.now();
@@ -124,10 +119,9 @@ function ConnectedFees({ address }: { address: string }) {
   const [claimError, setClaimError] = useState<string | null>(null);
   const [sending, setSending] = useState(false);
   const [queue, setQueue] = useState<ClaimQueue | null>(null);
-  const [loadingMore, setLoadingMore] = useState<string | null>(null);
   const [claimedIds, setClaimedIds] = useState<string[]>([]);
   const reviewSequence = useRef(0);
-  const scanSequence = useRef({ value: 0 });
+  const claimInFlight = useRef(false);
   const seenConfirmations = useRef(
     new Set(
       getClaims()
@@ -164,9 +158,6 @@ function ConnectedFees({ address }: { address: string }) {
   }));
   const currentQueue = queue ? reconcileClaimQueue(queue, activities) : null;
   const queueItem = currentQueue?.items[currentQueue.index];
-  const queueLabel = currentQueue?.items[0]
-    ? label(currentQueue.items[0].source.padId)
-    : 'Launchpad';
   const ownerConnected =
     !!address && account.address?.toLowerCase() === address;
   const currentActivities = activities.filter(
@@ -178,9 +169,6 @@ function ConnectedFees({ address }: { address: string }) {
   const queueActivities = currentQueue
     ? claimQueueActivities(currentQueue, currentActivities)
     : [];
-  const otherActivities = currentActivities.filter(
-    (activity) => !queueActivities.includes(activity),
-  );
   const locked =
     sending ||
     activities.some((activity) =>
@@ -209,11 +197,8 @@ function ConnectedFees({ address }: { address: string }) {
 
   useEffect(() => {
     if (!address) return;
-    const scanControl = scanSequence.current;
-    scanControl.value++;
     let cancelled = false;
     const timer = setTimeout(() => {
-      setLoadingMore(null);
       setResults({ address, revision: refresh, entries: [] });
       void loadFeeSources(
         address,
@@ -247,7 +232,6 @@ function ConnectedFees({ address }: { address: string }) {
     }, FEE_LOOKUP_DELAY);
     return () => {
       cancelled = true;
-      scanControl.value++;
       clearTimeout(timer);
     };
   }, [address, refresh]);
@@ -276,8 +260,7 @@ function ConnectedFees({ address }: { address: string }) {
           activity.status,
         ),
       ) ||
-      reviewing ||
-      loadingMore
+      reviewing
     )
       return;
     const sequence = ++reviewSequence.current;
@@ -362,95 +345,42 @@ function ConnectedFees({ address }: { address: string }) {
     };
   }, [visible, pendingActivity, watchClaim, walletChainId, ownerConnected]);
 
-  async function continueScan(entry: SourceResult) {
-    const source = entry.source;
-    if (!source?.nextCursor || !address || loading || loadingMore || locked)
-      return;
-    const scanControl = scanSequence.current;
-    const sequence = ++scanControl.value;
-    setLoadingMore(entry.key);
-    try {
-      const page = await loadFees(
-        address,
-        source.chainId,
-        source.padId,
-        source.nextCursor,
-      );
-      if (sequence !== scanControl.value) return;
-      const updated = {
-        ...entry,
-        source: mergeFeePages(source, page),
-        pages: entry.pages + 1,
-        pageError: undefined,
-      };
-      setResults((previous) =>
-        previous?.address === address && previous.revision === refresh
-          ? {
-              ...previous,
-              entries: previous.entries.map((result) =>
-                result.key === entry.key ? updated : result,
-              ),
-            }
-          : previous,
-      );
-    } catch (error) {
-      if (sequence !== scanControl.value) return;
-      setResults((previous) =>
-        previous?.address === address && previous.revision === refresh
-          ? {
-              ...previous,
-              entries: previous.entries.map((result) =>
-                result.key === entry.key
-                  ? { ...result, pageError: describeError(error, 'fees') }
-                  : result,
-              ),
-            }
-          : previous,
-      );
-    } finally {
-      if (sequence === scanControl.value) setLoadingMore(null);
-    }
-  }
-
-  function stopScan() {
-    scanSequence.current.value++;
-    setLoadingMore(null);
-  }
-
-  async function claim() {
+  async function claim(selectedQueue = currentQueue, selectedQuote = quote) {
+    const item = selectedQueue?.items[selectedQueue.index];
     if (
-      !currentQueue ||
-      !queueItem ||
-      currentQueue.status !== 'ready' ||
+      !selectedQueue ||
+      !item ||
+      selectedQueue.status !== 'ready' ||
       !account.sendClaim ||
       !account.ensureClaimChain ||
       !ownerConnected ||
       locked ||
-      reviewing
+      reviewing ||
+      claimInFlight.current
     )
       return;
-    setSending(true);
+    claimInFlight.current = true;
+    setReviewing(item.position.id);
     setClaimError(null);
     const sequence = ++reviewSequence.current;
     let submittedQueue: ClaimQueue | null = null;
     try {
-      await account.ensureClaimChain(
+      await runClaimAction({
+        queue: selectedQueue,
+        quote: selectedQuote,
         address,
-        queueItem.source.chainId,
-        () => sequence === reviewSequence.current,
-      );
-      if (sequence !== reviewSequence.current) return;
-      // A wallet network prompt may outlive the estimate. Refresh it within the
-      // user's confirmation action, before opening the transaction in the wallet.
-      const prepared =
-        !quote || localNow() >= quote.expiresAt
-          ? await prepareClaim(address, queueItem.source, queueItem.position)
-          : quote;
-      if (sequence !== reviewSequence.current) return;
-      submittedQueue = queueClaimAttempt(currentQueue, prepared);
-      setQueue(submittedQueue);
-      await account.sendClaim(prepared);
-      setQuote(null);
+        isCurrent: () => sequence === reviewSequence.current,
+        ensureChain: account.ensureClaimChain,
+        prepare: prepareClaim,
+        onPrepared: setQuote,
+        onAttempt: (attempt) => {
+          submittedQueue = attempt;
+          setQueue(attempt);
+          setReviewing(null);
+          setSending(true);
+        },
+        send: account.sendClaim,
+      });
     } catch (error) {
       if (sequence !== reviewSequence.current) return;
       if (submittedQueue)
@@ -462,6 +392,8 @@ function ConnectedFees({ address }: { address: string }) {
       setQuote(null);
       setClaimError(describeError(error, 'claim'));
     } finally {
+      claimInFlight.current = false;
+      setReviewing(null);
       setSending(false);
     }
   }
@@ -515,273 +447,164 @@ function ConnectedFees({ address }: { address: string }) {
     );
   }
 
+  const rows = FEE_SOURCES.map((source) => {
+    const key = `${source.padId}:${source.chainId}`;
+    const entry = entries.find((result) => result.key === key);
+    const data = claimSources.find((result) =>
+      result.padId === source.padId && result.chainId === source.chainId);
+    const eligible = data ? claimQueueItems([data]) : [];
+    const balances = groupFeeBalances(eligible.flatMap(({ position }) =>
+      position.payouts.filter((payout) => BigInt(payout.claimableRaw) > 0n)
+        .map((payout) => ({ ...payout, ...source }))));
+    const unavailable = !!entry?.error || data?.status === 'unavailable';
+    const checking = !entry || !!entry.scanning;
+    const active = currentQueue?.items[0]?.source.padId === source.padId &&
+      currentQueue?.items[0]?.source.chainId === source.chainId;
+    const history = currentActivities.filter((activity) =>
+      activity.quote.kind === source.padId && activity.quote.chainId === source.chainId);
+    const result = feeCheckResult(data, checking, unavailable || !!entry?.pageError);
+    const issue = !checking && (unavailable || !!entry?.pageError ||
+      !!data?.nextCursor || (!result && !active));
+    return { source, key, entry, data, eligible, balances,
+      checking, active, history, result, issue };
+  });
+  const pendingRows = rows.filter((row) => row.checking);
+  const failedRows = rows.filter((row) => row.issue);
+
+  function renderSource(row: (typeof rows)[number]) {
+    const { source, key, data, eligible, balances,
+      checking, active, history, result } = row;
+    const activeQuote = active ? quote : null;
+    const statusQuote = activeQuote ?? history.find((activity) =>
+      ['wallet', 'submitted'].includes(activity.status))?.quote;
+    const complete = active && currentQueue?.status === 'complete';
+    const canResume = active && currentQueue && !complete;
+    const hasAction = eligible.length > 0 || canResume;
+    const rowBusy = active && (!!reviewing || sending);
+    const message = result === 'empty' && !complete ? 'No fees to claim' : null;
+    const displayedActivities = active ? queueActivities : history;
+    const latestActivity = displayedActivities.at(-1);
+    const confirming = latestActivity?.status === 'submitted';
+    return (
+      <section className="fee-source fee-source-row" key={key}
+        aria-label={`${label(source.padId)} fees`} aria-busy={checking || rowBusy}>
+        <div className="fee-source-main">
+          <div className="fee-source-content">
+            <div className="fee-source-heading">
+              <strong>{label(source.padId)} <span>· {chainName(source.chainId)}</span></strong>
+            </div>
+            {balances.length > 0 && (
+              <div className="fee-balances" aria-label="Creator fees">
+                {balances.map((balance) => (
+                  <span className="fee-payout font-mono" key={balance.key}>
+                    {compactFeeAmount(balance.claimable)} {balance.symbol}
+                  </span>
+                ))}
+              </div>
+            )}
+            {complete && <p className="fee-complete">Fees claimed</p>}
+            {message && <p>{message}</p>}
+            {statusQuote && <p className="fee-gas">
+              Est. gas <strong>{ethText(statusQuote.estimatedWei)}</strong>
+              {statusQuote.gasUsd && localNow() < statusQuote.gasUsd.expiresAt &&
+                <> · {formatGasUsd(statusQuote.gasUsd)}</>}
+            </p>}
+            {activeQuote && highGas(activeQuote.estimatedWei) &&
+              <p role="alert" className="field-error">High gas fee. Review the estimate before continuing.</p>}
+          </div>
+          <div className="fee-source-action">
+            {hasAction && <Button
+              disabled={!ownerConnected || locked || !!reviewing ||
+                !account.sendClaim || !account.ensureClaimChain}
+              onClick={() => {
+                if (canResume) {
+                  const resumed: ClaimQueue = currentQueue.status === 'paused'
+                    ? { ...currentQueue, status: 'ready', attempt: undefined } : currentQueue;
+                  setQueue(resumed);
+                  void claim(resumed, quote);
+                } else if (data) {
+                  const nextQueue = startClaimQueue([data]);
+                  setQueue(nextQueue);
+                  setQuote(null);
+                  setClaimError(null);
+                  void claim(nextQueue, null);
+                }
+              }}>
+              {rowBusy ? reviewing ? 'Preparing…' : 'Check wallet'
+                : active && confirming ? 'Confirming…'
+                : active && currentQueue?.status === 'paused' ? 'Try again'
+                : activeQuote && highGas(activeQuote.estimatedWei) ? 'Continue in wallet'
+                : active && currentQueue && currentQueue.index > 0 ? 'Claim next'
+                : 'Claim fees'}
+            </Button>}
+            {hasAction && <span className="fee-transaction-count">
+              {active && currentQueue ? `${currentQueue.index} / ${currentQueue.items.length} confirmed`
+                : `${eligible.length} ${eligible.length === 1 ? 'transaction' : 'transactions'}`}
+            </span>}
+          </div>
+        </div>
+        {active && (rowBusy || latestActivity || claimError || complete) && (
+          <div className="fee-inline-progress" aria-live="polite">
+            {reviewing && <p>Preparing claim…</p>}
+            {latestActivity && renderActivity(latestActivity)}
+            {complete && <span>{currentQueue.index} / {currentQueue.items.length} confirmed</span>}
+            {claimError && <p className="field-error" role="alert">{claimError}</p>}
+          </div>
+        )}
+        {!active && latestActivity && renderActivity(latestActivity)}
+        {balances.length > 0 && (
+          <details className="fee-amount-details">
+            <summary>Exact amounts</summary>
+            {balances.map((balance) => <p className="font-mono" key={balance.key}>
+              {balance.claimable} {balance.symbol}
+            </p>)}
+            {data?.positions.some((position) => position.verification === 'indexed') &&
+              <p>Some reported fees are not available to claim here yet.</p>}
+            {active && queueItem?.source.padId === 'stonx' &&
+              <p>{queueItem.position.feeStream === 'trading' ? 'Trading fee share' : 'LP fee share'}</p>}
+            {activeQuote && activeQuote.payouts.map((payout) => <p key={payout.asset}>
+              Current transaction: {formatUnits(BigInt(payout.claimableRaw), payout.decimals)} {payout.symbol}
+            </p>)}
+          </details>
+        )}
+
+      </section>
+    );
+  }
+
   return (
     <main className="workspace fees-workspace">
       <div className="fee-heading-row">
-        <div className="fees-heading">
-          <h1>
-            FEES<span>.</span>
-          </h1>
-          <p>Claim your creator fees from each launchpad.</p>
-        </div>
-        <Button
-          type="button"
-          variant="outline"
-          disabled={
-            !address || loading || !!reviewing || locked || !!loadingMore
-          }
-          onClick={() => setRefresh((value) => value + 1)}
-        >
-          <RefreshCw size={16} />
-          Refresh
+        <div className="fees-heading"><h1>FEES<span>.</span></h1></div>
+        <Button type="button" variant="outline"
+          disabled={!address || loading || !!reviewing || locked}
+          onClick={() => setRefresh((value) => value + 1)}>
+          <RefreshCw size={16} />Refresh
         </Button>
       </div>
-      <section className="fee-sources" aria-label="Launchpad fees">
-        {FEE_SOURCES.map((source) => {
-          const key = `${source.padId}:${source.chainId}`;
-          const entry = entries.find((result) => result.key === key);
-          const data = claimSources.find(
-            (result) =>
-              result.padId === source.padId &&
-              result.chainId === source.chainId,
-          );
-          const unavailable = !!entry?.error || data?.status === 'unavailable';
-          const positions = data?.positions ?? [];
-          const eligible = data ? claimQueueItems([data]) : [];
-          const unverified = positions.some(
-            (position) => position.verification === 'indexed',
-          );
-          const claimUnavailable = disabledFeeSourceMessage(positions);
-          const balances = groupFeeBalances(
-            positions.flatMap((position) =>
-              position.payouts.map((payout) => ({
-                ...payout,
-                padId: source.padId,
-                chainId: source.chainId,
-              })),
-            ),
-          );
-          const incomplete = data?.status === 'partial' || !!data?.nextCursor;
-          const note = source.padId === 'pons' && entry && !entry.scanning && !unavailable
-            ? !eligible.length ? (claimUnavailable && positions.some(p => p.payouts.some(a => BigInt(a.claimableRaw) > 0n)) ? claimUnavailable : 'No fees ready to withdraw from this escrow.') : null
-            :
-            !entry || entry.scanning
-              ? 'Checking your fees…'
-              : unavailable
-                ? (entry.error ?? unavailableFeeMessage(data))
-                : !balances.length
-                  ? incomplete
-                    ? 'No fees found so far.'
-                    : 'No fees to claim.'
-                  : !eligible.length
-                    ? (claimUnavailable ??
-                      'These fees are not available to claim yet.')
-                    : unverified
-                      ? 'Some fees are not available to claim here yet.'
-                      : incomplete
-                        ? 'More fees may be available. Claim all includes fees found so far.'
-                        : null;
-          return (
-            <section
-              className="fee-source"
-              key={key}
-              aria-label={`${label(source.padId)} fees`}
-              aria-busy={!entry || !!entry.scanning}
-            >
-              <div className="fee-source-heading">
-                <strong>
-                  {label(source.padId)}{' '}
-                  <span>· {chainName(source.chainId)}</span>
-                </strong>
-                {unavailable && (
-                  <span className="fee-coverage fee-coverage-unknown">
-                    Unavailable
-                  </span>
-                )}
-              </div>
-              {balances.length > 0 && (
-                <div
-                  className="my-5"
-                  aria-label={
-                    unverified ? 'Reported creator fees' : 'Creator fees'
-                  }
-                >
-                  <p>{source.padId === 'pons' ? 'Ready to withdraw' : unverified ? 'Reported creator fees' : 'Creator fees'}</p>
-                  {balances.map((balance) => (
-                    <div className="fee-payout font-mono" key={balance.key}>
-                      {balance.claimable} {balance.symbol}
-                    </div>
-                  ))}
-                </div>
-              )}
-              {source.padId === 'stonks' && <p>Indexed Stonks creations. Fees pay the current recipients; redirected fees may belong to another wallet. Custom-recipient and older-launch coverage can be incomplete. Undelivered payouts appear separately when supported.</p>}
-              {note && <p>{note}</p>}
-              {source.padId === 'stonx' && (
-                <p>Trading fees and LP fees on Base. Each stream is claimed separately; Claim all reviews them in sequence.
-                  {' '}Balances are checked on-chain across indexed stonx pools. Newly launched pools may take time to appear.</p>
-              )}
-              {source.padId === 'pons' && (
-                <p>
-                  Current pons v2 escrow · ETH and configured payout tokens. Fees awaiting a sweep,
-                  locked buybacks and older escrows are not included.{' '}
-                  <a href="https://www.ponsfamily.com/launchpad" target="_blank" rel="noopener noreferrer" className="underline">
-                    Manage sweeps and vesting on pons ↗
-                  </a>
-                </p>
-              )}
-              {entry?.pageError && (
-                <p className="field-error" role="alert">
-                  {entry.pageError}
-                </p>
-              )}
-              <div className="fee-review-actions">
-                <Button
-                  disabled={
-                    !eligible.length ||
-                    !ownerConnected ||
-                    locked ||
-                    loading ||
-                    !!loadingMore ||
-                    !!reviewing
-                  }
-                  onClick={() => {
-                    setQuote(null);
-                    setClaimError(null);
-                    const nextQueue = startClaimQueue(
-                      claimSources,
-                      source.padId,
-                    );
-                    setQueue(nextQueue);
-                    const first = nextQueue.items[0];
-                    if (first) void review(first.source, first.position);
-                  }}
-                >
-                  Claim all
-                </Button>
-                {data?.nextCursor &&
-                  (loadingMore === key ? (
-                    <Button variant="outline" onClick={stopScan}>
-                      Cancel check
-                    </Button>
-                  ) : (
-                    <Button
-                      variant="outline"
-                      disabled={
-                        loading || !!loadingMore || locked || !!reviewing
-                      }
-                      onClick={() => entry && void continueScan(entry)}
-                    >
-                      Check more
-                    </Button>
-                  ))}
-              </div>
-            </section>
-          );
-        })}
+      {pendingRows.length > 0 && <output className="block" aria-live="polite">
+        Checking {pendingRows.map((row) => label(row.source.padId)).join(', ')} fees…
+      </output>}
+      {failedRows.length > 0 && <div className="notice" role="alert">
+        <p>Couldn’t finish checking {failedRows.map((row) => label(row.source.padId)).join(', ')} fees.</p>
+        <Button variant="outline" disabled={loading || locked || !!reviewing}
+          onClick={() => setRefresh((value) => value + 1)}>Retry fee checks</Button>
+      </div>}
+      <section className="fee-sources fee-compact-sources" aria-label="Launchpad fees">
+        {rows.filter((row) => row.result || row.active || row.history.length).map(renderSource)}
       </section>
-      {address && !ownerConnected && (
-        <p className="notice">Connect this address to claim its fees.</p>
-      )}
-      {address &&
-        locked &&
-        !currentActivities.some((activity) =>
-          ['wallet', 'submitted', 'uncertain', 'no_payout'].includes(
-            activity.status,
-          ),
-        ) && (
-          <p className="notice">
-            A claim for another address is unresolved. Return to that address
-            and check its claim status before claiming again.
-          </p>
-        )}
-      {currentQueue && (
-        <section
-          className="fee-review fee-queue font-mono"
-          aria-label="Claim fees"
-          aria-live="polite"
-          aria-busy={!!reviewing || sending}
-        >
-          <div className="fee-queue-heading">
-            <h2>
-              {currentQueue.status === 'complete'
-                ? `${queueLabel} fees claimed`
-                : `Claim ${queueLabel} fees`}
-            </h2>
-            <span>
-              {currentQueue.index} / {currentQueue.items.length} confirmed
-            </span>
-          </div>
-          {queueItem && (
-            <p>{queueItem.source.padId === 'stonx' ? (queueItem.position.feeStream === 'trading' ? 'Trading fee share' : 'LP fee share') : null}</p>
-          )}
-          {queueItem && (
-            <p className="fee-payout font-mono">
-              {(quote?.payouts ?? queueItem.position.payouts)
-                .map(payoutText)
-                .join(' + ')}
-            </p>
-          )}
-          {reviewing && <p>Preparing claim…</p>}
-          {quote && (
-            <p>
-              Estimated gas: <strong>{ethText(quote.estimatedWei)}</strong>
-              {' · '}
-              <span title="ETH/USD spot estimate from Coinbase">
-                {formatGasUsd(quote.gasUsd)}
-              </span>
-            </p>
-          )}
-          {quote && highGas(quote.estimatedWei) && (
-            <p role="alert" className="field-error">
-              High gas fee.
-            </p>
-          )}
-          {queueActivities.map((activity) => (
-            <div key={activity.quote.positionId}>
-              {renderActivity(activity)}
-            </div>
-          ))}
-          {queueItem && currentQueue.status === 'ready' && (
-            <div className="fee-review-actions">
-              <Button
-                disabled={
-                  locked ||
-                  !ownerConnected ||
-                  !!reviewing ||
-                  !account.sendClaim ||
-                  !account.ensureClaimChain
-                }
-                onClick={() => {
-                  if (quote) void claim();
-                  else void review(queueItem.source, queueItem.position);
-                }}
-              >
-                {reviewing
-                  ? 'Preparing…'
-                  : sending
-                    ? 'Confirming…'
-                    : quote
-                      ? 'Confirm in wallet'
-                      : 'Try again'}
-              </Button>
-            </div>
-          )}
-        </section>
-      )}
-      {claimError && (
-        <p role="alert" className="field-error">
-          {claimError}
+      <details className="fee-disclosure fee-coverage-details">
+        <summary>Coverage details</summary>
+        <p>Balances include fees found so far. Newly launched pools and older launches may not appear yet.</p>
+        <p>pons includes ETH and configured payout tokens in the current v2 escrow. Pending sweeps, locked buybacks and older escrows are excluded.{' '}
+          <a href="https://www.ponsfamily.com/launchpad" target="_blank" rel="noopener noreferrer">Manage sweeps and vesting on pons ↗</a>
         </p>
-      )}
-      {otherActivities.map((activity) => (
-        <section
-          className="fee-review font-mono"
-          key={activity.quote.positionId}
-          aria-label="Claim status"
-        >
-          {renderActivity(activity)}
-        </section>
-      ))}
+        <p>stonx trading fees and LP fees are claimed separately. Each transaction requires wallet confirmation.</p>
+      </details>
+      {address && !ownerConnected && <p className="notice">Connect this address to claim its fees.</p>}
+      {address && locked && !currentActivities.some((activity) =>
+        ['wallet', 'submitted', 'uncertain', 'no_payout'].includes(activity.status)) &&
+        <p className="notice">A claim for another address is unresolved. Return to that address and check its claim status before claiming again.</p>}
     </main>
   );
 }

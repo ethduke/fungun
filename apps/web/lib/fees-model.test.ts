@@ -4,11 +4,21 @@ import {
   createFeePreview,
   feeQueryState,
   groupFeeBalances,
+  compactFeeAmount,
   normalizeFeeAddress,
   type FeeBalance,
 } from './fees-model.ts';
 
 const address = (digit: string) => `0x${digit.repeat(40)}`;
+
+await test('compact fees preserve tiny positive and very large balances', () => {
+  assert.equal(compactFeeAmount('0.068000614695378809'), '0.068');
+  assert.equal(compactFeeAmount('30135.903949676245092108'), '30,135.9039');
+  assert.equal(compactFeeAmount('0.000000000000000001'), '<0.000001');
+  assert.equal(compactFeeAmount('0'), '0');
+  assert.equal(compactFeeAmount('0.000001'), '0.000001');
+  assert.equal(compactFeeAmount('999999999999999999999.123456'), '999,999,999,999,999,999,999.1234');
+});
 
 await test('fee lookups require a complete valid nonzero wallet address', () => {
   for (const input of [
@@ -48,7 +58,6 @@ await test('preview fee lookups never request RPC, invent zero balances or enabl
       { padId: 'o1', chainId: 4663 },
       { padId: 'longbow', chainId: 4663 },
       { padId: 'pons', chainId: 4663 },
-      { padId: 'stonks', chainId: 8453 },
       { padId: 'stonx', chainId: 8453 },
     ]);
   } finally {

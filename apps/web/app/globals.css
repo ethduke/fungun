@@ -187,6 +187,47 @@ tracked-market-feed {
   width: min(1190px, 90%);
   margin: 24px auto 0;
 }
+.agent-launch-guide {
+  width: min(1190px, 90%);
+  margin: 24px auto 0;
+  padding: 12px 14px;
+  border: 1px solid var(--feed-border);
+  border-radius: 6px;
+  background: var(--feed-panel);
+  font-size: 1rem;
+  line-height: 1.5;
+}
+.agent-launch-guide-heading {
+  display: flex;
+  align-items: baseline;
+  flex-wrap: wrap;
+  gap: 4px 9px;
+}
+.agent-launch-guide h2 {
+  margin: 0;
+  color: var(--feed-accent);
+  font-size: 0.875rem;
+  font-weight: 750;
+  letter-spacing: 0.08em;
+}
+.agent-launch-guide-link {
+  margin-left: auto;
+  font-size: 0.875rem;
+  white-space: nowrap;
+}
+.agent-launch-guide p {
+  margin: 4px 0 0;
+  color: var(--feed-muted);
+  overflow-wrap: anywhere;
+}
+.agent-launch-guide a {
+  color: var(--feed-accent);
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+.agent-launch-guide + tracked-market-feed {
+  margin-top: 12px;
+}
 .fees-heading {
   margin-bottom: 30px;
 }
@@ -226,6 +267,85 @@ tracked-market-feed {
   grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
   gap: 16px;
   margin-bottom: 30px;
+}
+.fee-compact-sources {
+  display: block;
+  margin: 20px 0 0;
+}
+.fee-compact-sources .fee-source-row {
+  padding: 24px 0;
+  border: 0;
+  border-bottom: 1px solid #dfe4d7;
+  border-radius: 0;
+  background: transparent;
+}
+.fee-source-main {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 24px;
+}
+.fee-source-content { min-width: 0; }
+.fee-balances {
+  display: flex;
+  flex-wrap: wrap;
+  column-gap: 24px;
+  row-gap: 6px;
+  margin-top: 10px;
+  overflow-wrap: anywhere;
+}
+.fee-source-action {
+  display: grid;
+  justify-items: end;
+  flex-shrink: 0;
+  gap: 8px;
+}
+.fee-source-action button { min-height: 44px; }
+.fee-transaction-count, .fee-amount-details, .fee-inline-progress {
+  font-size: 14px;
+}
+.fee-transaction-count { color: #687a56; }
+.fee-amount-details summary {
+  color: #687a56;
+  padding: 8px 0;
+  cursor: pointer;
+  width: fit-content;
+}
+.fee-amount-details p { overflow-wrap: anywhere; }
+.fee-inline-progress {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px 20px;
+  padding: 12px 16px;
+  margin-top: 12px;
+  background: #edf2e3;
+  border-radius: 8px;
+}
+.fee-inline-progress > div { margin-top: 0; }
+.fee-source .fee-complete { color: #25452d; }
+.fee-disclosure {
+  border-bottom: 1px solid #dfe4d7;
+  font-size: 15px;
+  color: #687a56;
+}
+.fee-disclosure summary { padding: 18px 0; cursor: pointer; }
+.fee-disclosure p { margin: 0 0 14px; line-height: 1.6; }
+.fee-coverage-details a { text-decoration: underline; }
+.fee-empty-source {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: space-between;
+  gap: 8px 20px;
+  padding: 0 0 16px;
+}
+.fee-empty-source > span:first-child { color: #284734; }
+.fee-scan-action { margin-top: 10px; }
+@media (max-width: 600px) {
+  .fee-source-main { flex-direction: column; align-items: stretch; gap: 14px; }
+  .fee-source-action { grid-template-columns: auto 1fr; align-items: center; justify-items: start; }
+  .fee-balances { flex-direction: column; }
+  .fee-amount-details summary { min-height: 44px; padding: 12px 0; }
 }
 .fee-source {
   padding: 18px;

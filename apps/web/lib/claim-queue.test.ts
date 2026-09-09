@@ -9,6 +9,8 @@ import {
 } from './claim-queue.ts';
 import type { ClaimQuote, FeeSource } from './fee-service.ts';
 import type { ClaimActivity } from './claim-wallet.ts';
+import { runClaimAction } from './claim-action.ts';
+import { HIGH_NETWORK_FEE_WEI } from './launch-cost.ts';
 
 const address = (value: string) => `0x${value.repeat(40)}`;
 const source = (id = 'a'.repeat(64)): FeeSource => ({
@@ -50,6 +52,71 @@ const quote = (value = source()): ClaimQuote => ({
   l1FeeWei: '0',
   operatorFeeWei: '0',
   expiresAt: 20_000,
+});
+
+function clickFixture() {
+  const queue = startClaimQueue([source()]);
+  const prepared = { ...quote(), expiresAt: performance.now() + 20_000 };
+  const calls: string[] = [];
+  let current = true;
+  const options = {
+    queue, quote: null as ClaimQuote | null, address: queue.items[0].source.address,
+    isCurrent: () => current,
+    ensureChain: async () => { calls.push('network'); },
+    prepare: async () => { calls.push('prepare'); return prepared; },
+    onPrepared: () => { calls.push('estimate'); },
+    onAttempt: () => { calls.push('attempt'); },
+    send: async () => { calls.push('wallet'); return '0x123'; },
+  };
+  return { options, prepared, calls, cancel: () => { current = false; } };
+}
+
+await test('one claim action prepares and opens the wallet exactly once', async () => {
+  const f = clickFixture();
+  await runClaimAction(f.options);
+  assert.deepEqual(f.calls, ['network', 'prepare', 'estimate', 'attempt', 'wallet']);
+});
+
+await test('account changes during network selection or preparation never open the wallet', async () => {
+  for (const stage of ['network', 'prepare']) {
+    const f = clickFixture();
+    if (stage === 'network') f.options.ensureChain = async () => { f.cancel(); };
+    else f.options.prepare = async () => { f.cancel(); return f.prepared; };
+    await runClaimAction(f.options);
+    assert.ok(!f.calls.includes('wallet'));
+    assert.ok(!f.calls.includes('attempt'));
+  }
+});
+
+await test('expired estimates refresh in the same claim action and mismatched quotes never send', async () => {
+  const f = clickFixture();
+  f.options.quote = { ...f.prepared, expiresAt: 0 };
+  await runClaimAction(f.options);
+  assert.equal(f.calls.filter((call) => call === 'wallet').length, 1);
+  assert.ok(f.calls.includes('prepare'));
+  const mismatch = clickFixture();
+  mismatch.options.quote = { ...mismatch.prepared, positionId: 'f'.repeat(64) };
+  await assert.rejects(runClaimAction(mismatch.options), /does not match/);
+  assert.ok(!mismatch.calls.includes('wallet'));
+});
+
+await test('high gas pauses inline and only a second explicit action sends the reviewed quote', async () => {
+  const f = clickFixture();
+  f.prepared.estimatedWei = HIGH_NETWORK_FEE_WEI.toString();
+  await runClaimAction(f.options);
+  assert.deepEqual(f.calls, ['network', 'prepare', 'estimate']);
+  f.options.quote = f.prepared;
+  await runClaimAction(f.options);
+  assert.equal(f.calls.filter((call) => call === 'wallet').length, 1);
+});
+
+await test('wallet rejection is surfaced without retrying or sending the next queue item', async () => {
+  const f = clickFixture();
+  f.options.queue = startClaimQueue([source(), source('b'.repeat(64))]);
+  let writes = 0;
+  f.options.send = async () => { writes++; throw new Error('Rejected'); };
+  await assert.rejects(runClaimAction(f.options), /Rejected/);
+  assert.equal(writes, 1);
 });
 
 await test('queues unique verified positive positions and counts a two-coin pool once', () => {
