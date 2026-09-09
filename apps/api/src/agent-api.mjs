@@ -7,14 +7,33 @@ import { IMAGE_BYTE_LIMIT } from "./launch-image.mjs";
 
 // Only contractually public asset error codes may cross the service boundary.
 const assetErrors = new Set([
-  "unavailable", "not_found", "invalid_request", "request_too_large", "origin_denied",
-  "rate_limited", "image_size", "invalid_wallet", "invalid_asset_image",
-  "invalid_launch_details", "invalid_asset_uri", "metadata_size",
-  "invalid_asset_approval", "asset_approval_changed", "asset_approval_expired",
-  "asset_busy", "asset_publication_uncertain", "ipfs_approval_pending",
-  "asset_history_full", "asset_storage_full", "asset_integrity_failed",
-  "asset_storage_unavailable", "asset_clock_unavailable", "asset_uploads_disabled",
-  "ipfs_publication_disabled", "artwork_daily_limit", "artwork_service_limit",
+  "unavailable",
+  "not_found",
+  "invalid_request",
+  "request_too_large",
+  "origin_denied",
+  "rate_limited",
+  "image_size",
+  "invalid_wallet",
+  "invalid_asset_image",
+  "invalid_launch_details",
+  "invalid_asset_uri",
+  "metadata_size",
+  "invalid_asset_approval",
+  "asset_approval_changed",
+  "asset_approval_expired",
+  "asset_busy",
+  "asset_publication_uncertain",
+  "ipfs_approval_pending",
+  "asset_history_full",
+  "asset_storage_full",
+  "asset_integrity_failed",
+  "asset_storage_unavailable",
+  "asset_clock_unavailable",
+  "asset_uploads_disabled",
+  "ipfs_publication_disabled",
+  "artwork_daily_limit",
+  "artwork_service_limit",
 ]);
 
 const fail = (code, status = 400) => {
@@ -217,13 +236,36 @@ export function createAgentHandler(
       const input = await json(request, limit);
       if (controller.signal.aborted) return;
       if (kind === "ticker") {
+        const validTicker = (ticker) => typeof ticker === "string" && /^[A-Z]{1,11}$/.test(ticker);
+        if (exact(input, ["ticker"]) && validTicker(input.ticker))
+          return send(200, await adapters.ticker(4663, input.ticker, ["long"]));
         if (
-          !exact(input, ["ticker"]) ||
-          typeof input.ticker !== "string" ||
-          !/^[A-Z]{1,11}$/.test(input.ticker)
+          !exact(input, ["tickers"]) ||
+          !Array.isArray(input.tickers) ||
+          input.tickers.length < 1 ||
+          input.tickers.length > 10 ||
+          input.tickers.some((ticker) => !validTicker(ticker)) ||
+          new Set(input.tickers).size !== input.tickers.length
         )
           fail("invalid_request");
-        return send(200, await adapters.ticker(4663, input.ticker, ["long"]));
+        const checked = [];
+        for (const ticker of input.tickers) {
+          if (controller.signal.aborted || response.destroyed) return;
+          let value;
+          try {
+            value = await adapters.ticker(4663, ticker, ["long"]);
+          } catch (error) {
+            if (controller.signal.aborted || response.destroyed) return;
+            if (safeError(error).status === 429) throw error;
+            fail("unavailable", 503);
+          }
+          if (controller.signal.aborted || response.destroyed) return;
+          const status = value?.results?.long?.status;
+          if (!["reserved", "unreserved"].includes(status)) fail("unavailable", 503);
+          checked.push({ ticker, status });
+          if (status === "unreserved") return send(200, { selectedTicker: ticker, checked });
+        }
+        fail("tickers_unavailable", 409);
       }
       if (!config.longLaunch) fail("launch_disabled", 503);
       if (artwork) {
@@ -253,10 +295,7 @@ export function createAgentHandler(
           return send(
             [400, 403, 404, 409, 413, 429, 503].includes(upstream.status) ? upstream.status : 503,
             {
-              error:
-                assetErrors.has(value.error)
-                  ? value.error
-                  : "unavailable",
+              error: assetErrors.has(value.error) ? value.error : "unavailable",
             },
           );
         }

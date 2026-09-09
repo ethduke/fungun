@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
 import { createServer } from "node:http";
 import { Budget } from "./budget.mjs";
+import { ServiceError } from "./errors.mjs";
 import { createAgentHandler, readAgentConfig } from "./agent-api.mjs";
 const wallet = "0x" + "1".repeat(40),
   artwork = "a".repeat(48),
@@ -315,7 +316,180 @@ test("opaque lowercase upstream error values are not reflected", async (t) => {
     fetcher: async () => Response.json({ error: "synthetic_opaque_credential" }, { status: 503 }),
   });
   const response = await request("long/artwork-prepare", {
-    chainId: 4663, wallet, draft, imageBase64: "aGk=",
+    chainId: 4663,
+    wallet,
+    draft,
+    imageBase64: "aGk=",
   });
   assert.deepEqual(await response.json(), { error: "unavailable" });
+});
+
+test("ordered ticker options stop at the first proven available candidate", async (t) => {
+  const seen = [];
+  const { request } = await fixture(t, {
+    adapters: {
+      ticker: async (chainId, ticker, pads) => {
+        assert.equal(chainId, 4663);
+        assert.deepEqual(pads, ["long"]);
+        seen.push(ticker);
+        return { results: { long: { status: ticker === "SECOND" ? "unreserved" : "reserved" } } };
+      },
+    },
+  });
+  const result = await request("long/ticker", { tickers: ["FIRST", "SECOND", "THIRD"] });
+  assert.equal(result.status, 200);
+  assert.deepEqual(await result.json(), {
+    selectedTicker: "SECOND",
+    checked: [
+      { ticker: "FIRST", status: "reserved" },
+      { ticker: "SECOND", status: "unreserved" },
+    ],
+  });
+  assert.deepEqual(seen, ["FIRST", "SECOND"]);
+});
+
+test("ordered ticker options return conflict only when every candidate is reserved", async (t) => {
+  const seen = [];
+  const { request } = await fixture(t, {
+    adapters: {
+      ticker: async (_, ticker) => {
+        seen.push(ticker);
+        return { results: { long: { status: "reserved" } } };
+      },
+    },
+  });
+  const response = await request("long/ticker", { tickers: ["FIRST", "SECOND"] });
+  assert.equal(response.status, 409);
+  assert.deepEqual(await response.json(), { error: "tickers_unavailable" });
+  assert.deepEqual(seen, ["FIRST", "SECOND"]);
+});
+
+test("ordered ticker options fail closed on unknown availability and provider exceptions", async (t) => {
+  for (const result of [
+    undefined,
+    {},
+    { results: { long: { status: "unverified" } } },
+    { results: { long: { status: "available" } } },
+    new Error("synthetic provider failure"),
+  ]) {
+    const seen = [];
+    const { request } = await fixture(t, {
+      adapters: {
+        ticker: async (_, ticker) => {
+          seen.push(ticker);
+          if (result instanceof Error) throw result;
+          return result;
+        },
+      },
+    });
+    const response = await request("long/ticker", { tickers: ["FIRST", "SECOND"] });
+    assert.equal(response.status, 503);
+    assert.deepEqual(await response.json(), { error: "unavailable" });
+    assert.deepEqual(seen, ["FIRST"]);
+  }
+});
+
+test("ordered ticker inputs are fully validated and authenticated before any reads", async (t) => {
+  let reads = 0;
+  const { request } = await fixture(t, {
+    adapters: {
+      ticker: async () => {
+        reads++;
+        return {};
+      },
+    },
+  });
+  for (const input of [
+    { tickers: [] },
+    { tickers: "FIRST" },
+    { tickers: ["FIRST", "FIRST"] },
+    { tickers: ["FIRST", "lowercase"] },
+    { tickers: ["FIRST", null] },
+    { tickers: ["FIRST", "TOOLONGTICKER"] },
+    { tickers: ["FIRST", "WITH SPACE"] },
+    { tickers: ["FIRST", "A1"] },
+    { tickers: ["FIRST", ""] },
+    { tickers: Array.from({ length: 11 }, (_, n) => String.fromCharCode(65 + n)) },
+    { ticker: "FIRST", tickers: ["SECOND"] },
+    { tickers: ["FIRST"], extra: true },
+  ]) {
+    assert.equal((await request("long/ticker", input)).status, 400);
+  }
+  assert.equal(
+    (await request("long/ticker", { tickers: ["FIRST"] }, { authorization: "" })).status,
+    401,
+  );
+  assert.equal(reads, 0);
+});
+
+test("ordered ticker options accept one or ten candidates and retain the legacy response", async (t) => {
+  const calls = [];
+  const legacy = {
+    chainId: 4663,
+    ticker: "LEGACY",
+    results: { long: { status: "unreserved", checkedAt: 1 } },
+  };
+  const { request } = await fixture(t, {
+    adapters: {
+      ticker: async (_, ticker) => {
+        calls.push(ticker);
+        return ticker === "LEGACY" ? legacy : { results: { long: { status: "unreserved" } } };
+      },
+    },
+  });
+  assert.deepEqual(await (await request("long/ticker", { ticker: "LEGACY" })).json(), legacy);
+  assert.equal(
+    (await (await request("long/ticker", { tickers: ["SINGLE"] })).json()).selectedTicker,
+    "SINGLE",
+  );
+  assert.equal(
+    (
+      await (
+        await request("long/ticker", {
+          tickers: Array.from({ length: 10 }, (_, n) => String.fromCharCode(65 + n)),
+        })
+      ).json()
+    ).selectedTicker,
+    "A",
+  );
+  assert.deepEqual(calls, ["LEGACY", "SINGLE", "A"]);
+});
+
+test("ordered ticker lookup stops after the deadline without reading subsequent options", async (t) => {
+  let release;
+  const pending = new Promise((resolve) => {
+    release = resolve;
+  });
+  const seen = [];
+  const { request } = await fixture(t, {
+    timeoutMs: 25,
+    adapters: {
+      ticker: async (_, ticker) => {
+        seen.push(ticker);
+        await pending;
+        return { results: { long: { status: "reserved" } } };
+      },
+    },
+  });
+  const response = await request("long/ticker", { tickers: ["FIRST", "SECOND"] });
+  assert.equal(response.status, 504);
+  release();
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.deepEqual(seen, ["FIRST"]);
+});
+
+test("ordered ticker options preserve underlying budget backoff without skipping candidates", async (t) => {
+  const seen = [];
+  const { request } = await fixture(t, {
+    adapters: {
+      ticker: async (_, ticker) => {
+        seen.push(ticker);
+        throw new ServiceError("rate_limited", 429, 7);
+      },
+    },
+  });
+  const response = await request("long/ticker", { tickers: ["FIRST", "SECOND"] });
+  assert.equal(response.status, 429);
+  assert.equal(response.headers.get("retry-after"), "7");
+  assert.deepEqual(seen, ["FIRST"]);
 });
