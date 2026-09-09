@@ -238,3 +238,20 @@ request after an uncertain outcome, without another charge.
 
 Repository operators can find full setup and CLI commands in
 `docs/agent-launches.md`; that repository path is not a public HTTP endpoint.
+
+## Ordered ticker alternatives
+
+The authenticated `POST /v1/agent/long/ticker` endpoint accepts either `{ticker}`
+or `{"tickers":["QVXL","QVX","QUORVIX"]}`. Lists contain 1–10 distinct uppercase
+letter tickers, each 1–11 characters. Checks follow the supplied order and stop
+at the first available option. The response contains `selectedTicker` and
+`checked` entries with `ticker` and `status`. All taken returns HTTP 409 with
+`tickers_unavailable`; an unknown check stops selection and never counts as free.
+
+SDK deployment input can replace `ticker` with `tickers`. Selection happens before
+artwork preparation and is saved for recovery. If launch preparation proves that
+the selected ticker was taken before signing, the SDK tries the remaining options
+and republishes metadata while reusing the image. It never chooses another ticker
+after an uncertain signature or transaction. Checking availability does not reserve
+a ticker. Direct HTTP clients pass the selected single ticker into artwork and
+launch preparation; the SDK manages the complete fallback workflow.

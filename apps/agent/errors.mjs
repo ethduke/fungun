@@ -22,6 +22,7 @@ export const retries = new Set([
   "image_daily_budget",
 ]);
 const visible = new Set([
+  "invalid_ticker_options", "ticker_selection_invalid", "tickers_unavailable",
   "asset_approval_expired", "ticker_reserved", "https_required", "image_required",
   "publication_changed", "wrong_signer", "broadcast_uncertain", "invalid_theme_limit",
   "launch_transaction_changed", "nonce_limit", "launch_simulation_failed",
@@ -87,12 +88,13 @@ export function safeAgentResult(value) {
     "retryable", "wallet", "unknown", "artwork_retry", "artwork_pending", "checked", "stale",
   ]);
   out.status = statuses.has(value?.status) ? value.status : "pending";
-  for (const key of ["id", "hash", "asset", "paidGasWei"]) {
+  for (const key of ["id", "hash", "asset", "paidGasWei", "selectedTicker"]) {
     const pattern = {
       id: /^[a-f0-9]{48,64}$/,
       hash: /^0x[a-fA-F0-9]{64}$/,
       asset: /^0x[a-fA-F0-9]{40}$/,
       paidGasWei: /^[0-9]{1,78}$/,
+      selectedTicker: /^[A-Z]{1,11}$/,
     }[key];
     if (typeof value?.[key] === "string" && pattern.test(value[key])) out[key] = value[key];
   }

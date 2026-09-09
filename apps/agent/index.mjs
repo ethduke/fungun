@@ -11,6 +11,17 @@ import {
 const neutral =
   "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=";
 const terminal = (r) => ["confirmed", "failed", "skipped"].includes(r.state);
+const withTicker = (result, record) =>
+  record?.tickerOptions ? { ...result, selectedTicker: record.draft.ticker } : result;
+function readTickerOptions(input) {
+  if (input.tickers === undefined) return undefined;
+  const options = input.tickers;
+  if (input.ticker !== undefined || !Array.isArray(options) || options.length < 1 ||
+      options.length > 10 || Array.from(options).some(t => typeof t !== "string" || !/^[A-Z]{1,11}$/.test(t)) ||
+      new Set(options).size !== options.length)
+    throw new Error("invalid_ticker_options");
+  return [...options];
+}
 export const defaultLimits = Object.freeze({
   maxLaunchesPerDay: 1,
   maxSpendWeiPerDay: "50000000000000000",
@@ -47,9 +58,10 @@ export function launchIdentity(
   image = { mode: input.image ? "provided" : "none" },
   themeKey = null,
 ) {
+  const tickers = readTickerOptions(input);
   const draft = assetDraft({
     name: input.name,
-    ticker: input.ticker,
+    ticker: tickers?.[0] ?? input.ticker,
     description: input.description ?? "",
     ...(input.website ? { website: input.website } : {}),
     ...(input.twitter ? { twitter: input.twitter } : {}),
@@ -65,7 +77,8 @@ export function launchIdentity(
         }
       : {}),
   };
-  return { draft, pairId: input.pairId, image: selectedImage, themeKey };
+  return { draft, pairId: input.pairId, image: selectedImage, themeKey,
+    ...(tickers ? { tickers } : {}) };
 }
 export class FungunAgent {
   constructor({
@@ -167,12 +180,22 @@ export class FungunAgent {
   async searchLaunchpads() {
     return this.request("launchpads");
   }
+  async selectTicker(tickers) {
+    readTickerOptions({ tickers });
+    const result = await this.request("long/ticker", { tickers });
+    const index = tickers.indexOf(result?.selectedTicker);
+    if (index < 0 || !Array.isArray(result.checked) || result.checked.length !== index + 1 ||
+        result.checked.some((row, i) => row?.ticker !== tickers[i] ||
+          row.status !== (i === index ? "unreserved" : "reserved")))
+      throw new Error("ticker_selection_invalid");
+    return result.selectedTicker;
+  }
   async resume() {
     try {
       return await this.journal.lock(async (j) => {
         const out = [];
         for (const r of Object.values(j.data.intents))
-          if (!terminal(r)) out.push(await this.advance(j, r));
+          if (!terminal(r)) out.push(withTicker(await this.advance(j, r), r));
         return out;
       });
     } catch (error) {
@@ -195,7 +218,8 @@ export class FungunAgent {
             await this.advance(j, r);
             if (!terminal(r)) throw new Error("unresolved_intent");
           }
-        return this.start(j, input, { intentKey, themeKey, image });
+        const result = await this.start(j, input, { intentKey, themeKey, image });
+        return withTicker(result, j.data.intents[intentKey]);
       });
     } catch (error) {
       throw safeSdkError(error);
@@ -225,7 +249,8 @@ export class FungunAgent {
       )
         throw new Error("daily_spend_limit");
       if (!input.pairId?.startsWith("long-")) throw new Error("unsupported_launchpad");
-      const draft = identity.draft;
+      const draft = { ...identity.draft };
+      if (identity.tickers) draft.ticker = await this.selectTicker(identity.tickers);
       r = {
         digest,
         key: intentKey,
@@ -237,6 +262,7 @@ export class FungunAgent {
         pairId: input.pairId,
         image: identity.image,
         providedImage: identity.image.base64,
+        ...(identity.tickers ? { tickerOptions: identity.tickers } : {}),
       };
       j.data.intents[intentKey] = r;
       await j.save();
@@ -247,6 +273,12 @@ export class FungunAgent {
     try {
       return await this.advanceIntent(j, r);
     } catch (error) {
+      if (!r.plan && !r.hash && r.publication && r.tickerOptions &&
+          ["publishing", "published"].includes(r.state) && error.message === "ticker_reserved") {
+        r.state = "ticker_retry";
+        await j.save();
+        return this.advance(j, r);
+      }
       if (!r.plan && r.approval && error.message === "asset_approval_expired") {
         delete r.approval;
         r.state = "intent";
@@ -269,6 +301,27 @@ export class FungunAgent {
   }
   async advanceIntent(j, r) {
     if (terminal(r)) return r.result;
+    if (r.state === "ticker_retry") {
+      const remaining = r.tickerOptions.slice(r.tickerOptions.indexOf(r.draft.ticker) + 1);
+      let selected;
+      try {
+        if (!remaining.length) throw new Error("tickers_unavailable");
+        selected = await this.selectTicker(remaining);
+      } catch (error) {
+        if (error.message !== "tickers_unavailable") throw error;
+        r.state = "skipped";
+        r.result = { status: "skipped", reason: "tickers_unavailable" };
+        r.reservedWei = "0";
+        await j.save();
+        return r.result;
+      }
+      r.draft = { ...r.draft, ticker: selected };
+      // Metadata capabilities bind the ticker. Reuse the image, including already-paid artwork.
+      delete r.approval;
+      delete r.publication;
+      r.state = "intent";
+      await j.save();
+    }
     if (r.plan) {
       // Even a retryable response cannot authorize another signature after uncertainty.
       const result = await this.request("long/status", { id: r.plan.id, hash: r.hash ?? null });

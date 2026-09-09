@@ -17,6 +17,7 @@ import {
 import { generatePrivateKey, privateKeyToAccount } from "viem/accounts";
 import { FungunAgent } from "./index.mjs";
 import { Budget } from "../api/src/budget.mjs";
+import { ServiceError } from "../api/src/errors.mjs";
 import { createAgentHandler } from "../api/src/agent-api.mjs";
 import { validateAssetInput } from "../api/src/asset-service.mjs";
 import { initializeIpfsStore, IpfsStore } from "../api/src/ipfs-store.mjs";
@@ -47,7 +48,8 @@ const profile = {
   ],
 };
 
-async function fixture(t, { loseBroadcast = false, losePublication = false } = {}) {
+async function fixture(t, { loseBroadcast = false, losePublication = false,
+  tickers, taken = [], raceTicker, grok = false, loseTickerLookup = false } = {}) {
   const root = realpathSync(mkdtempSync(join(tmpdir(), "agent-deploy-integration-")));
   initializeIpfsStore(root);
   const origin = "https://app.example.com",
@@ -61,6 +63,9 @@ async function fixture(t, { loseBroadcast = false, losePublication = false } = {
     .toBuffer();
   const counts = { sign: 0, broadcast: 0, publish: 0, pin: 0, reserve: 0, prepare: 0, status: 0 };
   const contents = new Map();
+  const checkedTickers = [];
+  const preparedTickers = [];
+  let imageGenerations = 0, tickerLookupLost = false;
   let submittedHash, plan, publication, serialized;
   const worker = createIpfsWorker(
     store,
@@ -118,10 +123,13 @@ async function fixture(t, { loseBroadcast = false, losePublication = false } = {
     run: async (kind, input) => {
       if (kind === "launch-prepare") {
         counts.prepare++;
+        preparedTickers.push(input.draft.ticker);
+        if (input.draft.ticker === raceTicker) throw new ServiceError("ticker_reserved", 409);
         assert.equal(input.wallet, account.address.toLowerCase());
         assert.equal(input.publication.id, publication.id);
         assert.equal(input.publication.metadataHash, publication.metadataHash);
         const metadata = JSON.parse(contents.get(publication.ipfs.metadataCid));
+        assert.equal(metadata.symbol, input.draft.ticker);
         assert.equal(metadata.website, input.draft.website);
         assert.equal(metadata.twitter, input.draft.twitter);
         const intentId = "00000000-0000-4000-8000-000000000001";
@@ -178,7 +186,14 @@ async function fixture(t, { loseBroadcast = false, losePublication = false } = {
         config,
         budget,
         launches,
-        adapters: {},
+        adapters: { ticker: async (_chain, ticker) => {
+          checkedTickers.push(ticker);
+          if (loseTickerLookup && counts.prepare && !tickerLookupLost) {
+            tickerLookupLost = true;
+            throw new ServiceError("unavailable", 503);
+          }
+          return { results: { long: { status: taken.includes(ticker) ? "reserved" : "unreserved" } } };
+        } },
         fetcher: assetFetcher,
         agent: {
           enabled: true,
@@ -256,12 +271,13 @@ async function fixture(t, { loseBroadcast = false, losePublication = false } = {
     signer,
     rpc,
     profile,
+    imageGenerator: async () => { imageGenerations++; return image.toString("base64"); },
     journalPath: join(root, "agent-journal.json"),
   };
   let agent = new FungunAgent(settings);
   const input = {
     name: "Quorvix Lantern",
-    ticker: "QVXL",
+    ...(tickers ? { tickers } : { ticker: "QVXL" }),
     description: "A test coin",
     website: "https://example.com",
     twitter: "https://x.com/example",
@@ -270,13 +286,18 @@ async function fixture(t, { loseBroadcast = false, losePublication = false } = {
   };
   return {
     counts,
+    checkedTickers,
+    preparedTickers,
     input,
-    deploy: () => agent.deploy(input, { intentKey: "stable-intent" }),
+    deploy: () => agent.deploy(input, { intentKey: "stable-intent",
+      ...(grok ? { image: { mode: "grok", prompt: "A fictional lantern." } } : {}) }),
     resume: () => agent.resume(),
     restart: () => {
       agent = new FungunAgent(settings);
     },
     expected: () => plan.predictedAsset,
+    imageGenerations: () => imageGenerations,
+    journal: () => JSON.parse(readFileSync(settings.journalPath)),
     assertNoSignedBytes: () => {
       assert.equal(readFileSync(settings.journalPath).includes(Buffer.from(serialized)), false);
     },
@@ -326,4 +347,72 @@ test("lost IPFS publication acknowledgment recovers status and never republishes
   assert.equal(f.counts.pin, 2);
   assert.equal(f.counts.sign, 1);
   assert.equal(f.counts.broadcast, 1);
+});
+
+test("ordered ticker deployment chooses before publication and persists its selection", async (t) => {
+  const f = await fixture(t, { tickers: ["TAKEN", "QVXL", "LATER"], taken: ["TAKEN"] });
+  const result = await f.deploy();
+  assert.equal(result.status, "confirmed");
+  assert.equal(result.selectedTicker, "QVXL");
+  assert.deepEqual(f.checkedTickers, ["TAKEN", "QVXL"]);
+  assert.deepEqual(f.preparedTickers, ["QVXL"]);
+  f.restart();
+  assert.deepEqual(await f.deploy(), result);
+  assert.deepEqual(f.checkedTickers, ["TAKEN", "QVXL"]);
+  assert.equal(f.counts.sign, 1);
+  assert.equal(f.counts.broadcast, 1);
+});
+
+test("a ticker taken during preparation falls back with fresh metadata and one signature", async (t) => {
+  const f = await fixture(t, { tickers: ["RACED", "QVXL", "LATER"], raceTicker: "RACED", grok: true });
+  const result = await f.deploy();
+  assert.equal(result.status, "confirmed");
+  assert.equal(result.selectedTicker, "QVXL");
+  assert.deepEqual(f.checkedTickers, ["RACED", "QVXL"]);
+  assert.deepEqual(f.preparedTickers, ["RACED", "QVXL"]);
+  assert.equal(f.counts.publish, 2);
+  assert.equal(f.imageGenerations(), 1);
+  assert.equal(f.counts.reserve, 1);
+  assert.equal(f.counts.sign, 1);
+  assert.equal(f.counts.broadcast, 1);
+  f.assertNoSignedBytes();
+});
+
+test("ticker exhaustion does not publish or sign, and unsigned race exhaustion releases budget", async (t) => {
+  const unavailable = await fixture(t, { tickers: ["TAKEN", "BUSY"], taken: ["TAKEN", "BUSY"] });
+  await assert.rejects(unavailable.deploy(), /tickers_unavailable/);
+  assert.equal(unavailable.counts.publish, 0);
+  assert.equal(unavailable.counts.sign, 0);
+  const raced = await fixture(t, { tickers: ["RACED", "BUSY"], taken: ["BUSY"], raceTicker: "RACED" });
+  const result = await raced.deploy();
+  assert.equal(result.status, "skipped");
+  assert.equal(result.reason, "tickers_unavailable");
+  assert.equal(raced.counts.sign, 0);
+  assert.equal(raced.counts.reserve, 0);
+  assert.equal(raced.journal().intents["stable-intent"].reservedWei, "0");
+});
+
+test("uncertain broadcast with ticker options recovers without selecting or signing again", async (t) => {
+  const f = await fixture(t, { tickers: ["QVXL", "LATER"], loseBroadcast: true });
+  await assert.rejects(f.deploy(), /agent_failed/);
+  f.restart();
+  const [result] = await f.resume();
+  assert.equal(result.status, "confirmed");
+  assert.equal(result.selectedTicker, "QVXL");
+  assert.deepEqual(f.checkedTickers, ["QVXL"]);
+  assert.equal(f.counts.sign, 1);
+  assert.equal(f.counts.broadcast, 1);
+});
+
+test("an unavailable fallback check resumes after restart without reusing old metadata", async (t) => {
+  const f = await fixture(t, { tickers: ["RACED", "QVXL"], raceTicker: "RACED", loseTickerLookup: true });
+  await assert.rejects(f.deploy(), /unavailable/);
+  assert.equal(f.journal().intents["stable-intent"].state, "ticker_retry");
+  assert.equal(f.counts.sign, 0);
+  f.restart();
+  const [result] = await f.resume();
+  assert.equal(result.selectedTicker, "QVXL");
+  assert.equal(result.status, "confirmed");
+  assert.deepEqual(f.preparedTickers, ["RACED", "QVXL"]);
+  assert.equal(f.counts.sign, 1);
 });

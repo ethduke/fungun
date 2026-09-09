@@ -100,3 +100,10 @@ required by the publication protocol). Optional website and Twitter HTTPS links
 are included in token metadata. API credentials, public wallet bindings and
 runtime configuration must be provisioned by the operator; do not invent addresses
 or copy secrets into requests. [Agent guide](/agent-guide.md) explains access.
+
+For ordered ticker alternatives, POST `/v1/agent/long/ticker` with
+`{"tickers":["QVXL","QVX","QUORVIX"]}`. The first confirmed available ticker is
+returned as `selectedTicker`, with the checked candidates. Lists allow 1–10 unique
+uppercase tickers. Single `{ticker}` requests remain supported. The deployment
+SDK also accepts `tickers` in place of `ticker`, persists the choice, and retries
+remaining candidates only before a transaction could have been signed.

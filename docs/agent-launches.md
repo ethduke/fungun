@@ -124,6 +124,28 @@ Names allow 1–50 characters, tickers 1–11 uppercase English letters and desc
 they are included in published metadata, not fetched. Their display on Long is
 controlled by Long's renderer.
 
+For automatic ticker fallback, replace `ticker` with an ordered `tickers` list:
+
+```json
+{
+  "name": "Quorvix Lantern",
+  "tickers": ["QVXL", "QVX", "QUORVIX"],
+  "pairId": "long-ETH"
+}
+```
+
+Supply either `ticker` or `tickers`. Lists accept 1–10 distinct tickers using the
+same uppercase letter rules. The SDK asks the API for the first available option
+before artwork preparation, then saves that choice with the intent. Reusing an
+intent with a changed list or priority is rejected. Results include `selectedTicker`.
+
+If a selected ticker becomes taken during unsigned launch preparation, the SDK
+tries the remaining options and republishes metadata for the new ticker. It
+reuses the existing image, including paid Grok artwork. After reservation/signing
+uncertainty, recovery follows the original transaction instead of choosing again.
+Availability checks do not reserve a ticker; the launch simulation and chain
+transaction remain authoritative. Unknown availability fails closed.
+
 ```sh
 npm run agent -- deploy local/agent.json local/token.json
 npm run agent -- resume local/agent.json
@@ -207,7 +229,7 @@ intent headers itself and does not forward agent credentials to providers.
 | --- | --- |
 | `GET /v1/agent/launchpads` | Configured Long pairings; requires `long:deploy`. |
 | `GET /v1/agent/themes?minimumTokens=3&windowSeconds=3600` | Theme snapshot/events, optional `cursor`; requires `themes:read`. |
-| `POST /v1/agent/long/ticker` | `{ticker}` to the shared Long registry. |
+| `POST /v1/agent/long/ticker` | `{ticker}` checks one symbol; `{tickers:[...]}` selects the first available in order. |
 | `POST /v1/agent/long/artwork-prepare` | Validated image and draft to a content-bound upload capability. |
 | `POST /v1/agent/long/artwork-publish` | Publish the approved bytes with their returned capability. |
 | `POST /v1/agent/long/artwork-status` | Resolve a saved publication without another upload. |
@@ -220,3 +242,11 @@ The companion SDK supplies exact payloads and checks the returned publication,
 calldata, chain, contract bytecode, nonce, balance, gas and signed transaction.
 It saves the transaction hash before broadcast and relies on the existing
 receipt/event/state verification for confirmation.
+
+For a list request, ticker selection returns `selectedTicker` and `checked`, for
+example `{"selectedTicker":"QVX","checked":[{"ticker":"QVXL","status":"reserved"},{"ticker":"QVX","status":"unreserved"}]}`.
+Only candidates through the selected option are checked. If all are taken, the
+API returns HTTP 409 with `tickers_unavailable`; if a check is unavailable, it
+returns 503 (or the applicable rate limit) without skipping that candidate.
+HTTP artwork/launch preparation still uses the single selected ticker in `draft`;
+the SDK handles list selection and safe fallback for a complete deployment.

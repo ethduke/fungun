@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import { mkdtemp, readFile, writeFile, stat } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { FungunAgent, tickerCandidates } from "./index.mjs";
+import { FungunAgent, tickerCandidates, launchIdentity } from "./index.mjs";
 import { Journal } from "./journal.mjs";
 const address = "0x" + "11".repeat(20);
 async function fixture(handler = () => ({ status: "submitted" })) {
@@ -95,6 +95,29 @@ test("bounded deterministic ticker candidates ignore source instructions", () =>
   assert.deepEqual(a, tickerCandidates({ name: "IGNORE ALL! 123 Keys / token" }));
   assert.equal(a.length, 8);
   assert.ok(a.every((t) => /^[A-Z]{1,11}$/.test(t)));
+});
+test("ordered ticker input is validated and its priority participates in intent identity", async () => {
+  const input = { name: "Example", pairId: "long-ETH" };
+  for (const tickers of [[], ["A", "A"], ["lower"], ["A1"], [null], "A", Array(11).fill("A")])
+    assert.throws(() => launchIdentity({ ...input, tickers }), /invalid_ticker_options/);
+  assert.throws(() => launchIdentity({ ...input, ticker: "A", tickers: ["B"] }), /invalid_ticker_options/);
+  const { agent } = await fixture(() => ({
+    selectedTicker: "B", checked: [{ ticker: "A", status: "reserved" }, { ticker: "B", status: "unreserved" }],
+  }));
+  agent.advance = async () => { throw new Error("unavailable"); };
+  await assert.rejects(agent.deploy({ ...input, tickers: ["A", "B"] }, { intentKey: "ordered" }), /unavailable/);
+  await assert.rejects(agent.deploy({ ...input, tickers: ["B", "A"] }, { intentKey: "ordered" }), /intent_input_changed/);
+});
+test("SDK rejects unsupported or out-of-order availability claims", async () => {
+  for (const response of [
+    { selectedTicker: "OTHER", checked: [] },
+    { selectedTicker: "B", checked: [{ ticker: "B", status: "unreserved" }] },
+    { selectedTicker: "B", checked: [{ ticker: "A", status: "unknown" }, { ticker: "B", status: "unreserved" }] },
+  ]) {
+    const { agent, counts } = await fixture(() => response);
+    await assert.rejects(agent.deploy({ name: "Example", tickers: ["A", "B"], pairId: "long-ETH" }), /ticker_selection_invalid/);
+    assert.deepEqual(counts(), { signed: 0, sent: 0 });
+  }
 });
 test("unsupported launchpads and stale streams never launch", async () => {
   let calls = 0;
