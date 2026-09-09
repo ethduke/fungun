@@ -9,6 +9,7 @@ import { Button } from '@/components/ui/button';
 import { AccountContext, type ConnectedAccount } from '@/lib/account-context';
 import { LaunchDraftProvider } from '@/lib/launch-draft';
 import { MarketFeed } from '@/components/market-feed';
+import { AgentLaunchGuide } from '@/components/agent-launch-guide';
 import { hasPreviousWalletConnection, subscribeWalletSession } from '@/lib/connection-session';
 
 const WalletConnection = lazy(() => import('@/components/connect-panel'));
@@ -89,6 +90,7 @@ export function AppShell({ children }: { children: ReactNode }) {
             )}
           </div>
         </header>
+        {pathname === '/' && <AgentLaunchGuide />}
         <MarketFeed compact={pathname !== '/'} />
         <LaunchDraftProvider>{children}</LaunchDraftProvider>
       </div>

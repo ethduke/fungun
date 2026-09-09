@@ -187,6 +187,47 @@ tracked-market-feed {
   width: min(1190px, 90%);
   margin: 24px auto 0;
 }
+.agent-launch-guide {
+  width: min(1190px, 90%);
+  margin: 24px auto 0;
+  padding: 12px 14px;
+  border: 1px solid var(--feed-border);
+  border-radius: 6px;
+  background: var(--feed-panel);
+  font-size: 1rem;
+  line-height: 1.5;
+}
+.agent-launch-guide-heading {
+  display: flex;
+  align-items: baseline;
+  flex-wrap: wrap;
+  gap: 4px 9px;
+}
+.agent-launch-guide h2 {
+  margin: 0;
+  color: var(--feed-accent);
+  font-size: 0.875rem;
+  font-weight: 750;
+  letter-spacing: 0.08em;
+}
+.agent-launch-guide-link {
+  margin-left: auto;
+  font-size: 0.875rem;
+  white-space: nowrap;
+}
+.agent-launch-guide p {
+  margin: 4px 0 0;
+  color: var(--feed-muted);
+  overflow-wrap: anywhere;
+}
+.agent-launch-guide a {
+  color: var(--feed-accent);
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+.agent-launch-guide + tracked-market-feed {
+  margin-top: 12px;
+}
 .fees-heading {
   margin-bottom: 30px;
 }
