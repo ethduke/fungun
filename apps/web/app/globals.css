@@ -203,12 +203,31 @@ tracked-market-feed {
   flex-wrap: wrap;
   gap: 4px 9px;
 }
-.agent-launch-guide h2 {
-  margin: 0;
+.agent-launch-guide-toggle {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  width: 100%;
+  padding: 0;
+  border: 0;
+  background: transparent;
   color: var(--feed-accent);
   font-size: 0.875rem;
   font-weight: 750;
   letter-spacing: 0.08em;
+  line-height: 1.5;
+  text-align: left;
+}
+.agent-launch-guide-arrow {
+  color: var(--feed-muted);
+  font-size: 1rem;
+  line-height: 1;
+}
+.agent-launch-guide-toggle[aria-expanded='true'] .agent-launch-guide-arrow {
+  transform: rotate(90deg);
+}
+.agent-launch-guide [data-slot='collapsible-content'] .agent-launch-guide-heading {
+  padding-top: 8px;
 }
 .agent-launch-guide-link {
   margin-left: auto;
