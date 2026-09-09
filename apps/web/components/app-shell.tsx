@@ -83,7 +83,7 @@ export function AppShell({ children }: { children: ReactNode }) {
             )}
           </div>
         </header>
-        <MarketFeed compact={pathname !== '/'} />
+        {pathname !== '/fees' && <MarketFeed compact={pathname !== '/'} />}
         <LaunchDraftProvider>{children}</LaunchDraftProvider>
       </div>
     </AccountContext>
