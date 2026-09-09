@@ -202,3 +202,11 @@ and LP shares on-chain, and claims each stream separately. Claim all reviews
 transactions in sequence. New pools may appear after an indexing delay. Each
 claim requires wallet confirmation; there are no token approvals or fee-rights
 transfers in this flow.
+
+
+## Market narratives
+
+One Narratives row shows all 2+ groups, newest arrival first, with X search links,
+short ages, a ten-minute new badge and 24-hour retention from the second mention.
+Arrival times are shared and persisted by the API. Additional mentions update
+counts without changing arrival order; multiple pools do not add mentions.

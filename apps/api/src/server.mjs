@@ -12,7 +12,6 @@ import { verifyProductionStorage } from "./storage.mjs";
 import { Fees } from "./fees.mjs";
 import { createFomoRelayHandler } from "./fomo-relay.mjs";
 import { createFomoService } from "./fomo-service.mjs";
-import { TrackedPrices } from "./tracked-prices.mjs";
 import { O1TokenImages } from "./o1-token-image.mjs";
 
 process.umask(0o077);
@@ -29,12 +28,11 @@ try {
   const fees = new Fees(config, upstream);
   const launches = new Launches(config, upstream, budget);
   const fomo = createFomoService(budget.db);
-  const trackedPrices = new TrackedPrices(config, upstream);
   const tokenImages = new O1TokenImages(config, upstream);
   const server = createServer(
     { maxHeaderSize: 8192 },
     createFomoRelayHandler(fomo, process.env.FOMO_RELAY_TOKEN,
-      createHandler(config, budget, adapters, fees, trackedPrices, launches, fomo, tokenImages)),
+      createHandler(config, budget, adapters, fees, launches, fomo, tokenImages)),
   );
   server.requestTimeout = 10_000;
   server.headersTimeout = 5000;

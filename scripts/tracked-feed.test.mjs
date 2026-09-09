@@ -1,11 +1,11 @@
+import { groupNarrativeTokens } from '../apps/web/lib/tracked-feed-narratives.mjs';
 import assert from "node:assert/strict";
 import test from "node:test";
 import {
   binCells,
-  priceServiceStatus,
-  popularTokens,
   trackedTokenDraft,
-  validatedPriceResponse,
+  narrativesHTML,
+  gmgnTokenUrl,
 } from "../apps/web/components/tracked-market-feed.mjs";
 import {
   createTrackedFeedHandler,
@@ -78,63 +78,6 @@ test("COPY uses the token ticker, never its quote symbol or contract address", (
   assert.deepEqual(trackedTokenDraft({}), { name: "", ticker: "" });
 });
 
-test("price service status distinguishes waiting, active and unavailable reads", () => {
-  assert.deepEqual(priceServiceStatus("waiting"), {
-    text: "",
-    error: false,
-  });
-  assert.deepEqual(priceServiceStatus("checking"), {
-    text: "Checking prices…",
-    error: false,
-  });
-  assert.deepEqual(priceServiceStatus("online"), {
-    text: "Prices online",
-    error: false,
-  });
-  assert.deepEqual(priceServiceStatus("no-quotes"), {
-    text: "Price service online · no verified quotes",
-    error: false,
-  });
-  assert.deepEqual(priceServiceStatus("unavailable"), {
-    text: "Prices unavailable · retrying",
-    error: true,
-  });
-});
-
-test("price responses distinguish verified samples, valid empties and malformed success", () => {
-  const request = {
-    pool: `0x${"a".repeat(64)}`,
-    token: address(1),
-    version: "v4",
-  };
-  assert.deepEqual(validatedPriceResponse({ prices: [], serverTime: 200 }, [request]), {
-    prices: [],
-    serverTime: 200,
-    state: "no-quotes",
-  });
-  const sample = {
-    pool: request.pool,
-    token: request.token,
-    value: 1.25,
-    quote: address(2),
-    observedAt: 100,
-    source: address(3),
-  };
-  assert.deepEqual(validatedPriceResponse({ prices: [sample], serverTime: 200 }, [request]), {
-    prices: [sample],
-    serverTime: 200,
-    state: "online",
-  });
-  for (const body of [
-    { prices: [], serverTime: null },
-    { prices: [{ ...sample, pool: `0x${"b".repeat(64)}` }], serverTime: 200 },
-    { prices: [{ ...sample, value: 0 }], serverTime: 200 },
-    { prices: [{ ...sample, observedAt: 201 }], serverTime: 200 },
-    { prices: [sample, sample], serverTime: 200 },
-  ])
-    assert.equal(validatedPriceResponse(body, [request]), null);
-});
-
 test("popularity counts distinct contracts per chain, not pools or high-volume singletons", () => {
   const rows = [
     row(10, { name: "Móon-Club", total_in: 3 }),
@@ -146,7 +89,7 @@ test("popularity counts distinct contracts per chain, not pools or high-volume s
     row(13, { name: "Sunshine", total_in: 100 }),
     row(14, { name: "Whale", total_in: 10000 }),
   ];
-  const groups = popularTokens(rows);
+  const groups = groupNarrativeTokens(rows);
   assert.equal(groups.length, 2);
   assert.deepEqual(
     groups.map(({ count, flow }) => ({ count, flow })),
@@ -156,20 +99,56 @@ test("popularity counts distinct contracts per chain, not pools or high-volume s
     ],
   );
   assert.equal(groups[0].name, "Moon Club");
-  assert.equal(popularTokens(rows, 1).length, 1);
-  assert.deepEqual(popularTokens([row(1)]), []);
-  assert.deepEqual(popularTokens([]), []);
+  assert.deepEqual(groupNarrativeTokens([row(1)]), []);
+  assert.deepEqual(groupNarrativeTokens([]), []);
 });
 
-test("popularity ranks equal-count groups by inflow and limits the list to three", () => {
+test("name grouping includes every repeated group", () => {
   const groups = ["Alpha", "Bravo", "Charlie", "Delta"].flatMap((name, i) => [
     row(i * 2 + 1, { name, total_in: i }),
     row(i * 2 + 2, { name, total_in: i }),
   ]);
   assert.deepEqual(
-    popularTokens(groups).map((item) => item.name),
-    ["Delta", "Charlie", "Bravo"],
+    groupNarrativeTokens(groups).map((item) => item.name),
+    ["Delta", "Charlie", "Bravo", "Alpha"],
   );
+});
+
+test("narratives renders newest first, X links, escaped names and short ages", () => {
+  const now = 100_000_000;
+  const items = [
+    { id: 1, name: 'Moon Club', count: 8, arrivedAt: now - 3_600_000 },
+    { id: 2, name: 'Marians', count: 3, arrivedAt: now - 18 * 60_000 },
+    { id: 3, name: 'The dogs', count: 2, arrivedAt: now - 2 * 60_000 },
+  ];
+  const html = narrativesHTML(items, now);
+  assert.ok(html.indexOf('The dogs') < html.indexOf('Marians'));
+  assert.ok(html.indexOf('Marians') < html.indexOf('Moon Club'));
+  assert.equal((html.match(/🆕/g) || []).length, 1);
+  for (const age of ['2m', '18m', '1h']) assert.ok(html.includes(`· ${age}`));
+  assert.match(html, /q=The%20dogs&amp;src=typed_query/);
+  assert.match(html, /target="_blank" rel="noopener noreferrer"/);
+  const unsafe = narrativesHTML([{ ...items[2], name: '<Dogs & "friends">' }], now);
+  assert.match(unsafe, /&lt;Dogs &amp; &quot;friends&quot;&gt; \(x2\)/);
+  assert.equal(unsafe.includes('<Dogs'), false);
+});
+
+test("narrative badge and retention expire on the clock even with a cached snapshot", () => {
+  const arrivedAt = 1_000_000;
+  const items = [{ id: 1, name: 'Dogs', count: 2, arrivedAt }];
+  assert.match(narrativesHTML(items, arrivedAt), /&lt;1m/);
+  assert.match(narrativesHTML(items, arrivedAt + 599_999), /🆕/);
+  assert.doesNotMatch(narrativesHTML(items, arrivedAt + 600_000), /🆕/);
+  assert.match(narrativesHTML(items, arrivedAt + 86_399_999), /Dogs/);
+  assert.doesNotMatch(narrativesHTML(items, arrivedAt + 86_400_000), /Dogs/);
+  assert.match(narrativesHTML([], arrivedAt), /No new narratives/);
+  assert.match(narrativesHTML(null, arrivedAt), /Narratives unavailable/);
+});
+
+test("feed cards retain validated Robinhood GMGN links", () => {
+  assert.equal(gmgnTokenUrl(row(1)), `https://gmgn.ai/robinhood/token/${address(1)}`);
+  assert.equal(gmgnTokenUrl(row(1, { chain_id: 8453 })), null);
+  assert.equal(gmgnTokenUrl({ meme: 'javascript:alert(1)' }), null);
 });
 
 test("eleven chronological cells distinguish observed zero, missing and future values", () => {

@@ -25,7 +25,7 @@ test('COPY client crosses the production web proxy and read-service route to fet
     return new Response(png, { headers: { 'content-type': 'image/png' } });
   };
   const images = new O1TokenImages(config, new Upstream(budget, providerFetch), providerFetch);
-  const server = createServer(createHandler(config, budget, {}, null, null, null, null, images));
+  const server = createServer(createHandler(config, budget, {}, null, null, null, images));
   t.after(async () => {
     globalThis.fetch = realFetch;
     if (previousOrigin === undefined) delete process.env.APP_ORIGIN; else process.env.APP_ORIGIN = previousOrigin;

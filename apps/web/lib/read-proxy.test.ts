@@ -143,24 +143,16 @@ await test('proxy normalizes opaque gateway failures without erasing timeout sem
   const originalFetch = globalThis.fetch;
   const origin = 'https://app.example.invalid';
   const request = () =>
-    new Request(`${origin}/api/tracked-prices`, {
+    new Request(`${origin}/api/catalog`, {
       method: 'POST',
       headers: {
         origin,
         'content-type': 'application/json',
-        'x-fungun-intent': 'tracked-prices',
+        'x-fungun-intent': 'catalog',
       },
-      body: JSON.stringify({
-        pools: [
-          {
-            pool: `0x${'1'.repeat(64)}`,
-            token: `0x${'2'.repeat(40)}`,
-            version: 'v4',
-          },
-        ],
-      }),
+      body: JSON.stringify({ chainId: 4663 }),
     });
-  const params = Promise.resolve({ operation: 'tracked-prices' });
+  const params = Promise.resolve({ operation: 'catalog' });
   try {
     process.env.APP_ORIGIN = origin;
     process.env.READ_SERVICE_ORIGIN = 'https://backend.example.invalid';

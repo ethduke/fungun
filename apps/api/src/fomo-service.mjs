@@ -1,6 +1,7 @@
 import { readFileSync } from "node:fs";
 import { FomoStore, fomoUsers } from "./fomo-store.mjs";
 import { FomoCollector } from "./fomo-collector.mjs";
+import { NarrativeStore } from "./narrative-store.mjs";
 import { createTrackedFeedHandler } from "../../web/lib/tracked-feed-handler.mjs";
 import { getO1Hooks, getStableAssets } from "../../web/lib/tracked-feed-registry.mjs";
 
@@ -18,11 +19,14 @@ export function createFomoService(db, env = process.env) {
   );
   const enabled = env.FOMO_ENABLED === "1";
   const collector = new FomoCollector(store, { enabled, key: env.FOMO_API_KEY || "" });
+  const narratives = new NarrativeStore(db);
   const handleFeed = createTrackedFeedHandler({
     loadHookRegistry: getO1Hooks,
     loadStableRegistry: getStableAssets,
-    onSnapshot: (snapshot) =>
-      store.register(snapshot.pools.map((row) => ({ ...row, chain_id: 4663 }))),
+    onSnapshot: (snapshot) => {
+      store.register(snapshot.pools.map((row) => ({ ...row, chain_id: 4663 })));
+      narratives.observe(snapshot.pools);
+    },
   });
   let stopped = false,
     timer,
@@ -58,6 +62,7 @@ export function createFomoService(db, env = process.env) {
       const snapshot = collector.snapshot();
       return {
         ...snapshot,
+        narratives: narratives.snapshot(),
         stream_highlights: snapshot.stream_highlights.filter((row) => users.has(row.handle)),
         stream_status: streamStatus,
         stream_last_seen_at: streamLastSeenAt,

@@ -137,7 +137,7 @@ test("launch HTTP endpoints enforce exact inputs and their bounded larger body",
       return { id: input.id ?? "a".repeat(64), status: kind.slice(7) };
     },
   };
-  const server = createServer(createHandler(config, budget, {}, undefined, undefined, launches));
+  const server = createServer(createHandler(config, budget, {}, undefined, launches));
   await new Promise((resolve, reject) => {
     server.once("error", reject);
     server.listen(0, "127.0.0.1", resolve);

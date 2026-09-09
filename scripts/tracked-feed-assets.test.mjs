@@ -9,7 +9,7 @@ import {
   createTrackedFeedHandler,
   projectTrackedPayload,
 } from "../apps/web/lib/tracked-feed-handler.mjs";
-import { popularTokens } from "../apps/web/components/tracked-market-feed.mjs";
+import { groupNarrativeTokens } from "../apps/web/lib/tracked-feed-narratives.mjs";
 
 const address = (n) => `0x${n.toString(16).padStart(40, "0")}`;
 const assetRegistry = () => ({
@@ -68,9 +68,9 @@ test("stable tracked assets and stable/stable pools are removed before cards, co
     result.pools.map((row) => row.meme),
     [address(7), address(8), address(9)],
   );
-  assert.equal(popularTokens(result.pools).length, 1);
-  assert.equal(popularTokens(result.pools)[0].name, "Moon Club");
-  assert.equal(popularTokens(result.pools)[0].count, 2);
+  assert.equal(groupNarrativeTokens(result.pools).length, 1);
+  assert.equal(groupNarrativeTokens(result.pools)[0].name, "Moon Club");
+  assert.equal(groupNarrativeTokens(result.pools)[0].count, 2);
   assert.equal(pools.length, 7, "does not mutate the source");
   assert.deepEqual(projectTrackedPayload({ pools: pools.slice(0, 4) }, null, assets).pools, []);
 });

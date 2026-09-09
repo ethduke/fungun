@@ -11,8 +11,7 @@ Use Node 24.4 or newer. Run `npm run setup`, then `npm run dev`. The launcher
 starts the local read service, waits for `/healthz`, starts the web app, and stops
 both if either exits. `npm run dev:web` and `npm run dev:api` are retained for
 isolated debugging. The webview remains at http://127.0.0.1:3000; its development
-proxy forwards `/api/catalog`, `/api/ticker`, `/api/fees`, `/api/claim-prepare` and
-`/api/tracked-prices` plus the three `/api/launch-*` operations to the local service
+proxy forwards `/api/catalog`, `/api/ticker`, `/api/fees`, `/api/claim-prepare` plus the three `/api/launch-*` operations to the local service
 on port 8787. An unavailable local
 service produces a retryable JSON 503 rather than an opaque proxy 502. The public market feed's
 `GET /api/tracked-feed` route runs in the web server. SQLite runtime files live in ignored

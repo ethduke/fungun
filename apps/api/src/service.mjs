@@ -2,7 +2,6 @@ import { validateLongInput } from "./long-live.mjs";
 import { isIP } from "node:net";
 import { ServiceError, safeError, serviceErrorBody } from "./errors.mjs";
 import { validAddress } from "./fee-contracts.mjs";
-import { validatePriceInput } from "./tracked-prices.mjs";
 import { validateTokenImageInput } from "./o1-token-image.mjs";
 
 export function validateInput(kind, input) {
@@ -13,7 +12,6 @@ export function validateInput(kind, input) {
     return {};
   }
   if (kind.startsWith("launch-")) return validateLongInput(kind, input);
-  if (kind === "tracked-prices") return validatePriceInput(input);
   if (kind === "fees" || kind === "claim-prepare") {
     const required = kind === "fees" ? ["address", "chainId", "padId"] : ["address", "positionId"];
     const fields = kind === "fees" ? [...required, "cursor"] : required;
@@ -88,7 +86,7 @@ async function readBody(request, limit = 2048) {
   }
 }
 
-export function createHandler(config, budget, adapters, fees, trackedPrices, launches, fomo, tokenImages) {
+export function createHandler(config, budget, adapters, fees, launches, fomo, tokenImages) {
   let active = 0;
   return async (request, response) => {
     response.setHeader("content-type", "application/json; charset=utf-8");
@@ -117,7 +115,7 @@ export function createHandler(config, budget, adapters, fees, trackedPrices, lau
         request.headers["sec-fetch-site"] === "cross-site"
       )
         throw new ServiceError("origin_denied", 403);
-      const kind = ["o1-token-image", "fomo", "catalog", "ticker", "fees", "claim-prepare", "tracked-prices", "launch-prepare", "launch-reserve", "launch-status", "launch-estimate"].find(
+      const kind = ["o1-token-image", "fomo", "catalog", "ticker", "fees", "claim-prepare", "launch-prepare", "launch-reserve", "launch-status", "launch-estimate"].find(
         (operation) => request.url === `/v1/${operation}`,
       );
       if (!kind || request.method !== "POST" || request.headers["x-fungun-intent"] !== kind)
@@ -132,10 +130,6 @@ export function createHandler(config, budget, adapters, fees, trackedPrices, lau
         kind === "fomo" ? fomo.snapshot() :
         kind.startsWith("launch-")
           ? await launches.run(kind, input)
-          : kind === "tracked-prices"
-          ? await trackedPrices.list(input, {
-              shouldContinue: () => !response.destroyed && !response.writableEnded,
-            })
           : kind === "fees"
             ? await fees.list(input)
             : kind === "claim-prepare"

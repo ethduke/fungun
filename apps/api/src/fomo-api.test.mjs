@@ -6,12 +6,26 @@ import { createHandler } from "./service.mjs";
 import { DatabaseSync } from "node:sqlite";
 import { createFomoService } from "./fomo-service.mjs";
 import { apiEnvironment } from "./runtime-env.mjs";
+import { NarrativeStore } from "./narrative-store.mjs";
+
+test("public snapshot includes shared persistent narrative arrivals", async (t) => {
+  const db = new DatabaseSync(":memory:");
+  t.after(() => db.close());
+  const journal = new NarrativeStore(db);
+  journal.observe([1, 2].map((i) => ({
+    meme: `0x${i.toString(16).padStart(40, '0')}`, name: 'Dogs', quote_kind: 'eth',
+  })));
+  const service = createFomoService(db, {});
+  assert.deepEqual(service.snapshot().narratives, journal.snapshot());
+  assert.equal(service.snapshot().narratives[0].count, 2);
+  await service.stop();
+});
 
 test("FOMO API is a cached read with existing origin and exact-input protection", async (t) => {
   let snapshots = 0;
   const origin = "http://127.0.0.1:3000";
   const server = createServer(
-    createHandler({ origin }, { request() {} }, null, null, null, null, {
+    createHandler({ origin }, { request() {} }, null, null, null, {
       snapshot() {
         snapshots++;
         return { stream_highlights: [], connected: false, history_complete: false };

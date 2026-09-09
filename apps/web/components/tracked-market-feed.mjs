@@ -1,10 +1,10 @@
+import {
+  NARRATIVE_TTL_MS,
+  NARRATIVE_NEW_MS,
+} from '../lib/tracked-feed-narratives.mjs';
 import { fomoHighlightsHTML, fomoStatus } from '../lib/fomo-highlights.mjs';
 import { TrackedFeedPoller } from '../lib/tracked-feed-poller.mjs';
 import { feedLaunchpad } from '../lib/tracked-feed-labels.mjs';
-import {
-  gmgnTokenUrl,
-  TrackedInflowQueue,
-} from '../lib/tracked-feed-inflow.mjs';
 
 const finite = (value) =>
   (typeof value === 'number' ||
@@ -24,70 +24,12 @@ const number = (value) =>
   amount(value) === null
     ? '—'
     : Number(value).toLocaleString('en-US', { maximumFractionDigits: 3 });
-const percent = (value) => {
-  const rounded = Number(value.toFixed(1));
-  return `${rounded > 0 ? '+' : ''}${rounded.toFixed(1)}%`;
-};
-export function priceServiceStatus(state) {
-  if (state === 'online') return { text: 'Prices online', error: false };
-  if (state === 'no-quotes')
-    return { text: 'Price service online · no verified quotes', error: false };
-  if (state === 'checking') return { text: 'Checking prices…', error: false };
-  if (state === 'unavailable')
-    return { text: 'Prices unavailable · retrying', error: true };
-  return { text: '', error: false };
-}
-const pricePool = /^0x[\da-f]{64}$/i;
-const priceAddress = /^0x[\da-f]{40}$/i;
-export function validatedPriceResponse(body, requests) {
-  if (
-    !body ||
-    !Array.isArray(body.prices) ||
-    body.prices.length > requests.length ||
-    !Number.isFinite(body.serverTime) ||
-    body.serverTime <= 0
-  )
-    return null;
-  const expected = new Set(
-    requests.map(
-      ({ pool, token }) =>
-        `${String(pool).toLowerCase()}:${String(token).toLowerCase()}`,
-    ),
-  );
-  const seen = new Set();
-  const prices = [];
-  for (const sample of body.prices) {
-    const pool =
-      typeof sample?.pool === 'string' ? sample.pool.toLowerCase() : '';
-    const token =
-      typeof sample?.token === 'string' ? sample.token.toLowerCase() : '';
-    const quote =
-      typeof sample?.quote === 'string' ? sample.quote.toLowerCase() : '';
-    const source =
-      typeof sample?.source === 'string' ? sample.source.toLowerCase() : '';
-    const key = `${pool}:${token}`;
-    if (
-      !pricePool.test(pool) ||
-      !priceAddress.test(token) ||
-      !priceAddress.test(quote) ||
-      !priceAddress.test(source) ||
-      !expected.has(key) ||
-      seen.has(key) ||
-      !Number.isFinite(sample.value) ||
-      sample.value <= 0 ||
-      !Number.isFinite(sample.observedAt) ||
-      sample.observedAt <= 0 ||
-      sample.observedAt > body.serverTime
-    )
-      return null;
-    seen.add(key);
-    prices.push({ ...sample, pool, token, quote, source });
-  }
-  return {
-    prices,
-    serverTime: body.serverTime,
-    state: prices.length ? 'online' : 'no-quotes',
-  };
+export function gmgnTokenUrl(row) {
+  const address = String(row.meme || row.token || '');
+  return Number(row.chain_id ?? 4663) === 4663 &&
+    /^0x[0-9a-f]{40}$/i.test(address)
+    ? `https://gmgn.ai/robinhood/token/${address.toLowerCase()}`
+    : null;
 }
 const chain = (row) => Number(row.chain_id ?? 4663);
 const token = (row) => String(row.meme || row.token || '');
@@ -105,106 +47,36 @@ export function trackedTokenDraft(row) {
   };
 }
 
-const nameKey = (value) =>
-  value
-    .normalize('NFKD')
-    .toLowerCase()
-    .replace(/[\u0300-\u036f]/g, '')
-    .replace(/[^a-z0-9]/g, '')
-    .slice(0, 64);
-
-function distance(a, b) {
-  let prev = Array.from({ length: a.length + 1 }, (_, i) => i);
-  for (let j = 1; j <= b.length; j++) {
-    const next = [j];
-    for (let i = 1; i <= a.length; i++)
-      next[i] = Math.min(
-        next[i - 1] + 1,
-        prev[i] + 1,
-        prev[i - 1] + Number(a[i - 1] !== b[j - 1]),
-      );
-    prev = next;
-  }
-  return prev[a.length];
-}
-
-function similar(a, b) {
-  if (a === b) return true;
-  const lo = Math.min(a.length, b.length),
-    hi = Math.max(a.length, b.length);
-  return (
-    lo >= 5 &&
-    hi / lo <= 1.35 &&
-    distance(a, b) <= Math.max(1, Math.floor(hi * 0.2))
+export function narrativesHTML(items, now = Date.now()) {
+  if (!Array.isArray(items))
+    return '<span class="empty">Narratives unavailable</span>';
+  const active = items.filter(
+    (item) =>
+      item &&
+      typeof item.name === 'string' &&
+      Number.isSafeInteger(item.count) &&
+      item.count >= 2 &&
+      Number.isFinite(item.arrivedAt) &&
+      item.arrivedAt > 0 &&
+      item.arrivedAt <= now &&
+      now - item.arrivedAt < NARRATIVE_TTL_MS,
   );
-}
-
-export function popularTokens(rows, limit = 3) {
-  const unique = new Map();
-  for (const row of rows) {
-    const address = token(row).toLowerCase();
-    const name = String(row.name || row.sym || '')
-        .trim()
-        .slice(0, 80),
-      key = nameKey(name);
-    if (!address || key.length < 2) continue;
-    const id = `${chain(row)}:${address}`,
-      flow = amount(row.total_in) ?? 0;
-    const item = unique.get(id);
-    if (!item || flow > item.flow) unique.set(id, { name, key, flow });
-  }
-  const items = [...unique.values()],
-    parent = items.map((_, i) => i);
-  const root = (i) => {
-    while (parent[i] !== i) {
-      parent[i] = parent[parent[i]];
-      i = parent[i];
-    }
-    return i;
-  };
-  for (let i = 0; i < items.length; i++)
-    for (let j = i + 1; j < items.length; j++) {
-      if (similar(items[i].key, items[j].key)) parent[root(j)] = root(i);
-    }
-  const groups = new Map();
-  items.forEach((item, i) => {
-    const key = root(i);
-    if (!groups.has(key)) groups.set(key, []);
-    groups.get(key).push(item);
-  });
-  return [...groups.values()]
-    .filter((group) => group.length > 1)
-    .map((group) => {
-      const variants = new Map();
-      for (const item of group) {
-        const variant = variants.get(item.key) || {
-          name: item.name,
-          count: 0,
-          flow: 0,
-          best: -1,
-        };
-        variant.count++;
-        variant.flow += item.flow;
-        if (item.flow > variant.best) {
-          variant.name = item.name;
-          variant.best = item.flow;
-        }
-        variants.set(item.key, variant);
-      }
-      const best = [...variants.values()].sort(
-        (a, b) => b.count - a.count || b.flow - a.flow,
-      )[0];
-      return {
-        name: best.name,
-        count: group.length,
-        flow: group.reduce((sum, item) => sum + item.flow, 0),
-      };
-    })
-    .sort(
-      (a, b) =>
-        b.count - a.count || b.flow - a.flow || a.name.localeCompare(b.name),
-    )
-    .slice(0, limit);
+  return (
+    active
+      .sort((a, b) => b.arrivedAt - a.arrivedAt || b.id - a.id)
+      .map(({ name, count, arrivedAt }) => {
+        const elapsed = now - arrivedAt;
+        const age =
+          elapsed < 60_000
+            ? '<1m'
+            : elapsed < 3_600_000
+              ? `${Math.floor(elapsed / 60_000)}m`
+              : `${Math.floor(elapsed / 3_600_000)}h`;
+        return `<span class="narrative">${elapsed < NARRATIVE_NEW_MS ? '<span class="narrative-new" aria-label="New narrative">🆕</span> ' : ''}<a href="https://x.com/search?q=${encodeURIComponent(name.toWellFormed())}&amp;src=typed_query" target="_blank" rel="noopener noreferrer">${esc(name)} (x${count})</a> <time datetime="${new Date(arrivedAt).toISOString()}" title="First reached two mentions: ${esc(new Date(arrivedAt).toLocaleString())}">· ${esc(age)}</time></span>`;
+      })
+      .join('<span class="narrative-separator">, </span>') ||
+    '<span class="empty">No new narratives in the last 24h</span>'
+  );
 }
 
 export function binCells(trail) {
@@ -275,17 +147,14 @@ function card(row) {
 
 const styles = `
   :host{display:block;color:var(--feed-text,#223a2c);font:14px/1.4 var(--font-site,'Quicksand',sans-serif)}
-  :host([compact]) .heading,:host([compact]) .popular,:host([compact]) .inflow,:host([compact]) .columns{display:none}:host([compact]) .top{border-bottom:0}:host([compact]) .fomo{margin-top:0}
+  :host([compact]) .heading,:host([compact]) .narratives,:host([compact]) .columns{display:none}:host([compact]) .top{border-bottom:0}:host([compact]) .fomo{margin-top:0}
   *{box-sizing:border-box}section{border:1px solid var(--feed-border);border-radius:16px;background:var(--feed-bg);overflow:hidden}
   .top{padding:14px 16px;border-bottom:1px solid var(--feed-border)}.heading,.metadata,.identity,.totals{display:flex;align-items:center;justify-content:space-between;gap:10px}
-  .statuses{display:flex;align-items:center;justify-content:flex-end;gap:8px;flex-wrap:wrap}.price-status{font-size:13px;color:var(--feed-muted)}.price-status[data-error=true]{color:#92520e}
   h2,h3,p{margin:0}h2{font-size: 16px}.status{font-size: 13px;color:var(--feed-muted)}.status[data-error=true]{color:#92520e}
-  .popular{display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-top:10px}.popular-label{font-size: 13px;letter-spacing:.08em;font-weight:750;color:var(--feed-muted)}
-  .popular a{padding:5px 9px;border-radius:6px;border:1px solid var(--feed-border);background:var(--feed-panel);overflow-wrap:anywhere}.popular small{font-size: 14px;color:var(--feed-muted);margin-left:6px}
   .fomo{margin-top:8px;padding:9px 12px;border:1px solid var(--feed-border);border-radius:6px;background:var(--feed-panel)}
   .fomo-line{display:flex;align-items:baseline;gap:9px;min-width:0}.fomo-label{color:var(--feed-accent);font-size:14px;font-weight:750;letter-spacing:.08em;flex-shrink:0}.fomo-buys{display:flex;align-items:baseline;gap:6px;overflow-x:auto;min-width:0;padding:3px 0;scrollbar-width:thin;font-size:14px}.fomo-buy{white-space:nowrap}.fomo-token{font-weight:750}.fomo-buy time,.fomo-separator,.fomo-empty{color:var(--feed-muted)}.fomo-buy time{font-size:12px}.fomo-health{display:block;color:var(--feed-muted);font-size:12px;margin-top:3px}
-  .inflow{display:flex;align-items:center;gap:8px;margin-top:7px;min-width:0}.inflow>.popular-label{flex-shrink:0}
-  .inflow-tokens{display:flex;align-items:center;gap:6px;min-width:0;overflow-x:auto;padding:3px;white-space:nowrap;scrollbar-width:thin}.inflow-tokens a{display:inline-flex;align-items:center;gap:5px;flex-shrink:0;padding:4px 7px;border:1px solid var(--feed-border);border-radius:5px;background:var(--feed-panel);font-size: 13px;font-weight:600}.inflow-ticker{max-width:110px;overflow:hidden;text-overflow:ellipsis}.price-change{font-variant-numeric:tabular-nums;color:var(--feed-muted)}.price-change[data-direction=up]{color:#268044}.price-change[data-direction=down]{color:#b13b33}.price-change[data-stale=true]{color:var(--feed-muted)}.inflow-tokens .empty{padding:4px 0;font-size: 13px}
+  .narratives{display:flex;align-items:baseline;gap:8px;margin-top:7px;min-width:0}.narratives-label{flex-shrink:0;font-weight:750;color:var(--feed-muted)}
+  .narratives-tokens{min-width:0;overflow-x:auto;white-space:nowrap;font-size:14px;padding:3px 0;scrollbar-width:thin}.narrative{display:inline-block}.narrative time,.narrative-separator{color:var(--feed-muted)}.narratives-tokens:focus-visible{outline:2px solid var(--feed-accent)}.narratives-tokens a{font-weight:600}.narratives-tokens .empty{padding:0}
   .columns{display:grid;grid-template-columns:1fr 1fr;gap:1px;background:var(--feed-border)}.lane{min-width:0;background:var(--feed-bg);padding:10px}
   h3{font-size: 14px;letter-spacing:.1em;margin:0 4px 8px}h3 span{font-weight:400;color:var(--feed-muted);letter-spacing:0}
   .list{max-height:320px;overflow:auto;scrollbar-gutter:stable;display:flex;flex-direction:column;gap:8px;overscroll-behavior:contain}
@@ -300,7 +169,7 @@ const styles = `
   .bin{border:1px solid var(--feed-border);border-radius:4px;text-align:center;padding:4px 2px;font:12px/1.25 var(--font-site,'Quicksand',sans-serif);min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
   .pending{border-style:dashed;color:var(--feed-muted)}.current{outline:1px solid var(--feed-accent);outline-offset:0}.totals{font-size: 12px;color:var(--feed-muted);margin-top:6px}.totals b{font-size: 1rem;font-weight:500;color:var(--feed-text);white-space:nowrap}
   .empty{color:var(--feed-muted);padding:12px 4px;font-size: 14px}
-  @media(max-width:760px){.columns{grid-template-columns:1fr}.top{padding:15px}.heading{align-items:flex-start;flex-direction:column;gap:4px}.list{max-height:280px}.inflow{align-items:stretch;flex-direction:column;gap:3px}}
+  @media(max-width:760px){.columns{grid-template-columns:1fr}.top{padding:15px}.heading{align-items:flex-start;flex-direction:column;gap:4px}.list{max-height:280px}}
 `;
 
 if (
@@ -311,13 +180,8 @@ if (
     constructor() {
       super();
       this.attachShadow({ mode: 'open' });
-      this.shadowRoot.innerHTML = `<style>${styles}</style><section aria-label="Tracked market feed"><div class="top"><div class="heading"><h2>Market feed</h2><div class="statuses"><span class="status" role="status" aria-live="polite">Connecting…</span><span class="price-status" role="status" aria-live="polite" hidden></span></div></div><div class="popular"></div><div class="fomo" aria-label="FOMO trader purchases"><div class="fomo-line"><span class="fomo-label">FOMO:</span><div class="fomo-buys" tabindex="0" role="region" aria-label="Recorded trader buys"></div></div><span class="fomo-health" role="status"></span></div><div class="inflow"><span class="popular-label">&gt;10ETH INFL:</span><nav class="inflow-tokens" aria-label="Tokens over 10 ETH total inflow, oldest first"></nav></div></div><div class="columns"><div class="lane"><h3>ETH <span class="count-eth"></span></h3><div class="list" data-kind="eth" tabindex="0" role="region" aria-label="Tracked ETH pairs"></div></div><div class="lane"><h3>SHARES <span class="count-shares"></span></h3><div class="list" data-kind="shares" tabindex="0" role="region" aria-label="Tracked SHARES pairs"></div></div></div></section>`;
+      this.shadowRoot.innerHTML = `<style>${styles}</style><section aria-label="Tracked market feed"><div class="top"><div class="heading"><h2>Market feed</h2><span class="status" role="status" aria-live="polite">Connecting…</span></div><div class="fomo" aria-label="FOMO trader purchases"><div class="fomo-line"><span class="fomo-label">FOMO:</span><div class="fomo-buys" tabindex="0" role="region" aria-label="Recorded trader buys"></div></div><span class="fomo-health" role="status"></span></div><div class="narratives"><span class="narratives-label">Narratives:</span><nav class="narratives-tokens" aria-label="Narratives from the last 24 hours, newest first" tabindex="0"></nav></div></div><div class="columns"><div class="lane"><h3>ETH <span class="count-eth"></span></h3><div class="list" data-kind="eth" tabindex="0" role="region" aria-label="Tracked ETH pairs"></div></div><div class="lane"><h3>SHARES <span class="count-shares"></span></h3><div class="list" data-kind="shares" tabindex="0" role="region" aria-label="Tracked SHARES pairs"></div></div></div></section>`;
       this.rows = [];
-      this.inflowQueue = new TrackedInflowQueue();
-      this.inflows = [];
-      this.priceController = null;
-      this.priceRetryAt = 0;
-      this.priceState = 'waiting';
       this.receivedAt = null;
       this.inView = false;
       this.pageHidden = false;
@@ -349,10 +213,8 @@ if (
           // Shared responses keep the relay's receipt time, including cache hits.
           const received = Date.parse(snapshot.fetched_at);
           this.receivedAt = Number.isFinite(received) ? received : Date.now();
-          this.inflows = this.inflowQueue.update(this.rows);
           this.error = false;
           this.render();
-          void this.refreshPrices();
         },
         onError: () => {
           this.error = true;
@@ -360,6 +222,7 @@ if (
         },
       });
       this.fomoPayload = null;
+      this.narrativeClock = null;
       this.fomoUnavailable = false;
       this.fomoPoller = new TrackedFeedPoller({
         getUrl: () => '/api/fomo',
@@ -378,12 +241,19 @@ if (
           }),
         onSnapshot: (payload) => {
           this.fomoPayload = payload;
+          if (Number.isFinite(payload.serverTime))
+            this.narrativeClock = {
+              serverTime: payload.serverTime,
+              received: performance.now(),
+            };
           this.fomoUnavailable = false;
           this.renderFomo();
+          this.renderNarratives();
         },
         onError: () => {
           this.fomoUnavailable = true;
           this.renderFomo();
+          this.renderNarratives();
         },
       });
       this.syncActivity = () => this.updateActivity();
@@ -425,7 +295,10 @@ if (
     }
 
     connectedCallback() {
-      this.fomoExpiryTimer = setInterval(() => this.renderFomo(), 15_000);
+      this.fomoExpiryTimer = setInterval(() => {
+        this.renderFomo();
+        this.renderNarratives();
+      }, 15_000);
       this.pageHidden = false;
       this.inView = false;
       document.addEventListener('visibilitychange', this.syncActivity);
@@ -456,8 +329,6 @@ if (
       window.removeEventListener('pageshow', this.onPageShow);
       this.poller.setActive(false);
       this.fomoPoller.setActive(false);
-      this.priceController?.abort();
-      this.priceController = null;
     }
 
     updateActivity() {
@@ -480,10 +351,6 @@ if (
       this.pauseReason = reason;
       this.poller.setActive(marketActive);
       this.fomoPoller.setActive(active);
-      if (!marketActive) {
-        this.priceController?.abort();
-        this.priceController = null;
-      }
       this.render();
     }
 
@@ -511,75 +378,30 @@ if (
       );
     }
 
-    async refreshPrices() {
-      if (
-        !this.poller.active ||
-        this.priceController ||
-        performance.now() < this.priceRetryAt
-      )
-        return;
-      const pools = this.inflowQueue.takePriceRequests();
-      if (!pools.length) return;
-      const controller = new AbortController();
-      this.priceController = controller;
-      const timeout = setTimeout(() => controller.abort(), 23_000);
-      const previousPriceState = this.priceState;
-      this.priceState = 'checking';
-      this.render();
-      let prices = [];
-      let serverTime = null;
-      try {
-        const response = await fetch('/api/tracked-prices', {
-          method: 'POST',
-          cache: 'no-store',
-          signal: controller.signal,
-          headers: {
-            'content-type': 'application/json',
-            'x-fungun-intent': 'tracked-prices',
-          },
-          body: JSON.stringify({ pools }),
-        });
-        if (!response.ok) {
-          const retry = response.headers.get('retry-after');
-          if (retry && /^\d{1,5}$/.test(retry))
-            this.priceRetryAt =
-              performance.now() + Math.min(86_400, Number(retry)) * 1000;
-          throw new Error('Prices unavailable');
-        }
-        const result = validatedPriceResponse(await response.json(), pools);
-        if (!result) throw new Error('Invalid price response');
-        ({ prices, serverTime } = result);
-        this.priceState = result.state;
-      } catch {
-        // No raw backend/provider errors or fabricated zero-price returns.
-        this.priceState =
-          controller.signal.aborted && !this.poller.active
-            ? previousPriceState
-            : 'unavailable';
-      } finally {
-        clearTimeout(timeout);
-        if (this.priceController === controller) {
-          this.priceController = null;
-          if (this.poller.active) {
-            this.inflows = this.inflowQueue.applyPrices(
-              pools,
-              prices,
-              serverTime,
-            );
-            this.render();
-          }
-        }
-      }
+    renderNarratives() {
+      const list = this.shadowRoot.querySelector('.narratives-tokens');
+      const now = this.narrativeClock
+        ? this.narrativeClock.serverTime +
+          Math.max(0, performance.now() - this.narrativeClock.received)
+        : Date.now();
+      const html = narrativesHTML(this.fomoPayload?.narratives, now);
+      if (list._html === html) return;
+      const focused = this.shadowRoot.activeElement;
+      const href =
+        focused && list.contains(focused) ? focused.getAttribute('href') : null;
+      const left = list.scrollLeft;
+      list.innerHTML = html;
+      list._html = html;
+      list.scrollLeft = left;
+      if (href)
+        [...list.querySelectorAll('a')]
+          .find((a) => a.getAttribute('href') === href)
+          ?.focus({ preventScroll: true });
     }
 
     render() {
       this.renderFomo();
       const status = this.shadowRoot.querySelector('.status');
-      const priceStatus = this.shadowRoot.querySelector('.price-status');
-      const priceView = priceServiceStatus(this.priceState);
-      priceStatus.dataset.error = String(priceView.error);
-      priceStatus.textContent = priceView.text;
-      priceStatus.hidden = !priceView.text;
       status.dataset.error = String(
         Boolean(this.error || this.pauseReason === 'offline'),
       );
@@ -595,62 +417,7 @@ if (
           : timestamp
             ? `Auto-updating · received ${timestamp}`
             : 'Connecting…';
-      const hits = popularTokens(this.rows);
-      const popular = this.shadowRoot.querySelector('.popular');
-      const popularHTML = `<span class="popular-label">${hits.length > 1 ? 'POPULAR TOKENS' : 'POPULAR TOKEN'}</span>${hits.length ? hits.map((hit) => `<a href="https://x.com/search?q=${encodeURIComponent(hit.name)}&src=typed_query" target="_blank" rel="noopener noreferrer">${esc(hit.name)} ↗<small>${hit.count} similar tracked tokens</small></a>`).join('') : '<span class="empty">No repeated token names yet</span>'}`;
-      if (popular._html !== popularHTML) {
-        const focused = this.shadowRoot.activeElement;
-        const focusHref =
-          focused && popular.contains(focused)
-            ? focused.getAttribute('href')
-            : null;
-        popular.innerHTML = popularHTML;
-        popular._html = popularHTML;
-        if (focusHref)
-          [...popular.querySelectorAll('a')]
-            .find((a) => a.getAttribute('href') === focusHref)
-            ?.focus({ preventScroll: true });
-      }
-      const inflow = this.shadowRoot.querySelector('.inflow-tokens');
-      const inflowHTML = this.inflows.length
-        ? this.inflows
-            .map((item) => {
-              const change =
-                item.priceChange === null ? '' : percent(item.priceChange);
-              const priceHint = item.priceStale
-                ? item.entryPrice === null
-                  ? 'No verified quote received yet'
-                  : 'Price update unavailable; last observation retained'
-                : item.entryPrice === null
-                  ? 'Price unavailable'
-                  : change
-                    ? `Change since first quote after entry in ${item.quoteSymbol}; refreshes every 2 min`
-                    : 'First percentage update after 2 min';
-              const observed = item.priceObservedAt
-                ? ` · Price observed ${new Date(item.priceObservedAt).toLocaleTimeString()}`
-                : '';
-              const baseline = item.entryObservedAt
-                ? ` · Baseline ${new Date(item.entryObservedAt).toLocaleTimeString()}`
-                : '';
-              return `<a href="${esc(item.href)}" target="_blank" rel="noopener noreferrer" title="${esc(item.ticker)} · ${number(item.flow)} ETH total inflow · ${esc(priceHint + baseline + observed)} · Open on GMGN"><span class="inflow-ticker">${esc(item.ticker)}</span>${change ? `<span class="price-change" data-direction="${item.priceChange > 0 ? 'up' : item.priceChange < 0 ? 'down' : 'flat'}" data-stale="${item.priceStale}">${change}${item.priceStale ? ' ·' : ''}</span>` : ''}</a>`;
-            })
-            .join('')
-        : '<span class="empty">Waiting for tokens over 10 ETH</span>';
-      if (inflow._html !== inflowHTML) {
-        const focused = this.shadowRoot.activeElement;
-        const focusHref =
-          focused && inflow.contains(focused)
-            ? focused.getAttribute('href')
-            : null;
-        const scrollLeft = inflow.scrollLeft;
-        inflow.innerHTML = inflowHTML;
-        inflow._html = inflowHTML;
-        inflow.scrollLeft = scrollLeft;
-        if (focusHref)
-          [...inflow.querySelectorAll('a')]
-            .find((a) => a.getAttribute('href') === focusHref)
-            ?.focus({ preventScroll: true });
-      }
+      this.renderNarratives();
       const present = new Set();
       for (const kind of ['eth', 'shares']) {
         const list = this.shadowRoot.querySelector(`[data-kind="${kind}"]`);

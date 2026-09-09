@@ -5,7 +5,6 @@ const operations = new Set([
   'ticker',
   'fees',
   'claim-prepare',
-  'tracked-prices',
   'launch-prepare',
   'launch-reserve',
   'launch-status',
