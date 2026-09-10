@@ -8,6 +8,7 @@ import { join } from "node:path";
 import sharp from "sharp";
 import {
   keccak256,
+  zeroAddress,
   toHex,
   parseTransaction,
   recoverTransactionAddress,
@@ -16,6 +17,7 @@ import {
 } from "viem";
 import { generatePrivateKey, privateKeyToAccount } from "viem/accounts";
 import { FungunAgent } from "./index.mjs";
+import { stonxFixture } from "./stonx-fixture.mjs";
 import { Budget } from "../api/src/budget.mjs";
 import { ServiceError } from "../api/src/errors.mjs";
 import { createAgentHandler } from "../api/src/agent-api.mjs";
@@ -49,7 +51,13 @@ const profile = {
 };
 
 async function fixture(t, { loseBroadcast = false, losePublication = false,
-  tickers, taken = [], raceTicker, grok = false, loseTickerLookup = false } = {}) {
+  tickers, taken = [], raceTicker, grok = false, loseTickerLookup = false,
+  stonxMode = false, wrongChain = false } = {}) {
+  const stonx = stonxMode ? stonxFixture() : null;
+  const effectiveProfile = stonx?.profile ?? profile;
+  const chainId = stonxMode ? 8453 : 4663;
+  const launchpad = stonxMode ? "stonx" : "long";
+  const paths = [];
   const root = realpathSync(mkdtempSync(join(tmpdir(), "agent-deploy-integration-")));
   initializeIpfsStore(root);
   const origin = "https://app.example.com",
@@ -132,6 +140,12 @@ async function fixture(t, { loseBroadcast = false, losePublication = false,
         assert.equal(metadata.symbol, input.draft.ticker);
         assert.equal(metadata.website, input.draft.website);
         assert.equal(metadata.twitter, input.draft.twitter);
+        if (stonx) {
+          assert.equal(input.chainId, 8453);
+          plan = stonx.planFor(input, publication);
+          stonx.changes.create = [plan.predictedAsset, plan.predictedAsset, zeroAddress, zeroAddress, zeroAddress];
+          return plan;
+        }
         const intentId = "00000000-0000-4000-8000-000000000001";
         const { publication: _ignoredPublication, ...launchInput } = input;
         const built = buildUnsignedLongLaunch(
@@ -179,7 +193,7 @@ async function fixture(t, { loseBroadcast = false, losePublication = false,
       return { status: "confirmed", id: plan.id, hash: submittedHash, asset: plan.predictedAsset };
     },
   };
-  const config = { origin, longLaunch: { assetOrigin, profile } };
+  const config = { origin, [stonxMode ? "stonxLaunch" : "longLaunch"]: { assetOrigin, profile: effectiveProfile } };
   const server = createServer(
     createAgentHandler(
       {
@@ -202,7 +216,7 @@ async function fixture(t, { loseBroadcast = false, losePublication = false,
             {
               id: "integration",
               wallet: account.address.toLowerCase(),
-              scopes: ["long:deploy"],
+              scopes: [`${launchpad}:deploy`],
               tokenHash: createHash("sha256").update(token).digest("hex"),
             },
           ],
@@ -242,14 +256,16 @@ async function fixture(t, { loseBroadcast = false, losePublication = false,
           account.address.toLowerCase(),
         );
         const tx = parseTransaction(params[0]);
-        assert.equal(tx.chainId, 4663);
+        assert.equal(tx.chainId, chainId);
         assert.equal(tx.data, plan.transaction.data);
-        assert.equal(tx.to.toLowerCase(), profile.launcher.address.toLowerCase());
+        assert.equal(tx.to.toLowerCase(), effectiveProfile.launcher.address.toLowerCase());
         assert.equal(tx.nonce, 0);
         submittedHash = keccak256(params[0]);
         if (loseBroadcast) throw Error("synthetic dropped broadcast acknowledgment");
         return submittedHash;
       }
+      if (wrongChain && method === "eth_chainId") return toHex(chainId === 8453 ? 4663 : 8453);
+      if (stonx) return stonx.rpc.request({ method, params });
       const responses = {
         eth_chainId: "0x1237",
         eth_getCode: "0x6001",
@@ -270,7 +286,12 @@ async function fixture(t, { loseBroadcast = false, losePublication = false,
     token,
     signer,
     rpc,
-    profile,
+    profile: effectiveProfile,
+    ...(stonx ? { baseFeeOracle: stonx.baseFeeOracle } : {}),
+    fetcher: (url, options) => {
+      paths.push(new URL(url).pathname);
+      return fetch(url, options);
+    },
     imageGenerator: async () => { imageGenerations++; return image.toString("base64"); },
     journalPath: join(root, "agent-journal.json"),
   };
@@ -281,11 +302,12 @@ async function fixture(t, { loseBroadcast = false, losePublication = false,
     description: "A test coin",
     website: "https://example.com",
     twitter: "https://x.com/example",
-    pairId: "long-EXAMPLE",
+    pairId: effectiveProfile.quotes[0].id,
     image: image.toString("base64"),
   };
   return {
     counts,
+    paths,
     checkedTickers,
     preparedTickers,
     input,
@@ -415,4 +437,55 @@ test("an unavailable fallback check resumes after restart without reusing old me
   assert.equal(result.status, "confirmed");
   assert.deepEqual(f.preparedTickers, ["RACED", "QVXL"]);
   assert.equal(f.counts.sign, 1);
+});
+
+
+test("Stonx deploy signs on Base through authenticated API and shared IPFS publication", async t => {
+  const f = await fixture(t, { stonxMode: true, tickers: ["QVXL", "QVX"] });
+  const result = await f.deploy();
+  assert.equal(result.status, "confirmed");
+  assert.equal(result.selectedTicker, "QVXL");
+  assert.equal(result.asset, f.expected());
+  assert.equal(f.counts.sign, 1);
+  assert.equal(f.counts.broadcast, 1);
+  assert.equal(f.counts.reserve, 1);
+  assert.equal(f.counts.publish, 1);
+  assert.deepEqual(f.checkedTickers, []);
+  assert.ok(f.paths.includes("/v1/agent/stonx/ticker"));
+  assert.ok(f.paths.every(path => path.startsWith("/v1/agent/stonx/")));
+  f.assertNoSignedBytes();
+  f.restart();
+  assert.equal((await f.deploy()).hash, result.hash);
+  assert.equal(f.counts.sign, 1);
+});
+
+test("Stonx uncertain broadcast recovers its Base transaction without signing again", async t => {
+  const f = await fixture(t, { stonxMode: true, loseBroadcast: true, tickers: ["QVXL", "QVX"] });
+  await assert.rejects(f.deploy());
+  f.restart();
+  const [result] = await f.resume();
+  assert.equal(result.status, "confirmed");
+  assert.equal(result.selectedTicker, "QVXL");
+  assert.equal(f.counts.sign, 1);
+  assert.equal(f.counts.broadcast, 1);
+  f.assertNoSignedBytes();
+});
+
+test("Stonx interrupted artwork acknowledgment reuses the paid image and publication", async t => {
+  const f = await fixture(t, { stonxMode: true, losePublication: true, grok: true });
+  await assert.rejects(f.deploy());
+  f.restart();
+  const [result] = await f.resume();
+  assert.equal(result.status, "confirmed");
+  assert.equal(f.imageGenerations(), 1);
+  assert.equal(f.counts.publish, 1);
+  assert.equal(f.counts.sign, 1);
+});
+
+test("Stonx wrong-chain RPC fails before reservation or signing", async t => {
+  const f = await fixture(t, { stonxMode: true, wrongChain: true });
+  await assert.rejects(f.deploy(), /wrong_chain/);
+  assert.equal(f.counts.reserve, 0);
+  assert.equal(f.counts.sign, 0);
+  assert.equal(f.counts.broadcast, 0);
 });

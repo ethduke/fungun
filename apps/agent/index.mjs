@@ -1,6 +1,6 @@
 import { safeSdkError } from "./errors.mjs";
 import { createHash, randomUUID } from "node:crypto";
-import { recoverTransactionAddress } from "viem";
+import { recoverTransactionAddress, isAddress, zeroAddress } from "viem";
 import { Journal } from "./journal.mjs";
 import { preflight, validateSigned } from "./preflight.mjs";
 import {
@@ -130,7 +130,10 @@ export class FungunAgent {
     );
     this.platform = profile.launchpad === "stonx" ? "stonx" : "long";
     this.chainId = this.platform === "stonx" ? 8453 : 4663;
-    if (this.platform === "stonx" && profile.chainId !== 8453) throw new Error("agent_configuration");
+    if (this.platform === "stonx" && (profile.chainId !== 8453 || !baseFeeOracle ||
+      Object.keys(baseFeeOracle).sort().join(",") !== "address,codeHash" ||
+      !isAddress(baseFeeOracle.address) || baseFeeOracle.address.toLowerCase() === zeroAddress ||
+      !/^0x[a-f0-9]{64}$/i.test(baseFeeOracle.codeHash))) throw new Error("agent_configuration");
     this.limits = { ...defaultLimits, ...(this.platform === "stonx" ? { maxGas: "8000000" } : {}), ...limits };
     if (!Number.isSafeInteger(this.limits.maxLaunchesPerDay) || this.limits.maxLaunchesPerDay < 1)
       throw new Error("invalid_limits");

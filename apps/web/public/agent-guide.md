@@ -206,17 +206,20 @@ claim requires wallet confirmation; there are no token approvals or fee-rights
 transfers in this flow.
 
 
-## Configured Long agent API
+## Configured Long and Stonx agent API
 
-The optional server API supports Long on Robinhood Chain (4663). Its Node SDK
+The optional server API supports Long on Robinhood Chain (4663) and Stonx on Base
+(8453). Its Node SDK
 runs locally with an owner-configured signer and can submit without repeated
 approval prompts. This is separate from browser preview tools; it does not add
 signing to `document.modelContext`. The operator must enable the agent API and
 provision a bearer credential bound to the agent's public wallet, with scopes
-`long:deploy` and/or `themes:read`. Private keys never belong in API payloads.
+`long:deploy`, `stonx:deploy` and/or `themes:read`. Private keys never belong in API payloads.
 
 At the operator-provided API origin, `GET /v1/agent/launchpads` lists configured
-Long pairings. JSON POSTs under `/v1/agent/long/` expose `ticker`, `artwork-prepare`,
+pairings filtered by deployment scopes. Use each launchpad entry's `chainId`; the
+legacy top-level chain ID remains 4663. JSON POSTs under `/v1/agent/long/` or
+`/v1/agent/stonx/` expose `ticker`, `artwork-prepare`,
 `artwork-publish`, `artwork-status`, `prepare`, `reserve` and `status`. These routes
 retain contract checks, independent client validation and durable recovery. The
 SDK accepts name, ticker, artwork and optional description/website/Twitter links.
@@ -229,8 +232,9 @@ refer to distinct contracts first observed by the service within that window,
 not deployment timestamps. Names match after Unicode, whitespace and case
 normalization; this differs from fuzzy popularity groups in the visual feed.
 
-Automatic deployment acts only on fresh data and the configured Long search and
-deployment targets. Preserve journals across restarts to prevent duplicates.
+Automatic deployment acts only on fresh data and matching search/deployment
+target lists: `["long"]` or `["stonx"]` for the configured SDK platform.
+The source feed remains Robinhood even when Stonx on Base is the deployment target. Preserve journals across restarts to prevent duplicates.
 Image modes are provided, Grok through USDG/x402, and none; none uses a neutral
 placeholder because current Long publication still requires an image. Grok
 payments have separate owner-configured USDG limits and recover the existing
@@ -255,3 +259,22 @@ and republishes metadata while reusing the image. It never chooses another ticke
 after an uncertain signature or transaction. Checking availability does not reserve
 a ticker. Direct HTTP clients pass the selected single ticker into artwork and
 launch preparation; the SDK manages the complete fallback workflow.
+
+
+## Stonx agent setup
+
+Provision the `stonx:deploy` scope and the existing Stonx launch backend. Use a
+reviewed Stonx profile, a Base RPC, a separate SDK journal and a trusted
+`baseFeeOracle` object containing its address and code hash. Do not reuse a Long
+journal or infer trusted deployment pins from an unsigned API response.
+Discover a Stonx pairing by its wrapped-stock `symbol`, then use its returned
+opaque pair ID. Artwork and launch preparation payloads use `chainId: 8453`;
+the server handles the shared artwork publication protocol internally.
+
+Stonx accepts the same name, ticker options, image and optional metadata as Long.
+It permits duplicate tickers, so selection returns the first valid option with
+`tickerPolicy: "duplicates_allowed"`. This is not a check that the name is unused.
+The SDK checks Base contract and proxy state, rebuilds calldata, and includes
+execution, L1 data and operator fees in spending limits before signing. Recovery
+keeps the original transaction and reuses paid artwork after interrupted responses.
+Grok payments still use Robinhood USDG; Stonx gas uses Base ETH.

@@ -25,12 +25,15 @@ function profileFixture(symbol = 'wtNVDA', token = address(2n ** 159n)) {
   return { chainId: 8453, launchpad: 'stonx', ...Object.fromEntries(STONX_ROLES.map(r => [r, pin(a[mapping[r]])])),
     integrator: address(500), protocolBeneficiary: address(600), quotes: [{ id: stonxPairId(token), token: { ...pin(token), codeHash: stonxWrapperCodeHash(address(123)) }, beacon: pin(address(123)), implementation: pin(address(124)), symbol, decimals: 18 }] };
 }
-async function fixture(t, symbol, token) {
+async function fixture(t, symbol, token, extraDraft = {}) {
   const db = new DatabaseSync(':memory:'); t.after(() => db.close());
   const profile = profileFixture(symbol, token), q = profile.quotes[0], wallet = address(700);
-  const draft = { name: 'Sample', ticker: 'SAMPLE', description: 'Shared artwork' };
+  const draft = { name: 'Sample', ticker: 'SAMPLE', description: 'Shared artwork', ...extraDraft };
   const imageCid = await ipfsContentId(Buffer.from('fixture'));
-  const bytes = Buffer.from(JSON.stringify({ name: draft.name, symbol: draft.ticker, description: draft.description, image: `ipfs://${imageCid}`, image_hash: `ipfs://${imageCid}` }));
+  const bytes = Buffer.from(JSON.stringify({ name: draft.name, symbol: draft.ticker, description: draft.description, image: `ipfs://${imageCid}`, image_hash: `ipfs://${imageCid}`,
+    ...(draft.website !== undefined ? { website: draft.website } : {}),
+    ...(draft.twitter !== undefined ? { twitter: draft.twitter } : {}),
+  }));
   const publication = { id: 'a'.repeat(48), imageHash: 'b'.repeat(64), metadataHash: createHash('sha256').update(bytes).digest('hex') };
   const published = { ...publication, status: 'published', ipfs: { imageCid, metadataCid: await ipfsContentId(bytes) } };
   const input = { chainId: 8453, wallet, draft, pairId: q.id, publication };
@@ -219,4 +222,21 @@ test('every wrapped-stock pairing can prepare, reconstruct and confirm a launch'
     assert.equal(decodeFunctionData({ abi: STONX_ABI, data: plan.transaction.data }).args[0].numeraire.toLowerCase(), f.profile.quotes[0].token.address);
     await f.live.confirm(plan, f.input, f.receipt(plan), '0x64');
   });
+});
+
+
+test('stonx launch binds optional website and twitter to published metadata', async t => {
+  const links = { website: 'https://quorvix.example.invalid', twitter: 'https://x.com/quorvix_example' };
+  const f = await fixture(t, undefined, undefined, links);
+  const plan = await f.prepare();
+  assert.equal(plan.stonxBuildInput.draft.website, links.website);
+  assert.equal(plan.stonxBuildInput.draft.twitter, links.twitter);
+  assert.equal(plan.review.metadataUri, `ipfs://${f.published.ipfs.metadataCid}`);
+  assert.doesNotThrow(() => validateLongPlan({ ...plan, serverTime: now }, f.input, f.published, 10, 10));
+});
+
+test('stonx launch rejects links substituted after artwork publication', async t => {
+  const f = await fixture(t, undefined, undefined, { website: 'https://quorvix.example.invalid' });
+  f.input.draft.website = 'https://another.example.invalid';
+  await assert.rejects(f.prepare(), error => error.code === 'launch_assets_unverified');
 });

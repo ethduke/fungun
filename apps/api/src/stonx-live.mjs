@@ -104,7 +104,10 @@ export class StonxLive extends BaseLaunchLive {
     this.budget.launch('prepare', 'stonx');
     if (!prior && this.db.prepare('SELECT COUNT(*) AS n FROM long_launches').get().n >= 4096) fail('launch_history_full');
     const publication = await this.metadata(input), imageUri = ipfsUri(publication.ipfs.imageCid), metadataUri = ipfsUri(publication.ipfs.metadataCid);
-    const bytes = Buffer.from(JSON.stringify({ name: input.draft.name, symbol: input.draft.ticker, description: input.draft.description, image: imageUri, image_hash: imageUri }));
+    const bytes = Buffer.from(JSON.stringify({ name: input.draft.name, symbol: input.draft.ticker, description: input.draft.description, image: imageUri, image_hash: imageUri,
+      ...(input.draft.website !== undefined ? { website: input.draft.website } : {}),
+      ...(input.draft.twitter !== undefined ? { twitter: input.draft.twitter } : {}),
+    }));
     if (createHash('sha256').update(bytes).digest('hex') !== input.publication.metadataHash || await ipfsContentId(bytes) !== publication.ipfs.metadataCid) fail('launch_assets_unverified');
     const p = { ...this.live.profile, quotes: [quote] }, block = await this.rpc.block(8453);
     await verifyStonx(this.rpc, p, block);

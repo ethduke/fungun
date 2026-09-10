@@ -1,22 +1,18 @@
-# Long agent deployments and trending themes
+# Long and Stonx agent deployments and trending themes
 
-The agent API prepares Long launches on Robinhood Chain (4663). The companion
-Node SDK signs locally and submits through the agent owner's RPC. After setup,
-`deploy` and `watch` run without confirmation prompts. Neither the API nor the
-image provider receives the signing key. This release supports Long only.
+The agent API prepares Long launches on Robinhood Chain (4663) and Stonx launches
+on Base (8453). The companion Node SDK signs locally and submits through the agent
+owner's RPC. After setup, `deploy` and `watch` run without confirmation prompts.
+Neither the API nor the image provider receives the signing key.
 
-The hosted agent API is disabled by default and has not been rolled out by this
-change. Automated tests use synthetic contracts and mocked chain responses.
-On September 8, 2026, a separate agent completed one live Long/NVDA smoke test
-through the merged SDK and a local authenticated API, using the existing public
-artwork service. Independent chain checks verified the successful receipt, launch
-event, deployed bytecode and token name/symbol. The signer stayed local; the test
-used neutral artwork and no paid image generation. Enable the hosted API against
-the existing configured Long and artwork services using the setup below.
+Agent access is disabled by default. Each launchpad also needs its configured
+launch backend and an explicit deployment scope on the client's credential.
+Automated Stonx validation uses synthetic contracts and mocked chain responses;
+adding API support does not itself enable a hosted client or submit a token launch.
 
 ## 1. Configure the service and access
 
-Keep the existing Long settings, reviewed contract profiles, RPC, ticker registry,
+Keep the existing launchpad settings, reviewed contract profiles, RPC, Long ticker registry,
 asset publication service and persistent read-service volume. Add these API runtime
 settings through your usual secret manager:
 
@@ -36,7 +32,7 @@ Example record shape only; the placeholders are deliberately invalid:
   "id": "quorvix-agent",
   "tokenHash": "<sha256-of-provisioned-token>",
   "wallet": "<owner-approved-public-wallet-address>",
-  "scopes": ["long:deploy", "themes:read"]
+  "scopes": ["long:deploy", "stonx:deploy", "themes:read"]
 }
 ```
 
@@ -44,6 +40,8 @@ The operator binds each credential to a public wallet. Authentication does not
 replace signing: creating a transaction requires that wallet's local signer.
 Requests cannot supply a different wallet, arbitrary contract destination or RPC
 URL. Other clients cannot use an agent's artwork or launch recovery identifiers.
+Recovery and artwork IDs are also bound to their launchpad and chain, including
+when the same credential has permission for both Long and Stonx.
 Revoke a client by removing its record; rotate tokens while retaining its client
 ID and wallet to preserve recovery access. Restart the API after runtime changes.
 
@@ -121,8 +119,8 @@ All token details above are fictional format examples, not availability claims.
 Name and ticker are required; description, website and Twitter are optional.
 Names allow 1–50 characters, tickers 1–11 uppercase English letters and descriptions
 2,000 UTF-8 bytes. Website/Twitter fields accept HTTPS URLs without credentials;
-they are included in published metadata, not fetched. Their display on Long is
-controlled by Long's renderer.
+they are included in published metadata, not fetched. Their display is controlled
+by the launchpad's renderer.
 
 For automatic ticker fallback, replace `ticker` with an ordered `tickers` list:
 
@@ -139,11 +137,11 @@ same uppercase letter rules. The SDK asks the API for the first available option
 before artwork preparation, then saves that choice with the intent. Reusing an
 intent with a changed list or priority is rejected. Results include `selectedTicker`.
 
-If a selected ticker becomes taken during unsigned launch preparation, the SDK
+On Long, if a selected ticker becomes taken during unsigned launch preparation, the SDK
 tries the remaining options and republishes metadata for the new ticker. It
 reuses the existing image, including paid Grok artwork. After reservation/signing
 uncertainty, recovery follows the original transaction instead of choosing again.
-Availability checks do not reserve a ticker; the launch simulation and chain
+Long availability checks do not reserve a ticker; the launch simulation and chain
 transaction remain authoritative. Unknown availability fails closed.
 
 ```sh
@@ -215,8 +213,67 @@ The feed keeps up to 100,000 observed token identities, 128 threshold/window
 configurations and 10,000 events for at most seven days. An expired cursor returns
 410 instead of silently skipping data. Invalid individual token metadata is dropped
 and counted; unavailable or malformed source snapshots do not create fresh signals.
-Both `searchLaunchpads` and `deployLaunchpads` currently accept only `["long"]`;
-unsupported launchpads are rejected rather than searched elsewhere.
+For a Long instance, both `searchLaunchpads` and `deployLaunchpads` must be
+`["long"]`; for a Stonx instance both must be `["stonx"]`. Each instance uses one
+trusted profile, one chain RPC and its own journal. Mixed platform lists are rejected.
+The theme source remains the Robinhood feed even when the deployment target is Stonx on Base.
+
+## Stonx on Base
+
+Use `stonx:deploy` on the agent credential. The API must already have a reviewed
+`STONX_BASE_PROFILE_JSON`, `STONX_BASE_WALLET_LAUNCH=true`, enabled upstream reads,
+Base RPC and fee-oracle settings, and the configured artwork service. Stonx is a
+separate launchpad from Stonks Exchange; their pair IDs and contracts cannot be mixed.
+
+Configure the SDK with a reviewed Stonx profile (`launchpad: "stonx"`, `chainId: 8453`),
+a Base RPC in `FUNGUN_RPC_URL`, and a separate journal. Keep the same API token and
+local signer conventions. Supply `baseFeeOracle` as an independently reviewed
+`{address, codeHash}` pin; it is required before any image generation starts.
+The journal binds this pin as well as the profile. Never copy pins from an
+unverified plan or put a private key in configuration JSON.
+
+```json
+{
+  "apiUrl": "https://api.example.invalid",
+  "appOrigin": "https://app.example.invalid",
+  "profileFile": "./local/reviewed-stonx-profile.json",
+  "baseFeeOracle": {
+    "address": "<reviewed-base-fee-oracle-address>",
+    "codeHash": "<reviewed-base-fee-oracle-code-hash>"
+  },
+  "journalPath": "./local/stonx-agent-state.json",
+  "pairId": "<stonx-pair-id-from-discovery>",
+  "image": { "mode": "none" },
+  "searchLaunchpads": ["stonx"],
+  "deployLaunchpads": ["stonx"]
+}
+```
+
+These placeholders deliberately cannot be executed. Discover enabled Stonx pairs
+with `GET /v1/agent/launchpads`: select the entry with `id: "stonx"`, check its
+`chainId: 8453`, and choose a pair by its `symbol`, such as `wtNVDA`. Use the returned
+opaque `stonx-…` pair ID unchanged. The legacy top-level `chainId` remains 4663 for
+compatibility; the launchpad entry determines the target network.
+
+The manual input and CLI command are the same as Long: supply a name, one `ticker`
+or ordered `tickers`, optional image, description, website and Twitter. Stonx permits
+duplicate symbols: `/v1/agent/stonx/ticker` returns `tickerPolicy: "duplicates_allowed"`
+and selects the first valid option. Its `unreserved` status means no reservation
+is enforced; it does not claim the ticker is unique or unused on Stonx.
+
+Before signing, the SDK rebuilds the exact calldata and fee recipients, verifies
+contract code and module/proxy state, checks the Base RPC chain, and simulates the
+transaction. Base cost limits include execution gas, buffered L1 data fees and
+operator fees from the pinned oracle. Stonx defaults to an 8,000,000 gas ceiling;
+Long retains 3,000,000. Both retain the existing per-transaction and daily ETH
+ceilings unless the owner changes them. These are limits, not cost estimates.
+
+Provided images and the neutral placeholder work directly. Grok remains the
+existing USDG/x402 payment flow on Robinhood Chain (4663), with separate image
+budgets; switching the launch RPC to Base does not move or fund those payments.
+The agent owner must fund Base ETH for Stonx gas and, if using Grok, the existing
+Robinhood payment asset. Recovery observes the original transaction and reuses
+already generated/published artwork after an interrupted response.
 
 ## HTTP interface
 
@@ -227,7 +284,7 @@ intent headers itself and does not forward agent credentials to providers.
 
 | Route | Purpose |
 | --- | --- |
-| `GET /v1/agent/launchpads` | Configured Long pairings; requires `long:deploy`. |
+| `GET /v1/agent/launchpads` | Configured pairings filtered by `long:deploy` / `stonx:deploy` scopes; read each launchpad's `chainId`. |
 | `GET /v1/agent/themes?minimumTokens=3&windowSeconds=3600` | Theme snapshot/events, optional `cursor`; requires `themes:read`. |
 | `POST /v1/agent/long/ticker` | `{ticker}` checks one symbol; `{tickers:[...]}` selects the first available in order. |
 | `POST /v1/agent/long/artwork-prepare` | Validated image and draft to a content-bound upload capability. |
@@ -237,7 +294,13 @@ intent headers itself and does not forward agent credentials to providers.
 | `POST /v1/agent/long/reserve` | `{id,binding}` records dispatch intent before local signing. |
 | `POST /v1/agent/long/status` | `{id,hash}` verifies the saved launch; `hash` may be null during recovery. |
 
-Launch and artwork routes require `long:deploy` and the credential's wallet.
+The same POST operations are available under `/v1/agent/stonx/`. Long routes
+require `long:deploy`; Stonx routes require `stonx:deploy`. Both use the credential's
+wallet. Artwork and launch preparation payloads use the target chain ID (4663 for
+Long, 8453 for Stonx); `reserve` and `status` use the original saved identifiers.
+The server translates Stonx artwork requests into the existing shared publication
+protocol internally; the published asset capability is not a transaction signature.
+Clients must not rewrite that capability or the returned challenge text.
 The companion SDK supplies exact payloads and checks the returned publication,
 calldata, chain, contract bytecode, nonce, balance, gas and signed transaction.
 It saves the transaction hash before broadcast and relies on the existing
@@ -245,7 +308,7 @@ receipt/event/state verification for confirmation.
 
 For a list request, ticker selection returns `selectedTicker` and `checked`, for
 example `{"selectedTicker":"QVX","checked":[{"ticker":"QVXL","status":"reserved"},{"ticker":"QVX","status":"unreserved"}]}`.
-Only candidates through the selected option are checked. If all are taken, the
+On Long, only candidates through the selected option are checked. If all are taken, the
 API returns HTTP 409 with `tickers_unavailable`; if a check is unavailable, it
 returns 503 (or the applicable rate limit) without skipping that candidate.
 HTTP artwork/launch preparation still uses the single selected ticker in `draft`;

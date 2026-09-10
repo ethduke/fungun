@@ -499,7 +499,7 @@ const stonxConfig = {
   ...config,
   stonxLaunch: {
     assetOrigin: "https://stonx-assets.example",
-    profile: { chainId: 8453, quotes: [{ id: stonxPair, token: { symbol: "NVDA" } }] },
+    profile: { chainId: 8453, quotes: [{ id: stonxPair, symbol: "wtNVDA", token: { symbol: "NVDA" } }] },
   },
 };
 const stonxAgent = {
@@ -530,7 +530,7 @@ test("Stonx scope configuration and discovery expose only permitted launchpads",
   const discovery = await (await request("launchpads")).json();
   assert.equal(discovery.chainId, 4663);
   assert.deepEqual(discovery.launchpads, [
-    { id: "stonx", chainId: 8453, pairs: [{ id: stonxPair, token: { symbol: "NVDA" } }] },
+    { id: "stonx", chainId: 8453, pairs: [{ id: stonxPair, symbol: "wtNVDA", token: { symbol: "NVDA" } }] },
   ]);
   assert.equal((await request("long/ticker", { ticker: "COIN" })).status, 403);
   assert.equal(

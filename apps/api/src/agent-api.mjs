@@ -234,7 +234,7 @@ export function createAgentHandler(
           ].flatMap(([id, chainId, launch]) => {
             const quotes = launch?.profile.quotes.filter((q) => q.id.startsWith(`${id}-`)) ?? [];
             return client.scopes.includes(`${id}:deploy`) && quotes.length
-              ? [{ id, chainId, pairs: quotes.map((q) => ({ id: q.id, token: q.token })) }]
+              ? [{ id, chainId, pairs: quotes.map((q) => ({ id: q.id, token: q.token, ...(q.symbol ? { symbol: q.symbol } : {}) })) }]
               : [];
           }),
         });

@@ -45,3 +45,12 @@ test('Stonx configured profile rejects Long pairs and mixed theme platforms befo
   await assert.rejects(f.agent.tick({ searchLaunchpads: ['stonx'], deployLaunchpads: ['long'] }), /unsupported_launchpad/);
   assert.equal(f.calls.length, 0);
 });
+
+
+test('Stonx requires an explicit fee oracle before any paid artwork or requests', async () => {
+  const f = await fixture();
+  for (const oracle of [undefined, {}, { ...f.baseFeeOracle, codeHash: 'invalid' }, { ...f.baseFeeOracle, address: syntheticAddress(0) }]) {
+    assert.throws(() => new FungunAgent({ ...f.settings, baseFeeOracle: oracle }), /agent_configuration/);
+  }
+  assert.equal(f.calls.length, 0);
+});

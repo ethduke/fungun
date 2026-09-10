@@ -80,16 +80,18 @@ claim requires wallet confirmation; there are no token approvals or fee-rights
 transfers in this flow.
 
 
-## Optional Long agent API
+## Optional Long and Stonx agent API
 
-Configured deployments can expose an authenticated Long-only agent API at the
+Configured deployments can expose authenticated Long (Robinhood 4663) and Stonx
+(Base 8453) agent APIs at the
 operator-provided API origin. It is disabled by default. The companion Node SDK
 can deploy without per-launch prompts after its owner configures access, signing
 and spending limits. Keys stay in the local signer; the API prepares unsigned
 transactions and verifies recovery. The experimental browser preview tools remain
 limited to drafting.
 
-`GET /v1/agent/launchpads` lists configured Long pairings. `GET /v1/agent/themes`
+`GET /v1/agent/launchpads` lists pairings allowed by the credential's
+`long:deploy` and/or `stonx:deploy` scopes; use each launchpad entry's `chainId`. `GET /v1/agent/themes`
 provides exact normalized-name trends, distinct contract counts, threshold-crossing
 events and opaque cursors. Threshold and observation-window settings are configurable;
 freshness must be checked before automatic deployment. The SDK searches Long ticker
@@ -107,3 +109,13 @@ returned as `selectedTicker`, with the checked candidates. Lists allow 1–10 un
 uppercase tickers. Single `{ticker}` requests remain supported. The deployment
 SDK also accepts `tickers` in place of `ticker`, persists the choice, and retries
 remaining candidates only before a transaction could have been signed.
+
+For Stonx, use `/v1/agent/stonx/` for the same ticker, artwork, prepare, reserve and
+status operations, with Base chain ID 8453 in artwork/prepare payloads. Configure
+a reviewed Stonx profile, Base RPC, pinned `baseFeeOracle` and a separate SDK journal.
+Stonx pair IDs are opaque; discover them by wrapped-stock `symbol` (e.g. `wtNVDA`).
+Stonx permits duplicate tickers: list selection uses the first valid option and
+returns `tickerPolicy: "duplicates_allowed"`, without a uniqueness guarantee.
+Base gas limits include execution, L1 data and operator fees. Grok payments remain
+on Robinhood with separate USDG limits. Theme monitoring can target Stonx, but its
+source remains the Robinhood feed; configure both target lists as `["stonx"]`.
