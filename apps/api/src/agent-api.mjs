@@ -62,7 +62,7 @@ export function readAgentConfig(env = process.env) {
           c.wallet.toLowerCase() === zeroAddress ||
           !Array.isArray(c.scopes) ||
           !c.scopes.length ||
-          c.scopes.some((s) => !["long:deploy", "themes:read"].includes(s)),
+          c.scopes.some((s) => !["long:deploy", "stonx:deploy", "themes:read"].includes(s)),
       ) ||
       new Set(clients.map((c) => c.id)).size !== clients.length ||
       new Set(clients.map((c) => c.tokenHash)).size !== clients.length
@@ -120,26 +120,48 @@ export function createAgentHandler(
 ) {
   if (agent.enabled)
     budget.db.exec(
-      "CREATE TABLE IF NOT EXISTS agent_resources (kind TEXT NOT NULL, id TEXT NOT NULL, client TEXT NOT NULL, PRIMARY KEY(kind,id)); CREATE INDEX IF NOT EXISTS agent_resources_client ON agent_resources(client)",
+      "CREATE TABLE IF NOT EXISTS agent_resources (kind TEXT NOT NULL, id TEXT NOT NULL, client TEXT NOT NULL, PRIMARY KEY(kind,id)); CREATE INDEX IF NOT EXISTS agent_resources_client ON agent_resources(client); CREATE TABLE IF NOT EXISTS agent_resource_routes (kind TEXT NOT NULL, id TEXT NOT NULL, launchpad TEXT NOT NULL, chain_id INTEGER NOT NULL, PRIMARY KEY(kind,id))",
     );
   let active = 0;
-  const own = (kind, id, client) => {
+  const own = (kind, id, client, pad) => {
+    // Existing resources predate Stonx and belong to Long on chain 4663.
+    const route = budget.db
+      .prepare("SELECT launchpad, chain_id FROM agent_resource_routes WHERE kind=? AND id=?")
+      .get(kind, id);
+    if (
+      (route?.launchpad ?? "long") !== pad ||
+      (route?.chain_id ?? 4663) !== (pad === "stonx" ? 8453 : 4663)
+    )
+      fail("not_found", 404);
     if (
       budget.db.prepare("SELECT client FROM agent_resources WHERE kind=? AND id=?").get(kind, id)
         ?.client !== client.id
     )
       fail("not_found", 404);
   };
-  const save = (kind, id, client) => {
+  const save = (kind, id, client, pad) => {
     if (
       typeof id !== "string" ||
       !new RegExp(`^[a-f0-9]{${kind === "launch" ? 64 : 48}}$`).test(id)
     )
       fail("unavailable", 503);
-    budget.db
-      .prepare("INSERT OR IGNORE INTO agent_resources VALUES (?,?,?)")
-      .run(kind, id, client.id);
-    own(kind, id, client);
+    if (
+      budget.db.prepare("SELECT client FROM agent_resources WHERE kind=? AND id=?").get(kind, id)
+    ) {
+      own(kind, id, client, pad);
+      return;
+    }
+    budget.db.exec("BEGIN IMMEDIATE");
+    try {
+      budget.db.prepare("INSERT INTO agent_resources VALUES (?,?,?)").run(kind, id, client.id);
+      budget.db
+        .prepare("INSERT INTO agent_resource_routes VALUES (?,?,?,?)")
+        .run(kind, id, pad, pad === "stonx" ? 8453 : 4663);
+      budget.db.exec("COMMIT");
+    } catch (error) {
+      budget.db.exec("ROLLBACK");
+      throw error;
+    }
   };
   return async (request, response) => {
     if (!request.url?.startsWith("/v1/agent/")) return fallback(request, response);
@@ -175,7 +197,14 @@ export function createAgentHandler(
       if (!client) fail("unauthorized", 401);
       const route = new URL(request.url, "http://agent.invalid");
       const themeRoute = route.pathname === "/v1/agent/themes";
-      if (!client.scopes.includes(themeRoute ? "themes:read" : "long:deploy"))
+      const pad = route.pathname.startsWith("/v1/agent/stonx/") ? "stonx" : "long";
+      const chainId = pad === "stonx" ? 8453 : 4663;
+      const discovery = request.url === "/v1/agent/launchpads" && request.method === "GET";
+      if (
+        discovery
+          ? !client.scopes.some((scope) => ["long:deploy", "stonx:deploy"].includes(scope))
+          : !client.scopes.includes(themeRoute ? "themes:read" : `${pad}:deploy`)
+      )
         fail("forbidden", 403);
       budget.debit([
         [`agent:${client.id}:requests`, 60, 60000],
@@ -194,13 +223,20 @@ export function createAgentHandler(
           if (options[key] !== undefined) options[key] = Number(options[key]);
         return send(200, await themes.poll(options));
       }
-      const pairs = config.longLaunch?.profile.quotes.filter((q) => q.id.startsWith("long-")) ?? [];
-      if (request.url === "/v1/agent/launchpads" && request.method === "GET")
+      const live = pad === "stonx" ? config.stonxLaunch : config.longLaunch;
+      const pairs = live?.profile.quotes.filter((q) => q.id.startsWith(`${pad}-`)) ?? [];
+      if (discovery)
         return send(200, {
           chainId: 4663,
-          launchpads: pairs.length
-            ? [{ id: "long", pairs: pairs.map((q) => ({ id: q.id, token: q.token })) }]
-            : [],
+          launchpads: [
+            ["long", 4663, config.longLaunch],
+            ["stonx", 8453, config.stonxLaunch],
+          ].flatMap(([id, chainId, launch]) => {
+            const quotes = launch?.profile.quotes.filter((q) => q.id.startsWith(`${id}-`)) ?? [];
+            return client.scopes.includes(`${id}:deploy`) && quotes.length
+              ? [{ id, chainId, pairs: quotes.map((q) => ({ id: q.id, token: q.token })) }]
+              : [];
+          }),
         });
       if (
         budget.db
@@ -209,7 +245,7 @@ export function createAgentHandler(
         /\/(?:artwork-prepare|prepare)$/.test(request.url)
       )
         fail("agent_storage_limit", 429);
-      const operation = request.url.replace("/v1/agent/long/", "");
+      const operation = request.url.replace(`/v1/agent/${pad}/`, "");
       const artwork = operation.startsWith("artwork-");
       const kind = artwork
         ? {
@@ -223,7 +259,7 @@ export function createAgentHandler(
             reserve: "launch-reserve",
             status: "launch-status",
           }[operation];
-      if (!request.url.startsWith("/v1/agent/long/") || !kind || request.method !== "POST")
+      if (!request.url.startsWith(`/v1/agent/${pad}/`) || !kind || request.method !== "POST")
         fail("not_found", 404);
       if (
         request.headers["content-type"]?.split(";")[0].trim() !== "application/json" ||
@@ -238,7 +274,17 @@ export function createAgentHandler(
       if (kind === "ticker") {
         const validTicker = (ticker) => typeof ticker === "string" && /^[A-Z]{1,11}$/.test(ticker);
         if (exact(input, ["ticker"]) && validTicker(input.ticker))
-          return send(200, await adapters.ticker(4663, input.ticker, ["long"]));
+          return send(
+            200,
+            pad === "stonx"
+              ? {
+                  chainId,
+                  ticker: input.ticker,
+                  results: { stonx: { status: "unreserved" } },
+                  tickerPolicy: "duplicates_allowed",
+                }
+              : await adapters.ticker(4663, input.ticker, ["long"]),
+          );
         if (
           !exact(input, ["tickers"]) ||
           !Array.isArray(input.tickers) ||
@@ -248,6 +294,12 @@ export function createAgentHandler(
           new Set(input.tickers).size !== input.tickers.length
         )
           fail("invalid_request");
+        if (pad === "stonx")
+          return send(200, {
+            selectedTicker: input.tickers[0],
+            checked: [{ ticker: input.tickers[0], status: "unreserved" }],
+            tickerPolicy: "duplicates_allowed",
+          });
         const checked = [];
         for (const ticker of input.tickers) {
           if (controller.signal.aborted || response.destroyed) return;
@@ -267,15 +319,19 @@ export function createAgentHandler(
         }
         fail("tickers_unavailable", 409);
       }
-      if (!config.longLaunch) fail("launch_disabled", 503);
+      if (!live) fail("launch_disabled", 503);
       if (artwork) {
         if (!agent.publicAssetOrigin) fail("agent_asset_configuration", 503);
-        validateAssetInput(kind, input);
+        if (input?.chainId !== chainId) fail("invalid_request");
+        // The shared publication protocol uses 4663 even for Base launches.
+        // Keep the public route bound to its chain; translate only this envelope.
+        const assetInput = { ...input, chainId: 4663 };
+        validateAssetInput(kind, assetInput);
         if (input.wallet.toLowerCase() !== client.wallet || input.draft?.launchpad)
           fail("forbidden", 403);
-        if (kind !== "launch-prepare") own("artwork", input.id, client);
+        if (kind !== "launch-prepare") own("artwork", input.id, client, pad);
         else budget.debit([[`agent:${client.id}:artwork`, 30, 86400000]]);
-        const upstream = await fetcher(`${config.longLaunch.assetOrigin}/v1/asset-${kind}`, {
+        const upstream = await fetcher(`${live.assetOrigin}/v1/asset-${kind}`, {
           method: "POST",
           redirect: "error",
           signal: controller.signal,
@@ -284,7 +340,7 @@ export function createAgentHandler(
             "content-type": "application/json",
             "x-fungun-intent": `asset-${kind}`,
           },
-          body: JSON.stringify(input),
+          body: JSON.stringify(assetInput),
         });
         if (upstream.headers.get("content-type")?.split(";")[0].trim() !== "application/json")
           fail("unavailable", 503);
@@ -306,20 +362,20 @@ export function createAgentHandler(
           )
             fail("invalid_asset_response", 503);
           value.assetOrigin = agent.publicAssetOrigin;
-          save("artwork", value.id, client);
+          save("artwork", value.id, client, pad);
         }
         return send(upstream.status, value);
       }
       const validated = validateLongInput(kind, input);
       if (kind === "launch-prepare") {
-        if (validated.chainId !== 4663 || validated.wallet !== client.wallet)
+        if (validated.chainId !== chainId || validated.wallet !== client.wallet)
           fail("forbidden", 403);
         if (!pairs.some((q) => q.id === validated.pairId)) fail("unsupported_pair");
-        own("artwork", validated.publication.id, client);
+        own("artwork", validated.publication.id, client, pad);
         budget.debit([[`agent:${client.id}:prepare`, 30, 86400000]]);
-      } else own("launch", validated.id, client);
+      } else own("launch", validated.id, client, pad);
       const value = await launches.run(kind, validated);
-      if (kind === "launch-prepare") save("launch", value.id ?? value.recovery?.id, client);
+      if (kind === "launch-prepare") save("launch", value.id ?? value.recovery?.id, client, pad);
       send(200, value);
     } catch (error) {
       const safe = safeError(error);

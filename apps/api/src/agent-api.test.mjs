@@ -493,3 +493,251 @@ test("ordered ticker options preserve underlying budget backoff without skipping
   assert.equal(response.headers.get("retry-after"), "7");
   assert.deepEqual(seen, ["FIRST"]);
 });
+
+const stonxPair = `stonx-${"d".repeat(24)}`;
+const stonxConfig = {
+  ...config,
+  stonxLaunch: {
+    assetOrigin: "https://stonx-assets.example",
+    profile: { chainId: 8453, quotes: [{ id: stonxPair, token: { symbol: "NVDA" } }] },
+  },
+};
+const stonxAgent = {
+  ...agent,
+  clients: agent.clients.map((entry) => ({ ...entry, scopes: [...entry.scopes, "stonx:deploy"] })),
+};
+const stonxArtwork = { chainId: 8453, wallet, draft, imageBase64: "aGk=" };
+const stonxPrepare = {
+  chainId: 8453,
+  wallet,
+  draft,
+  pairId: stonxPair,
+  publication: { id: artwork, imageHash: hash, metadataHash: hash },
+};
+const stonxFixture = (t, options = {}) =>
+  fixture(t, { config: stonxConfig, agent: stonxAgent, ...options });
+
+test("Stonx scope configuration and discovery expose only permitted launchpads", async (t) => {
+  const stonxClient = { ...client, scopes: ["stonx:deploy"] };
+  assert.deepEqual(
+    readAgentConfig({
+      AGENT_API_ENABLED: "true",
+      AGENT_API_CLIENTS_JSON: JSON.stringify([stonxClient]),
+    }).clients,
+    [stonxClient],
+  );
+  const { request } = await stonxFixture(t, { agent: { ...agent, clients: [stonxClient] } });
+  const discovery = await (await request("launchpads")).json();
+  assert.equal(discovery.chainId, 4663);
+  assert.deepEqual(discovery.launchpads, [
+    { id: "stonx", chainId: 8453, pairs: [{ id: stonxPair, token: { symbol: "NVDA" } }] },
+  ]);
+  assert.equal((await request("long/ticker", { ticker: "COIN" })).status, 403);
+  assert.equal(
+    (await request("stonx/ticker", { ticker: "COIN" }, { authorization: "" })).status,
+    401,
+  );
+  const longOnly = await stonxFixture(t, { agent });
+  assert.equal((await longOnly.request("stonx/ticker", { ticker: "COIN" })).status, 403);
+  assert.deepEqual(
+    (await (await longOnly.request("launchpads")).json()).launchpads.map((pad) => [
+      pad.id,
+      pad.chainId,
+    ]),
+    [["long", 4663]],
+  );
+});
+
+test("Stonx ticker policy accepts duplicates on chain without registry reads", async (t) => {
+  const { request } = await stonxFixture(t, {
+    adapters: {
+      ticker: async () => {
+        throw Error("unexpected registry read");
+      },
+    },
+  });
+  assert.deepEqual(await (await request("stonx/ticker", { ticker: "COIN" })).json(), {
+    chainId: 8453,
+    ticker: "COIN",
+    results: { stonx: { status: "unreserved" } },
+    tickerPolicy: "duplicates_allowed",
+  });
+  for (const tickers of [
+    ["FIRST"],
+    ["FIRST", "SECOND"],
+    Array.from({ length: 10 }, (_, n) => String.fromCharCode(65 + n)),
+  ]) {
+    assert.deepEqual(await (await request("stonx/ticker", { tickers })).json(), {
+      selectedTicker: tickers[0],
+      checked: [{ ticker: tickers[0], status: "unreserved" }],
+      tickerPolicy: "duplicates_allowed",
+    });
+  }
+  for (const input of [
+    { tickers: [] },
+    { tickers: "FIRST" },
+    { tickers: ["FIRST", "FIRST"] },
+    { tickers: ["FIRST", "lowercase"] },
+    { tickers: ["FIRST", null] },
+    { tickers: ["FIRST", "TOOLONGTICKER"] },
+    { tickers: ["FIRST", "WITH SPACE"] },
+    { tickers: ["FIRST", "A1"] },
+    { tickers: ["FIRST", ""] },
+    { tickers: Array.from({ length: 11 }, (_, n) => String.fromCharCode(65 + n)) },
+    { ticker: "FIRST", tickers: ["SECOND"] },
+    { tickers: ["FIRST"], chainId: 8453 },
+  ])
+    assert.equal((await request("stonx/ticker", input)).status, 400);
+});
+
+test("Stonx artwork translates the shared protocol and preserves capability payload and optional metadata", async (t) => {
+  const { request, calls } = await stonxFixture(t);
+  const enriched = {
+    ...stonxArtwork,
+    draft: { ...draft, website: "https://coin.example", twitter: "https://x.com/coin" },
+  };
+  assert.equal((await request("stonx/artwork-prepare", enriched)).status, 200);
+  assert.equal(calls[0][0], "https://stonx-assets.example/v1/asset-launch-prepare");
+  assert.deepEqual(calls[0][1], { ...enriched, chainId: 4663 });
+  assert.equal(calls[0][2].headers["x-fungun-intent"], "asset-launch-prepare");
+  assert.equal(calls[0][2].headers.authorization, undefined);
+  const publish = { ...enriched, id: artwork, uploadToken: "EXAMPLE_UPLOAD_CAPABILITY" };
+  assert.equal((await request("stonx/artwork-publish", publish)).status, 200);
+  assert.deepEqual(calls[1][1], { ...publish, chainId: 4663 });
+  assert.equal(
+    (await request("stonx/prepare", { ...stonxPrepare, draft: enriched.draft })).status,
+    200,
+  );
+  assert.deepEqual(calls[2], ["launch-prepare", { ...stonxPrepare, draft: enriched.draft }]);
+  assert.equal((await request("stonx/reserve", { id: launch, binding: hash })).status, 200);
+  assert.equal((await request("stonx/status", { id: launch, hash: null })).status, 200);
+});
+
+test("Stonx client and route ownership rejects cross-launchpad launch and artwork capabilities", async (t) => {
+  for (const originalPad of ["long", "stonx"]) {
+    const { request, calls } = await stonxFixture(t);
+    const sourceChain = originalPad === "long" ? 4663 : 8453;
+    const otherPad = originalPad === "long" ? "stonx" : "long";
+    const otherChain = sourceChain === 4663 ? 8453 : 4663;
+    const sourceArtwork = { ...stonxArtwork, chainId: sourceChain };
+    const sourcePrepare = {
+      ...stonxPrepare,
+      chainId: sourceChain,
+      pairId: originalPad === "long" ? "long-NVDA" : stonxPair,
+    };
+    assert.equal((await request(`${originalPad}/artwork-prepare`, sourceArtwork)).status, 200);
+    assert.equal((await request(`${originalPad}/prepare`, sourcePrepare)).status, 200);
+    const before = calls.length;
+    for (const [pad, chainId, headers] of [
+      [otherPad, otherChain, {}],
+      [originalPad, sourceChain, { authorization: bearer(token + "2") }],
+    ]) {
+      assert.equal(
+        (await request(`${pad}/reserve`, { id: launch, binding: hash }, headers)).status,
+        404,
+      );
+      assert.equal(
+        (await request(`${pad}/status`, { id: launch, hash: null }, headers)).status,
+        404,
+      );
+      assert.equal(
+        (
+          await request(
+            `${pad}/artwork-status`,
+            { chainId, wallet, id: artwork, imageHash: hash, metadataHash: hash },
+            headers,
+          )
+        ).status,
+        404,
+      );
+      assert.equal(
+        (
+          await request(
+            `${pad}/artwork-publish`,
+            { ...sourceArtwork, chainId, id: artwork, uploadToken: "EXAMPLE_UPLOAD_CAPABILITY" },
+            headers,
+          )
+        ).status,
+        404,
+      );
+      assert.equal(
+        (
+          await request(
+            `${pad}/prepare`,
+            { ...sourcePrepare, chainId, pairId: pad === "long" ? "long-NVDA" : stonxPair },
+            headers,
+          )
+        ).status,
+        404,
+      );
+    }
+    assert.equal(calls.length, before);
+    // Even a repeated prepare returning the same content id cannot claim it across routes.
+    assert.equal(
+      (await request(`${otherPad}/artwork-prepare`, { ...sourceArtwork, chainId: otherChain }))
+        .status,
+      404,
+    );
+  }
+});
+
+test("Stonx rejects wrong chain, wallet, launchpad and unsupported pairs before upstream work", async (t) => {
+  const { request, calls } = await stonxFixture(t);
+  for (const chainId of [4663, 1, "8453", null]) {
+    assert.equal(
+      (await request("stonx/artwork-prepare", { ...stonxArtwork, chainId })).status,
+      400,
+    );
+    assert.notEqual((await request("stonx/prepare", { ...stonxPrepare, chainId })).status, 200);
+  }
+  assert.equal(
+    (await request("stonx/artwork-prepare", { ...stonxArtwork, wallet: "0x" + "2".repeat(40) }))
+      .status,
+    403,
+  );
+  assert.equal(
+    (
+      await request("stonx/artwork-prepare", {
+        ...stonxArtwork,
+        draft: { ...draft, launchpad: "longbow" },
+      })
+    ).status,
+    403,
+  );
+  for (const pairId of [`stonks-${"d".repeat(24)}`, "native", `stonx-${"e".repeat(24)}`])
+    assert.equal((await request("stonx/prepare", { ...stonxPrepare, pairId })).status, 400);
+  assert.equal(
+    (await request("stonx/prepare", { ...stonxPrepare, editableMetadata: true })).status,
+    400,
+  );
+  assert.equal(calls.length, 0);
+});
+
+test("Stonx launch flags, asset configuration, failures and limits fail safely", async (t) => {
+  const disabled = await stonxFixture(t, { config });
+  assert.deepEqual(await (await disabled.request("stonx/artwork-prepare", stonxArtwork)).json(), {
+    error: "launch_disabled",
+  });
+  const noOrigin = await stonxFixture(t, {
+    agent: { ...stonxAgent, publicAssetOrigin: undefined },
+  });
+  assert.deepEqual(await (await noOrigin.request("stonx/artwork-prepare", stonxArtwork)).json(), {
+    error: "agent_asset_configuration",
+  });
+  const failed = await stonxFixture(t, {
+    fetcher: async () => {
+      throw new Error("EXAMPLE_PRIVATE_PROVIDER_DETAIL");
+    },
+  });
+  assert.deepEqual(await (await failed.request("stonx/artwork-prepare", stonxArtwork)).json(), {
+    error: "unavailable",
+  });
+  assert.equal(
+    failed.budget.db.prepare("SELECT count(*) AS count FROM agent_resources").get().count,
+    0,
+  );
+  const limited = await stonxFixture(t);
+  limited.budget.debit([["agent:test:artwork", 30, 86400000]], 30);
+  assert.equal((await limited.request("stonx/artwork-prepare", stonxArtwork)).status, 429);
+  assert.equal(limited.calls.length, 0);
+});
