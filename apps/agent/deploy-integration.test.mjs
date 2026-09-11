@@ -18,6 +18,7 @@ import {
 import { generatePrivateKey, privateKeyToAccount } from "viem/accounts";
 import { FungunAgent } from "./index.mjs";
 import { stonxFixture } from "./stonx-fixture.mjs";
+import { o1Fixture } from "./o1-fixture.mjs";
 import { Budget } from "../api/src/budget.mjs";
 import { ServiceError } from "../api/src/errors.mjs";
 import { createAgentHandler } from "../api/src/agent-api.mjs";
@@ -52,11 +53,13 @@ const profile = {
 
 async function fixture(t, { loseBroadcast = false, losePublication = false,
   tickers, taken = [], raceTicker, grok = false, loseTickerLookup = false,
-  stonxMode = false, wrongChain = false } = {}) {
-  const stonx = stonxMode ? stonxFixture() : null;
-  const effectiveProfile = stonx?.profile ?? profile;
-  const chainId = stonxMode ? 8453 : 4663;
-  const launchpad = stonxMode ? "stonx" : "long";
+  stonxMode = false, platform = stonxMode ? "stonx" : "long", targetChain = platform === "stonx" ? 8453 : 4663,
+  wrongChain = false } = {}) {
+  const independent = platform === "stonx" ? stonxFixture()
+    : platform === "o1" ? o1Fixture(targetChain) : null;
+  const effectiveProfile = independent?.profile ?? profile;
+  const chainId = targetChain;
+  const launchpad = platform === "o1" && chainId === 8453 ? "o1-base" : platform;
   const paths = [];
   const root = realpathSync(mkdtempSync(join(tmpdir(), "agent-deploy-integration-")));
   initializeIpfsStore(root);
@@ -140,10 +143,14 @@ async function fixture(t, { loseBroadcast = false, losePublication = false,
         assert.equal(metadata.symbol, input.draft.ticker);
         assert.equal(metadata.website, input.draft.website);
         assert.equal(metadata.twitter, input.draft.twitter);
-        if (stonx) {
-          assert.equal(input.chainId, 8453);
-          plan = stonx.planFor(input, publication);
-          stonx.changes.create = [plan.predictedAsset, plan.predictedAsset, zeroAddress, zeroAddress, zeroAddress];
+        if (independent) {
+          assert.equal(input.chainId, chainId);
+          assert.equal(input.pairId, independent.input.pairId);
+          if (platform === "longbow") assert.equal(input.draft.launchpad, "longbow");
+          if (platform === "o1") assert.equal(input.editableMetadata, false);
+          if (platform === "pons") assert.equal(metadata.image_hash, metadata.image);
+          plan = independent.planFor(input, publication);
+          if (platform === "stonx") independent.changes.create = [plan.predictedAsset, plan.predictedAsset, zeroAddress, zeroAddress, zeroAddress];
           return plan;
         }
         const intentId = "00000000-0000-4000-8000-000000000001";
@@ -193,7 +200,8 @@ async function fixture(t, { loseBroadcast = false, losePublication = false,
       return { status: "confirmed", id: plan.id, hash: submittedHash, asset: plan.predictedAsset };
     },
   };
-  const config = { origin, [stonxMode ? "stonxLaunch" : "longLaunch"]: { assetOrigin, profile: effectiveProfile } };
+  const launchConfig = platform === "o1" && chainId === 8453 ? "o1BaseLaunch" : `${platform}Launch`;
+  const config = { origin, [launchConfig]: { assetOrigin, profile: effectiveProfile } };
   const server = createServer(
     createAgentHandler(
       {
@@ -206,7 +214,7 @@ async function fixture(t, { loseBroadcast = false, losePublication = false,
             tickerLookupLost = true;
             throw new ServiceError("unavailable", 503);
           }
-          return { results: { long: { status: taken.includes(ticker) ? "reserved" : "unreserved" } } };
+          return { results: { [platform === "longbow" ? "long" : platform]: { status: taken.includes(ticker) ? "reserved" : "unreserved" } } };
         } },
         fetcher: assetFetcher,
         agent: {
@@ -216,7 +224,7 @@ async function fixture(t, { loseBroadcast = false, losePublication = false,
             {
               id: "integration",
               wallet: account.address.toLowerCase(),
-              scopes: [`${launchpad}:deploy`],
+              scopes: [`${platform}:deploy`],
               tokenHash: createHash("sha256").update(token).digest("hex"),
             },
           ],
@@ -265,7 +273,7 @@ async function fixture(t, { loseBroadcast = false, losePublication = false,
         return submittedHash;
       }
       if (wrongChain && method === "eth_chainId") return toHex(chainId === 8453 ? 4663 : 8453);
-      if (stonx) return stonx.rpc.request({ method, params });
+      if (independent) return independent.rpc.request({ method, params });
       const responses = {
         eth_chainId: "0x1237",
         eth_getCode: "0x6001",
@@ -287,7 +295,7 @@ async function fixture(t, { loseBroadcast = false, losePublication = false,
     signer,
     rpc,
     profile: effectiveProfile,
-    ...(stonx ? { baseFeeOracle: stonx.baseFeeOracle } : {}),
+    ...(independent?.baseFeeOracle ? { baseFeeOracle: independent.baseFeeOracle } : {}),
     fetcher: (url, options) => {
       paths.push(new URL(url).pathname);
       return fetch(url, options);
@@ -302,7 +310,8 @@ async function fixture(t, { loseBroadcast = false, losePublication = false,
     description: "A test coin",
     website: "https://example.com",
     twitter: "https://x.com/example",
-    pairId: effectiveProfile.quotes[0].id,
+    pairId: independent?.input.pairId ?? effectiveProfile.quotes[0].id,
+    ...(platform === "o1" ? { editableMetadata: false } : {}),
     image: image.toString("base64"),
   };
   return {
@@ -489,3 +498,39 @@ test("Stonx wrong-chain RPC fails before reservation or signing", async t => {
   assert.equal(f.counts.sign, 0);
   assert.equal(f.counts.broadcast, 0);
 });
+
+for (const [platform, targetChain] of [["o1", 4663], ["o1", 8453]]) {
+  const route = platform === "o1" && targetChain === 8453 ? "o1-base" : platform;
+  test(`${platform} chain ${targetChain} deploy traverses authenticated HTTP, IPFS and signing once`, async t => {
+    const f = await fixture(t, { platform, targetChain, tickers: ["QVXL", "LATER"] });
+    const result = await f.deploy();
+    assert.equal(result.status, "confirmed");
+    assert.equal(result.asset, f.expected());
+    assert.equal(result.selectedTicker, "QVXL");
+    assert.deepEqual(f.counts, { sign: 1, broadcast: 1, publish: 1, pin: 2, reserve: 1, prepare: 1, status: 1 });
+    assert.ok(f.paths.includes(`/v1/agent/${route}/ticker`));
+    assert.ok(f.paths.every(path => path.startsWith(`/v1/agent/${route}/`)));
+    assert.deepEqual(f.checkedTickers, platform === "longbow" ? ["QVXL"] : []);
+    f.restart();
+    assert.deepEqual(await f.deploy(), result);
+    assert.deepEqual(await f.resume(), []);
+    assert.equal(f.counts.sign, 1);
+    assert.equal(f.counts.broadcast, 1);
+    f.assertNoSignedBytes();
+  });
+  test(`${platform} chain ${targetChain} recovers lost broadcast without re-signing`, async t => {
+    const f = await fixture(t, { platform, targetChain, loseBroadcast: true, tickers: ["QVXL", "LATER"] });
+    await assert.rejects(f.deploy(), /agent_failed/);
+    f.restart();
+    const [result] = await f.resume();
+    assert.equal(result.status, "confirmed");
+    assert.equal(result.asset, f.expected());
+    assert.equal(result.selectedTicker, "QVXL");
+    assert.deepEqual(await f.deploy(), result);
+    assert.equal(f.counts.sign, 1);
+    assert.equal(f.counts.broadcast, 1);
+    assert.equal(f.counts.reserve, 1);
+    assert.equal(f.counts.publish, 1);
+    f.assertNoSignedBytes();
+  });
+}

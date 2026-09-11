@@ -21,16 +21,16 @@ const addr = n => toHex(n, { size: 20 }), hash = n => toHex(n, { size: 32 });
 const b20 = tail => `0xb2${'00'.repeat(10)}${tail}`;
 const stockAddress = b20('000000000000000001');
 const contract = n => ({ address: addr(n), codeHash: keccak256('0x01') });
-async function fixture(t, stock = false) {
+async function fixture(t, stock = false, links = {}) {
   const db = new DatabaseSync(':memory:'); t.after(() => db.close());
   const now = 1800000000000, pool = hash(50), blockHash = hash(51), txHash = hash(52);
   const quote = stock ? { id: catalogPairId(8453, stockAddress), decimals: 8, token: { address: stockAddress } }
     : { id: 'native', decimals: 18, token: null };
   const profile = { chainId: 8453, launchpad: 'o1', launcher: contract(1), launchTokenValidator: contract(2),
     hook: contract(3), feeEscrow: contract(4), announcementRegistry: contract(5), quotes: [quote] };
-  const draft = { name: 'Sample', ticker: 'SAMPLE', description: 'Synthetic Base test' };
+  const draft = { name: 'Sample', ticker: 'SAMPLE', description: 'Synthetic Base test', ...links };
   const imageCid = await ipfsContentId(Buffer.from('synthetic')), imageUri = `ipfs://${imageCid}`;
-  const bytes = Buffer.from(JSON.stringify({ name: draft.name, symbol: draft.ticker, description: draft.description, image: imageUri, image_hash: imageUri }));
+  const bytes = Buffer.from(JSON.stringify({ name: draft.name, symbol: draft.ticker, description: draft.description, image: imageUri, image_hash: imageUri, ...links }));
   const publication = { id: 'a'.repeat(48), imageHash: 'b'.repeat(64), metadataHash: createHash('sha256').update(bytes).digest('hex') };
   const published = { ...publication, status: 'published', ipfs: { imageCid, metadataCid: await ipfsContentId(bytes) } };
   const input = { chainId: 8453, wallet: addr(1001), pairId: quote.id, draft, publication, editableMetadata: true };
@@ -187,4 +187,11 @@ void test('Base funding guidance includes L1 and operator fees when low balance 
     assert.deepEqual(error.funding, { chainId: 8453, balanceWei: '0', requiredWei: '1008000000001400', shortfallWei: '1008000000001400', basis: 'gas-limit' });
     return true;
   });
+});
+
+test('O1 binds shared publication with optional socials', async t => {
+  const links = { website: 'https://sample.example.invalid', twitter: 'https://x.com/sample_example' };
+  const f = await fixture(t, false, links), plan = await f.live.prepare(f.input);
+  assert.equal(plan.buildInput.draft.website, links.website);
+  assert.equal(plan.buildInput.draft.twitter, links.twitter);
 });

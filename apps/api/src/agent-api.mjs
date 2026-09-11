@@ -5,6 +5,16 @@ import { validateLongInput } from "./long-live.mjs";
 import { validateAssetInput } from "./asset-service.mjs";
 import { IMAGE_BYTE_LIMIT } from "./launch-image.mjs";
 
+// Route names bind resources to one launchpad and chain, including O1's two networks.
+const targets = {
+  long: { chainId: 4663, config: "longLaunch", scope: "long:deploy", registry: true, pair: id => id.startsWith("long-") },
+  stonx: { chainId: 8453, config: "stonxLaunch", scope: "stonx:deploy", pair: id => /^stonx-[a-f0-9]{24}$/.test(id) },
+  o1: { chainId: 4663, config: "o1Launch", scope: "o1:deploy", pair: id => /^(native|rwa-[a-f0-9]{24}|crypto-USDG)$/.test(id) },
+  "o1-base": { chainId: 8453, config: "o1BaseLaunch", scope: "o1:deploy", pair: id => /^(native|rwa-[a-f0-9]{24})$/.test(id) },
+};
+const deployScopes = [...new Set(Object.values(targets).map(t => t.scope))];
+const targetPairs = (target, live) => live?.profile.quotes?.filter(q => target.pair(q.id)) ?? [];
+
 // Only contractually public asset error codes may cross the service boundary.
 const assetErrors = new Set([
   "unavailable",
@@ -62,7 +72,7 @@ export function readAgentConfig(env = process.env) {
           c.wallet.toLowerCase() === zeroAddress ||
           !Array.isArray(c.scopes) ||
           !c.scopes.length ||
-          c.scopes.some((s) => !["long:deploy", "stonx:deploy", "themes:read"].includes(s)),
+          c.scopes.some((s) => ![...deployScopes, "themes:read"].includes(s)),
       ) ||
       new Set(clients.map((c) => c.id)).size !== clients.length ||
       new Set(clients.map((c) => c.tokenHash)).size !== clients.length
@@ -130,7 +140,7 @@ export function createAgentHandler(
       .get(kind, id);
     if (
       (route?.launchpad ?? "long") !== pad ||
-      (route?.chain_id ?? 4663) !== (pad === "stonx" ? 8453 : 4663)
+      (route?.chain_id ?? 4663) !== targets[pad].chainId
     )
       fail("not_found", 404);
     if (
@@ -156,7 +166,7 @@ export function createAgentHandler(
       budget.db.prepare("INSERT INTO agent_resources VALUES (?,?,?)").run(kind, id, client.id);
       budget.db
         .prepare("INSERT INTO agent_resource_routes VALUES (?,?,?,?)")
-        .run(kind, id, pad, pad === "stonx" ? 8453 : 4663);
+        .run(kind, id, pad, targets[pad].chainId);
       budget.db.exec("COMMIT");
     } catch (error) {
       budget.db.exec("ROLLBACK");
@@ -197,13 +207,14 @@ export function createAgentHandler(
       if (!client) fail("unauthorized", 401);
       const route = new URL(request.url, "http://agent.invalid");
       const themeRoute = route.pathname === "/v1/agent/themes";
-      const pad = route.pathname.startsWith("/v1/agent/stonx/") ? "stonx" : "long";
-      const chainId = pad === "stonx" ? 8453 : 4663;
+      const pad = route.pathname.split("/")[3];
+      const target = targets[pad];
+      const chainId = target?.chainId;
       const discovery = request.url === "/v1/agent/launchpads" && request.method === "GET";
       if (
         discovery
-          ? !client.scopes.some((scope) => ["long:deploy", "stonx:deploy"].includes(scope))
-          : !client.scopes.includes(themeRoute ? "themes:read" : `${pad}:deploy`)
+          ? !client.scopes.some((scope) => deployScopes.includes(scope))
+          : !client.scopes.includes(themeRoute ? "themes:read" : target?.scope)
       )
         fail("forbidden", 403);
       budget.debit([
@@ -223,18 +234,15 @@ export function createAgentHandler(
           if (options[key] !== undefined) options[key] = Number(options[key]);
         return send(200, await themes.poll(options));
       }
-      const live = pad === "stonx" ? config.stonxLaunch : config.longLaunch;
-      const pairs = live?.profile.quotes.filter((q) => q.id.startsWith(`${pad}-`)) ?? [];
+      const live = target && config[target.config];
+      const pairs = target ? targetPairs(target, live) : [];
       if (discovery)
         return send(200, {
           chainId: 4663,
-          launchpads: [
-            ["long", 4663, config.longLaunch],
-            ["stonx", 8453, config.stonxLaunch],
-          ].flatMap(([id, chainId, launch]) => {
-            const quotes = launch?.profile.quotes.filter((q) => q.id.startsWith(`${id}-`)) ?? [];
-            return client.scopes.includes(`${id}:deploy`) && quotes.length
-              ? [{ id, chainId, pairs: quotes.map((q) => ({ id: q.id, token: q.token, ...(q.symbol ? { symbol: q.symbol } : {}) })) }]
+          launchpads: Object.entries(targets).flatMap(([id, entry]) => {
+            const quotes = targetPairs(entry, config[entry.config]);
+            return client.scopes.includes(entry.scope) && quotes.length
+              ? [{ id, chainId: entry.chainId, pairs: quotes.map((q) => ({ id: q.id, token: q.token, ...(q.symbol ? { symbol: q.symbol } : {}) })) }]
               : [];
           }),
         });
@@ -273,18 +281,14 @@ export function createAgentHandler(
       if (controller.signal.aborted) return;
       if (kind === "ticker") {
         const validTicker = (ticker) => typeof ticker === "string" && /^[A-Z]{1,11}$/.test(ticker);
-        if (exact(input, ["ticker"]) && validTicker(input.ticker))
-          return send(
-            200,
-            pad === "stonx"
-              ? {
-                  chainId,
-                  ticker: input.ticker,
-                  results: { stonx: { status: "unreserved" } },
-                  tickerPolicy: "duplicates_allowed",
-                }
-              : await adapters.ticker(4663, input.ticker, ["long"]),
-          );
+        if (exact(input, ["ticker"]) && validTicker(input.ticker)) {
+          if (!target.registry) return send(200, {
+            chainId, ticker: input.ticker, results: { [pad]: { status: "unreserved" } },
+            tickerPolicy: "duplicates_allowed",
+          });
+          const result = await adapters.ticker(4663, input.ticker, ["long"]);
+          return send(200, pad === "long" ? result : { ...result, results: { [pad]: result.results?.long } });
+        }
         if (
           !exact(input, ["tickers"]) ||
           !Array.isArray(input.tickers) ||
@@ -294,7 +298,7 @@ export function createAgentHandler(
           new Set(input.tickers).size !== input.tickers.length
         )
           fail("invalid_request");
-        if (pad === "stonx")
+        if (!target.registry)
           return send(200, {
             selectedTicker: input.tickers[0],
             checked: [{ ticker: input.tickers[0], status: "unreserved" }],
@@ -327,7 +331,7 @@ export function createAgentHandler(
         // Keep the public route bound to its chain; translate only this envelope.
         const assetInput = { ...input, chainId: 4663 };
         validateAssetInput(kind, assetInput);
-        if (input.wallet.toLowerCase() !== client.wallet || input.draft?.launchpad)
+        if (input.wallet.toLowerCase() !== client.wallet || (input.draft && Boolean(input.draft.launchpad)))
           fail("forbidden", 403);
         if (kind !== "launch-prepare") own("artwork", input.id, client, pad);
         else budget.debit([[`agent:${client.id}:artwork`, 30, 86400000]]);

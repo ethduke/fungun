@@ -105,7 +105,9 @@ export class O1Live extends BaseLaunchLive {
     if (!prior && this.db.prepare('SELECT COUNT(*) AS n FROM long_launches').get().n >= 4096) fail('launch_history_full');
     const publication = await this.metadata(input), imageUri = ipfsUri(publication.ipfs.imageCid);
     const metadata = Buffer.from(JSON.stringify({ name: input.draft.name, symbol: input.draft.ticker,
-      description: input.draft.description, image: imageUri, image_hash: imageUri }));
+      description: input.draft.description, image: imageUri, image_hash: imageUri,
+      ...(input.draft.website !== undefined ? { website: input.draft.website } : {}),
+      ...(input.draft.twitter !== undefined ? { twitter: input.draft.twitter } : {}) }));
     if (createHash('sha256').update(metadata).digest('hex') !== input.publication.metadataHash
       || await ipfsContentId(metadata) !== publication.ipfs.metadataCid) fail('launch_assets_unverified');
     const pinned = await this.o1Metadata.prepare(key, input, publication, quote.token?.address ?? zeroAddress);

@@ -8,6 +8,19 @@ import {
   validateAssetPreview,
   validatePublishedAsset,
 } from "../web/lib/asset-protocol.ts";
+function agentTarget(profile) {
+  const platform = profile.launchpad ?? "long";
+  const chainId = platform === "stonx" ? 8453 : platform === "o1" ? profile.chainId : 4663;
+  if (!["long", "stonx", "o1"].includes(platform) || ![4663, 8453].includes(chainId) ||
+      (profile.chainId !== undefined && profile.chainId !== chainId)) throw new Error("agent_configuration");
+  return { platform, chainId, route: platform === "o1" && chainId === 8453 ? "o1-base" : platform,
+    registry: platform === "long" };
+}
+function supportsPair(platform, chainId, pair) {
+  if (typeof pair !== "string") return false;
+  if (platform === "o1") return /^(native|rwa-[a-f0-9]{24})$/.test(pair) || (chainId === 4663 && pair === "crypto-USDG");
+  return platform === "stonx" ? /^stonx-[a-f0-9]{24}$/.test(pair) : pair.startsWith("long-");
+}
 const neutral =
   "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=";
 const terminal = (r) => ["confirmed", "failed", "skipped"].includes(r.state);
@@ -78,7 +91,8 @@ export function launchIdentity(
       : {}),
   };
   return { draft, pairId: input.pairId, image: selectedImage, themeKey,
-    ...(tickers ? { tickers } : {}) };
+    ...(tickers ? { tickers } : {}),
+    ...(input.editableMetadata !== undefined ? { editableMetadata: input.editableMetadata } : {}) };
 }
 export class FungunAgent {
   constructor({
@@ -114,6 +128,7 @@ export class FungunAgent {
     )
       throw new Error("agent_configuration");
     Object.assign(this, { token, signer, rpc, profile, baseFeeOracle, imageGenerator, fetcher });
+    Object.assign(this, agentTarget(profile));
     this.journal = new Journal(
       journalPath,
       createHash("sha256")
@@ -123,18 +138,16 @@ export class FungunAgent {
             apiOrigin: this.url.origin,
             appOrigin: this.appOrigin,
             profile,
-            ...(profile.launchpad === "stonx" ? { baseFeeOracle } : {}),
+            ...(this.chainId === 8453 ? { baseFeeOracle } : {}),
           }),
         )
         .digest("hex"),
     );
-    this.platform = profile.launchpad === "stonx" ? "stonx" : "long";
-    this.chainId = this.platform === "stonx" ? 8453 : 4663;
-    if (this.platform === "stonx" && (profile.chainId !== 8453 || !baseFeeOracle ||
+    if (this.chainId === 8453 && (profile.chainId !== 8453 || !baseFeeOracle ||
       Object.keys(baseFeeOracle).sort().join(",") !== "address,codeHash" ||
       !isAddress(baseFeeOracle.address) || baseFeeOracle.address.toLowerCase() === zeroAddress ||
       !/^0x[a-f0-9]{64}$/i.test(baseFeeOracle.codeHash))) throw new Error("agent_configuration");
-    this.limits = { ...defaultLimits, ...(this.platform === "stonx" ? { maxGas: "8000000" } : {}), ...limits };
+    this.limits = { ...defaultLimits, ...(!this.registry ? { maxGas: "8000000" } : {}), ...limits };
     if (!Number.isSafeInteger(this.limits.maxLaunchesPerDay) || this.limits.maxLaunchesPerDay < 1)
       throw new Error("invalid_limits");
     for (const k of ["maxSpendWeiPerDay", "maxTransactionWei", "maxGas", "maxGasPriceWei"])
@@ -190,9 +203,9 @@ export class FungunAgent {
   }
   async selectTicker(tickers) {
     readTickerOptions({ tickers });
-    const result = await this.request(`${this.platform}/ticker`, { tickers });
+    const result = await this.request(`${this.route}/ticker`, { tickers });
     const index = tickers.indexOf(result?.selectedTicker);
-    if (this.platform === "stonx" && (index !== 0 || result.tickerPolicy !== "duplicates_allowed"))
+    if (!this.registry && (index !== 0 || result.tickerPolicy !== "duplicates_allowed"))
       throw new Error("ticker_selection_invalid");
     if (index < 0 || !Array.isArray(result.checked) || result.checked.length !== index + 1 ||
         result.checked.some((row, i) => row?.ticker !== tickers[i] ||
@@ -242,6 +255,7 @@ export class FungunAgent {
       ["__proto__", "constructor", "prototype"].includes(intentKey)
     )
       throw new Error("invalid_input");
+    if (input.editableMetadata !== undefined && (this.platform !== "o1" || typeof input.editableMetadata !== "boolean")) throw new Error("invalid_input");
     const identity = launchIdentity(input, image, themeKey);
     const digest = createHash("sha256").update(canonicalJson(identity)).digest("hex");
     let r = j.data.intents[intentKey];
@@ -258,7 +272,7 @@ export class FungunAgent {
         BigInt(this.limits.maxSpendWeiPerDay)
       )
         throw new Error("daily_spend_limit");
-      if (this.platform === "stonx" ? !/^stonx-[a-f0-9]{24}$/.test(input.pairId ?? "") : !input.pairId?.startsWith("long-")) throw new Error("unsupported_launchpad");
+      if (!supportsPair(this.platform, this.chainId, input.pairId)) throw new Error("unsupported_launchpad");
       const draft = { ...identity.draft };
       if (identity.tickers) draft.ticker = await this.selectTicker(identity.tickers);
       r = {
@@ -270,6 +284,7 @@ export class FungunAgent {
         state: "intent",
         draft,
         pairId: input.pairId,
+        ...(this.platform === "o1" ? { editableMetadata: input.editableMetadata ?? false } : {}),
         image: identity.image,
         providedImage: identity.image.base64,
         ...(identity.tickers ? { tickerOptions: identity.tickers } : {}),
@@ -283,7 +298,7 @@ export class FungunAgent {
     try {
       return await this.advanceIntent(j, r);
     } catch (error) {
-      if (this.platform === "long" && !r.plan && !r.hash && r.publication && r.tickerOptions &&
+      if (this.registry && !r.plan && !r.hash && r.publication && r.tickerOptions &&
           ["publishing", "published"].includes(r.state) && error.message === "ticker_reserved") {
         r.state = "ticker_retry";
         await j.save();
@@ -334,7 +349,7 @@ export class FungunAgent {
     }
     if (r.plan) {
       // Even a retryable response cannot authorize another signature after uncertainty.
-      const result = await this.request(`${this.platform}/status`, { id: r.plan.id, hash: r.hash ?? null });
+      const result = await this.request(`${this.route}/status`, { id: r.plan.id, hash: r.hash ?? null });
       r.result = result;
       if (["confirmed", "failed"].includes(result.status)) r.state = result.status;
       if (r.state === "reserving" && !r.hash && result.status === "retryable") {
@@ -369,7 +384,7 @@ export class FungunAgent {
     }
     if (!r.approval) {
       const startedAt = performance.now();
-      const raw = await this.request(`${this.platform}/artwork-prepare`, {
+      const raw = await this.request(`${this.route}/artwork-prepare`, {
         ...base,
         imageBase64: r.imageBase64,
       });
@@ -385,7 +400,7 @@ export class FungunAgent {
     const a = r.approval;
     if (!r.publication) {
       if (r.state === "publishing") {
-        const status = await this.request(`${this.platform}/artwork-status`, {
+        const status = await this.request(`${this.route}/artwork-status`, {
           chainId: this.chainId,
           wallet: this.signer.address,
           id: a.id,
@@ -405,7 +420,7 @@ export class FungunAgent {
           return { status: "artwork_retry" };
         } else if (status?.status === "pending" && status.id === a.id) {
           // Same ID/token publication is idempotent, including a crash before its first POST.
-          const published = await this.request(`${this.platform}/artwork-publish`, {
+          const published = await this.request(`${this.route}/artwork-publish`, {
             ...base,
             id: a.id,
             uploadToken: a.uploadToken,
@@ -417,7 +432,7 @@ export class FungunAgent {
       } else {
         r.state = "publishing";
         await j.save();
-        const status = await this.request(`${this.platform}/artwork-publish`, {
+        const status = await this.request(`${this.route}/artwork-publish`, {
           ...base,
           id: a.id,
           uploadToken: a.uploadToken,
@@ -439,9 +454,10 @@ export class FungunAgent {
     const input = {
       ...base,
       pairId: r.pairId,
+      ...(this.platform === "o1" ? { editableMetadata: r.editableMetadata ?? false } : {}),
       publication: { id: a.id, imageHash: a.imageHash, metadataHash: a.metadataHash },
     };
-    const p = await this.request(`${this.platform}/prepare`, input);
+    const p = await this.request(`${this.route}/prepare`, input);
     if (p.recovery) {
       r.plan = p.recovery;
       r.state = "uncertain";
@@ -453,7 +469,7 @@ export class FungunAgent {
     r.plan = { id: p.id, binding: p.binding };
     r.state = "reserving";
     await j.save();
-    await this.request(`${this.platform}/reserve`, r.plan);
+    await this.request(`${this.route}/reserve`, r.plan);
     // Before this marker no signer has been invoked: expired reservations can refresh safely.
     if (Date.now() >= p.expiresAt) throw new Error("quote_expired");
     if (r.day !== new Date().toISOString().slice(0, 10)) throw new Error("quote_expired");
@@ -544,8 +560,8 @@ export class FungunAgent {
           const tried = new Set(previous.map((r) => r.draft?.ticker));
           for (const ticker of tickerCandidates(theme)) {
             if (tried.has(ticker)) continue;
-            const status = await this.request(`${this.platform}/ticker`, { ticker });
-            if (status.results?.[this.platform]?.status !== "unreserved" || (this.platform === "stonx" && status.tickerPolicy !== "duplicates_allowed")) continue;
+            const status = await this.request(`${this.route}/ticker`, { ticker });
+            if (status.results?.[this.route]?.status !== "unreserved" || (!this.registry && status.tickerPolicy !== "duplicates_allowed")) continue;
             const attempt = Object.values(j.data.intents).filter((r) => r.themeKey === key).length;
             const intentKey = createHash("sha256").update(`${this.platform}:${key}:${attempt}`).digest("hex");
             const cleanName = String(theme.name ?? ticker)

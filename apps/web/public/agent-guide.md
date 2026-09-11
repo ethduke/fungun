@@ -278,3 +278,28 @@ The SDK checks Base contract and proxy state, rebuilds calldata, and includes
 execution, L1 data and operator fees in spending limits before signing. Recovery
 keeps the original transaction and reuses paid artwork after interrupted responses.
 Grok payments still use Robinhood USDG; Stonx gas uses Base ETH.
+
+
+## O1 agent deployments
+
+O1 uses `/v1/agent/o1/` on Robinhood (4663) and `/v1/agent/o1-base/`
+on Base (8453). Both require `o1:deploy` and their existing configured launch
+backend. Each route supports `ticker`, `artwork-prepare`, `artwork-publish`,
+`artwork-status`, `prepare`, `reserve` and `status`. Discover configured pairs
+with `GET /v1/agent/launchpads`; the entry ID is the route name.
+
+Use an independently reviewed O1 profile (`launchpad: "o1"`), a matching RPC,
+and a separate journal per network. Base additionally requires a pinned
+`baseFeeOracle` address and code hash; transaction limits include L1 and operator
+fees. Native ETH uses pair ID `native`; use discovery for other enabled pairs.
+
+The SDK accepts the same name, ticker or ordered `tickers`, image, description
+and optional links. O1 permits duplicate tickers and chooses the first valid
+option with `tickerPolicy: "duplicates_allowed"`. Metadata is immutable by
+default; set `editableMetadata: true` explicitly to retain metadata authority.
+O1's native ERC7572 metadata schema contains name, symbol, description and image;
+optional links remain in the shared publication, not O1's native metadata URI.
+For example, deployment input can be
+`{"name":"Quorvix","tickers":["QVXL","QVX"],"pairId":"native"}`.
+Theme automation uses `["o1"]` for both target lists and keeps the Robinhood
+source feed. Signing stays local, and recovery reuses the original transaction.
