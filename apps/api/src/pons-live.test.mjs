@@ -16,7 +16,7 @@ import { sendLongWallet, validateLongPlan } from '../../web/lib/long-wallet.ts';
 
 const addr = n => toHex(BigInt(n), { size: 20 });
 const hash = n => toHex(BigInt(n), { size: 32 });
-async function fixture(t) {
+async function fixture(t, links = {}) {
   let now = 1800000000000;
   const root = mkdtempSync(join(tmpdir(), 'pons-live-'));
   const budget = new Budget(join(root, 'budget.sqlite'), () => now);
@@ -25,10 +25,10 @@ async function fixture(t) {
     ...Object.fromEntries(PONS_ROLES.map((role, i) => [role, { address: addr(i + 1), codeHash: keccak256('0x01') }])) });
   const config = { readsEnabled: true, origin: 'https://example.invalid',
     ponsLaunch: { profile, assetOrigin: 'https://assets.example.invalid' } };
-  const draft = { name: 'Sample', ticker: 'SAMPLE', description: 'Synthetic artwork.' };
+  const draft = { name: 'Sample', ticker: 'SAMPLE', description: 'Synthetic artwork.', ...links };
   const imageCid = await ipfsContentId(Buffer.from('synthetic image'));
   const imageUri = `ipfs://${imageCid}`;
-  const metadata = Buffer.from(JSON.stringify({ name: draft.name, symbol: draft.ticker, description: draft.description, image: imageUri, image_hash: imageUri }));
+  const metadata = Buffer.from(JSON.stringify({ name: draft.name, symbol: draft.ticker, description: draft.description, image: imageUri, image_hash: imageUri, ...links }));
   const publication = { id: 'a'.repeat(48), imageHash: 'b'.repeat(64), metadataHash: createHash('sha256').update(metadata).digest('hex') };
   const published = { ...publication, status: 'published', ipfs: { profile: 'pinata-v1-256k', schema: 'long-ipfs-v1', imageCid, metadataCid: await ipfsContentId(metadata) } };
   const input = { chainId: 4663, wallet: addr(1001), pairId: 'pons-native', draft, publication };
@@ -48,7 +48,7 @@ async function fixture(t) {
         case 'name': return draft.name;
         case 'symbol': return draft.ticker;
         case 'totalSupply': return launchConfig.supply;
-        case 'getTokenInfo': return [input.wallet, changes.logo ?? imageUri, draft.description, { twitter: '', telegram: '', discord: '', website: '', farcaster: '' }];
+        case 'getTokenInfo': return [input.wallet, changes.logo ?? imageUri, draft.description, { twitter: draft.twitter ?? '', telegram: '', discord: '', website: draft.website ?? '', farcaster: '', ...changes.socials }];
         case 'getLaunchedToken': return { token: addr(200), curve: addr(201), deployer: input.wallet, creatorFeeRecipient: changes.recipient ?? input.wallet,
           pairToken: zeroAddress, creatorTaxBps: 0, buybackEnabled: false, exists: true };
         default: throw new Error(`Unexpected call ${e.functionName}`);
@@ -197,4 +197,22 @@ test('wallet-side pons simulation must agree before reserving or sending', async
   revert = false;
   assert.equal(await sendLongWallet(provider, plan, () => true, async () => { reserved++; }), hash(500));
   assert.equal(sent, 1);
+});
+
+ test('pons publishes approved website/twitter and confirms exact onchain socials', async t => {
+  const f = await fixture(t, { website: 'https://sample.example/', twitter: 'https://x.com/sample' });
+  const plan = await f.service.run('launch-prepare', f.input);
+  const { args } = decodeFunctionData({ abi: PONS_ABI, data: plan.transaction.data });
+  assert.equal(args[0].socials.website, f.input.draft.website);
+  assert.equal(args[0].socials.twitter, f.input.draft.twitter);
+  await f.service.confirm(plan, f.input, f.receipt, '0x64');
+  for (const socials of [{ website: '' }, { twitter: 'https://x.com/changed' }, { telegram: 'unexpected' }]) {
+    f.changes.socials = socials;
+    await assert.rejects(f.service.confirm(plan, f.input, f.receipt, '0x64'), e => e.code === 'launch_receipt_unverified');
+  }
+});
+test('pons rejects unapproved social metadata before preparing', async t => {
+  const f = await fixture(t);
+  f.input.draft.website = 'https://sample.example/';
+  await assert.rejects(f.service.run('launch-prepare', f.input), e => e.code === 'launch_assets_unverified');
 });

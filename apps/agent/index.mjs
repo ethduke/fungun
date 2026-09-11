@@ -11,13 +11,14 @@ import {
 function agentTarget(profile) {
   const platform = profile.launchpad ?? "long";
   const chainId = platform === "stonx" ? 8453 : platform === "o1" ? profile.chainId : 4663;
-  if (!["long", "stonx", "o1", "longbow"].includes(platform) || ![4663, 8453].includes(chainId) ||
+  if (!["long", "stonx", "o1", "longbow", "pons"].includes(platform) || ![4663, 8453].includes(chainId) ||
       (profile.chainId !== undefined && profile.chainId !== chainId)) throw new Error("agent_configuration");
   return { platform, chainId, route: platform === "o1" && chainId === 8453 ? "o1-base" : platform,
     registry: ["long", "longbow"].includes(platform) };
 }
 function supportsPair(platform, chainId, pair) {
   if (typeof pair !== "string") return false;
+  if (platform === "pons") return pair === "pons-native";
   if (platform === "longbow") return pair.startsWith("longbow-");
   if (platform === "o1") return /^(native|rwa-[a-f0-9]{24})$/.test(pair) || (chainId === 4663 && pair === "crypto-USDG");
   return platform === "stonx" ? /^stonx-[a-f0-9]{24}$/.test(pair) : pair.startsWith("long-");

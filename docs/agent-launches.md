@@ -1,13 +1,13 @@
-# Long and Stonx agent deployments and trending themes
+# Launchpad agent deployments and trending themes
 
-The agent API prepares Long launches on Robinhood Chain (4663) and Stonx launches
-on Base (8453). The companion Node SDK signs locally and submits through the agent
+The agent API prepares Long, Longbow, O1 and Pons launches on Robinhood Chain
+(4663), and O1 and Stonx launches on Base (8453). The companion Node SDK signs locally and submits through the agent
 owner's RPC. After setup, `deploy` and `watch` run without confirmation prompts.
 Neither the API nor the image provider receives the signing key.
 
 Agent access is disabled by default. Each launchpad also needs its configured
 launch backend and an explicit deployment scope on the client's credential.
-Automated Stonx validation uses synthetic contracts and mocked chain responses;
+Automated launchpad validation uses synthetic contracts and mocked chain responses;
 adding API support does not itself enable a hosted client or submit a token launch.
 
 ## 1. Configure the service and access
@@ -32,7 +32,7 @@ Example record shape only; the placeholders are deliberately invalid:
   "id": "quorvix-agent",
   "tokenHash": "<sha256-of-provisioned-token>",
   "wallet": "<owner-approved-public-wallet-address>",
-  "scopes": ["long:deploy", "stonx:deploy", "themes:read"]
+  "scopes": ["long:deploy", "stonx:deploy", "o1:deploy", "longbow:deploy", "pons:deploy", "themes:read"]
 }
 ```
 
@@ -41,7 +41,7 @@ replace signing: creating a transaction requires that wallet's local signer.
 Requests cannot supply a different wallet, arbitrary contract destination or RPC
 URL. Other clients cannot use an agent's artwork or launch recovery identifiers.
 Recovery and artwork IDs are also bound to their launchpad and chain, including
-when the same credential has permission for both Long and Stonx.
+when the same credential has permission for multiple launchpads.
 Revoke a client by removing its record; rotate tokens while retaining its client
 ID and wallet to preserve recovery access. Restart the API after runtime changes.
 
@@ -213,8 +213,8 @@ The feed keeps up to 100,000 observed token identities, 128 threshold/window
 configurations and 10,000 events for at most seven days. An expired cursor returns
 410 instead of silently skipping data. Invalid individual token metadata is dropped
 and counted; unavailable or malformed source snapshots do not create fresh signals.
-For a Long instance, both `searchLaunchpads` and `deployLaunchpads` must be
-`["long"]`; for a Stonx instance both must be `["stonx"]`. Each instance uses one
+Both `searchLaunchpads` and `deployLaunchpads` must contain exactly the configured
+platform: `long`, `stonx`, `o1`, `longbow` or `pons`. Each instance uses one
 trusted profile, one chain RPC and its own journal. Mixed platform lists are rejected.
 The theme source remains the Robinhood feed even when the deployment target is Stonx on Base.
 
@@ -284,7 +284,7 @@ intent headers itself and does not forward agent credentials to providers.
 
 | Route | Purpose |
 | --- | --- |
-| `GET /v1/agent/launchpads` | Configured pairings filtered by `long:deploy` / `stonx:deploy` scopes; read each launchpad's `chainId`. |
+| `GET /v1/agent/launchpads` | Configured pairings filtered by deployment scopes; read each launchpad's `chainId`. |
 | `GET /v1/agent/themes?minimumTokens=3&windowSeconds=3600` | Theme snapshot/events, optional `cursor`; requires `themes:read`. |
 | `POST /v1/agent/long/ticker` | `{ticker}` checks one symbol; `{tickers:[...]}` selects the first available in order. |
 | `POST /v1/agent/long/artwork-prepare` | Validated image and draft to a content-bound upload capability. |
@@ -294,10 +294,10 @@ intent headers itself and does not forward agent credentials to providers.
 | `POST /v1/agent/long/reserve` | `{id,binding}` records dispatch intent before local signing. |
 | `POST /v1/agent/long/status` | `{id,hash}` verifies the saved launch; `hash` may be null during recovery. |
 
-The same POST operations are available under `/v1/agent/stonx/`. Long routes
-require `long:deploy`; Stonx routes require `stonx:deploy`. Both use the credential's
-wallet. Artwork and launch preparation payloads use the target chain ID (4663 for
-Long, 8453 for Stonx); `reserve` and `status` use the original saved identifiers.
+The same POST operations are available under `/v1/agent/{entry-id}/` using the
+ID from discovery. Each platform requires its `:deploy` scope; O1 and O1 Base
+share `o1:deploy`. All use the credential's wallet. Artwork and launch preparation
+payloads use the entry's chain ID; `reserve` and `status` use the original saved identifiers.
 The server translates Stonx artwork requests into the existing shared publication
 protocol internally; the published asset capability is not a transaction signature.
 Clients must not rewrite that capability or the returned challenge text.
@@ -356,3 +356,22 @@ Preflight verifies the configured 99% sale and 1% platform allocation as well as
 the exact transaction, fees and current ticker availability. Theme automation
 uses `["longbow"]` for both target lists. Image and optional metadata inputs
 follow the same local signing workflow, without per-launch confirmation prompts.
+
+
+## Pons agent deployments
+
+Use `/v1/agent/pons/` with `pons:deploy`, the configured Pons backend and
+chain ID 4663. The same ticker, artwork, prepare, reserve and status operations
+apply. Discovery returns `pons-native` for ETH. Configure an independently
+reviewed Pons profile (`launchpad: "pons"`), a Robinhood RPC and its own journal.
+
+Pons accepts the same name, ticker options, image and optional description,
+website and Twitter. It permits duplicate tickers, so the first valid option is
+selected with `tickerPolicy: "duplicates_allowed"`. Pons launches use zero
+creator tax, disabled buyback and no developer purchase. The SDK verifies live
+launch economics, supply, dependencies, launch permission, fees and calldata
+before signing locally. Theme automation uses `["pons"]` for both target lists.
+
+Support in the repository does not provision hosted credentials or enable a
+backend. Operators must configure the corresponding backend and grant each
+requested deployment scope. Existing clients retain only their existing scopes.

@@ -18,6 +18,7 @@ import {
 import { generatePrivateKey, privateKeyToAccount } from "viem/accounts";
 import { FungunAgent } from "./index.mjs";
 import { stonxFixture } from "./stonx-fixture.mjs";
+import { ponsFixture } from "./pons-fixture.mjs";
 import { o1Fixture } from "./o1-fixture.mjs";
 import { longbowFixture } from "./longbow-fixture.mjs";
 import { Budget } from "../api/src/budget.mjs";
@@ -56,11 +57,10 @@ async function fixture(t, { loseBroadcast = false, losePublication = false,
   tickers, taken = [], raceTicker, grok = false, loseTickerLookup = false,
   stonxMode = false, platform = stonxMode ? "stonx" : "long", targetChain = platform === "stonx" ? 8453 : 4663,
   wrongChain = false } = {}) {
-  const independent = platform === "stonx" ? stonxFixture()
+  const independent = platform === "stonx" ? stonxFixture() : platform === "pons" ? ponsFixture()
     : platform === "o1" ? o1Fixture(targetChain) : platform === "longbow" ? longbowFixture() : null;
   const effectiveProfile = independent?.profile ?? profile;
   const chainId = targetChain;
-  const launchpad = platform === "o1" && chainId === 8453 ? "o1-base" : platform;
   const paths = [];
   const root = realpathSync(mkdtempSync(join(tmpdir(), "agent-deploy-integration-")));
   initializeIpfsStore(root);
@@ -500,8 +500,15 @@ test("Stonx wrong-chain RPC fails before reservation or signing", async t => {
   assert.equal(f.counts.broadcast, 0);
 });
 
-for (const [platform, targetChain] of [["o1", 4663], ["o1", 8453], ["longbow", 4663]]) {
+for (const [platform, targetChain] of [["o1", 4663], ["o1", 8453], ["longbow", 4663], ["pons", 4663]]) {
   const route = platform === "o1" && targetChain === 8453 ? "o1-base" : platform;
+  test(`${platform} chain ${targetChain} rejects the wrong RPC network before signing`, async t => {
+    const f = await fixture(t, { platform, targetChain, wrongChain: true });
+    await assert.rejects(f.deploy(), /wrong_chain/);
+    assert.equal(f.counts.reserve, 0);
+    assert.equal(f.counts.sign, 0);
+    assert.equal(f.counts.broadcast, 0);
+  });
   test(`${platform} chain ${targetChain} deploy traverses authenticated HTTP, IPFS and signing once`, async t => {
     const f = await fixture(t, { platform, targetChain, tickers: ["QVXL", "LATER"] });
     const result = await f.deploy();
@@ -535,3 +542,17 @@ for (const [platform, targetChain] of [["o1", 4663], ["o1", 8453], ["longbow", 4
     f.assertNoSignedBytes();
   });
 }
+
+
+test("Longbow ticker race republishes metadata while reusing paid artwork", async t => {
+  const f = await fixture(t, { platform: "longbow", tickers: ["RACED", "QVXL", "LATER"], raceTicker: "RACED", grok: true });
+  const result = await f.deploy();
+  assert.equal(result.status, "confirmed");
+  assert.equal(result.selectedTicker, "QVXL");
+  assert.deepEqual(f.preparedTickers, ["RACED", "QVXL"]);
+  assert.equal(f.counts.publish, 2);
+  assert.equal(f.imageGenerations(), 1);
+  assert.equal(f.counts.sign, 1);
+  assert.equal(f.counts.broadcast, 1);
+  f.assertNoSignedBytes();
+});

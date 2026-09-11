@@ -80,7 +80,9 @@ export class PonsLive extends LongLive {
     const terms = await this.terms(block, input.wallet);
     const publication = await this.metadata(input), imageUri = ipfsUri(publication.ipfs.imageCid);
     const metadata = Buffer.from(JSON.stringify({ name: input.draft.name, symbol: input.draft.ticker,
-      description: input.draft.description, image: imageUri, image_hash: imageUri }));
+      description: input.draft.description, image: imageUri, image_hash: imageUri,
+      ...(input.draft.website !== undefined ? { website: input.draft.website } : {}),
+      ...(input.draft.twitter !== undefined ? { twitter: input.draft.twitter } : {}) }));
     if (createHash('sha256').update(metadata).digest('hex') !== input.publication.metadataHash
       || await ipfsContentId(metadata) !== publication.ipfs.metadataCid) fail('launch_assets_unverified');
     const buildInput = { wallet: input.wallet, draft: input.draft, pairId: input.pairId,
@@ -150,7 +152,8 @@ export class PonsLive extends LongLive {
     ], block);
     if (name !== context.draft.name || symbol !== context.draft.ticker || supply.toString() !== plan.review.totalSupply
       || !same(info[0], context.wallet) || info[1] !== plan.ponsBuildInput.imageUri || info[2] !== context.draft.description
-      || Object.values(info[3]).some(Boolean) || !launch.exists || !same(launch.token, plan.predictedAsset)
+      || info[3].website !== (context.draft.website ?? '') || info[3].twitter !== (context.draft.twitter ?? '')
+      || info[3].telegram !== '' || info[3].discord !== '' || info[3].farcaster !== '' || !launch.exists || !same(launch.token, plan.predictedAsset)
       || !same(launch.curve, plan.predictedPool) || !same(launch.deployer, context.wallet)
       || !same(launch.creatorFeeRecipient, context.wallet) || !same(launch.pairToken, zeroAddress)
       || launch.creatorTaxBps !== 0 || launch.buybackEnabled) fail('launch_receipt_unverified');

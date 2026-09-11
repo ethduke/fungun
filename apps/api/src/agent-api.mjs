@@ -7,14 +7,17 @@ import { IMAGE_BYTE_LIMIT } from "./launch-image.mjs";
 
 // Route names bind resources to one launchpad and chain, including O1's two networks.
 const targets = {
-  longbow: { chainId: 4663, config: "longbowLaunch", scope: "longbow:deploy", registry: true, pair: id => id.startsWith("longbow-") },
   long: { chainId: 4663, config: "longLaunch", scope: "long:deploy", registry: true, pair: id => id.startsWith("long-") },
   stonx: { chainId: 8453, config: "stonxLaunch", scope: "stonx:deploy", pair: id => /^stonx-[a-f0-9]{24}$/.test(id) },
   o1: { chainId: 4663, config: "o1Launch", scope: "o1:deploy", pair: id => /^(native|rwa-[a-f0-9]{24}|crypto-USDG)$/.test(id) },
   "o1-base": { chainId: 8453, config: "o1BaseLaunch", scope: "o1:deploy", pair: id => /^(native|rwa-[a-f0-9]{24})$/.test(id) },
+  longbow: { chainId: 4663, config: "longbowLaunch", scope: "longbow:deploy", registry: true, pair: id => id.startsWith("longbow-") },
+  pons: { chainId: 4663, config: "ponsLaunch", scope: "pons:deploy", pair: id => id === "pons-native" },
 };
 const deployScopes = [...new Set(Object.values(targets).map(t => t.scope))];
-const targetPairs = (target, live) => live?.profile.quotes?.filter(q => target.pair(q.id)) ?? [];
+const targetPairs = (target, live) => !live ? [] : target.config === "ponsLaunch"
+  ? [{ id: "pons-native", token: null, symbol: "ETH" }]
+  : live.profile.quotes?.filter(q => target.pair(q.id)) ?? [];
 
 // Only contractually public asset error codes may cross the service boundary.
 const assetErrors = new Set([

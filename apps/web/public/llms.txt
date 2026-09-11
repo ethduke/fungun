@@ -80,10 +80,10 @@ claim requires wallet confirmation; there are no token approvals or fee-rights
 transfers in this flow.
 
 
-## Optional Long and Stonx agent API
+## Optional Launchpad agent API
 
-Configured deployments can expose authenticated Long (Robinhood 4663) and Stonx
-(Base 8453) agent APIs at the
+Configured deployments can expose authenticated Long, Longbow, O1 and Pons
+(Robinhood 4663), plus O1 and Stonx (Base 8453), agent APIs at the
 operator-provided API origin. It is disabled by default. The companion Node SDK
 can deploy without per-launch prompts after its owner configures access, signing
 and spending limits. Keys stay in the local signer; the API prepares unsigned
@@ -91,7 +91,7 @@ transactions and verifies recovery. The experimental browser preview tools remai
 limited to drafting.
 
 `GET /v1/agent/launchpads` lists pairings allowed by the credential's
-`long:deploy` and/or `stonx:deploy` scopes; use each launchpad entry's `chainId`. `GET /v1/agent/themes`
+deployment scopes; use each launchpad entry's `chainId`. `GET /v1/agent/themes`
 provides exact normalized-name trends, distinct contract counts, threshold-crossing
 events and opaque cursors. Threshold and observation-window settings are configurable;
 freshness must be checked before automatic deployment. The SDK searches Long ticker
@@ -162,3 +162,22 @@ Preflight verifies the configured 99% sale and 1% platform allocation as well as
 the exact transaction, fees and current ticker availability. Theme automation
 uses `["longbow"]` for both target lists. Image and optional metadata inputs
 follow the same local signing workflow, without per-launch confirmation prompts.
+
+
+## Pons agent deployments
+
+Use `/v1/agent/pons/` with `pons:deploy`, the configured Pons backend and
+chain ID 4663. The same ticker, artwork, prepare, reserve and status operations
+apply. Discovery returns `pons-native` for ETH. Configure an independently
+reviewed Pons profile (`launchpad: "pons"`), a Robinhood RPC and its own journal.
+
+Pons accepts the same name, ticker options, image and optional description,
+website and Twitter. It permits duplicate tickers, so the first valid option is
+selected with `tickerPolicy: "duplicates_allowed"`. Pons launches use zero
+creator tax, disabled buyback and no developer purchase. The SDK verifies live
+launch economics, supply, dependencies, launch permission, fees and calldata
+before signing locally. Theme automation uses `["pons"]` for both target lists.
+
+Support in the repository does not provision hosted credentials or enable a
+backend. Operators must configure the corresponding backend and grant each
+requested deployment scope. Existing clients retain only their existing scopes.

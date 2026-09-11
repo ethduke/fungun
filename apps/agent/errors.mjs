@@ -36,6 +36,8 @@ const visible = new Set([
   "daily_reservation_expired",
   "unresolved_intent",
   "contract_unverified",
+  "o1_launch_disabled", "pons_launch_disabled", "pons_launch_restricted",
+  "launch_eoa_required", "launch_already_exists",
   "nonce_changed",
   "insufficient_funds",
   "intent_input_changed",

@@ -45,7 +45,7 @@ export function buildUnsignedPonsLaunch(input, configuredProfile) {
   const binding = sha256(toBytes(JSON.stringify(['fungun:pons:1', profile, wallet, draft, imageUri, metadataUri,
     input.expectedEconomics, input.totalSupply, input.launchpadFeeWei, input.intentId]))).slice(2);
   const params = { name: draft.name, symbol: draft.ticker, logo: imageUri, description: draft.description,
-    socials: { twitter: '', telegram: '', discord: '', website: '', farcaster: '' }, creatorFeeRecipient: wallet,
+    socials: { twitter: draft.twitter ?? '', telegram: '', discord: '', website: draft.website ?? '', farcaster: '' }, creatorFeeRecipient: wallet,
     creatorTaxBps: 0, buybackEnabled: false, expectedEconomics: input.expectedEconomics, salt: `0x${input.intentId}` };
   return { binding, profile, transaction: { from: wallet, to: profile.launcher.address,
     data: encodeFunctionData({ abi: PONS_ABI, functionName: 'launchToken', args: [params, BigInt(profile.launchConfigId), zeroAddress] }),

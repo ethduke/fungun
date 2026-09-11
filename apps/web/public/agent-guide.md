@@ -206,20 +206,19 @@ claim requires wallet confirmation; there are no token approvals or fee-rights
 transfers in this flow.
 
 
-## Configured Long and Stonx agent API
+## Configured Launchpad agent API
 
-The optional server API supports Long on Robinhood Chain (4663) and Stonx on Base
-(8453). Its Node SDK
+The optional server API supports Long, Longbow, O1 and Pons on Robinhood Chain
+(4663), plus O1 and Stonx on Base (8453). Its Node SDK
 runs locally with an owner-configured signer and can submit without repeated
 approval prompts. This is separate from browser preview tools; it does not add
 signing to `document.modelContext`. The operator must enable the agent API and
 provision a bearer credential bound to the agent's public wallet, with scopes
-`long:deploy`, `stonx:deploy` and/or `themes:read`. Private keys never belong in API payloads.
+`long:deploy`, `stonx:deploy`, `o1:deploy`, `longbow:deploy`, `pons:deploy` and/or `themes:read`. Private keys never belong in API payloads.
 
 At the operator-provided API origin, `GET /v1/agent/launchpads` lists configured
 pairings filtered by deployment scopes. Use each launchpad entry's `chainId`; the
-legacy top-level chain ID remains 4663. JSON POSTs under `/v1/agent/long/` or
-`/v1/agent/stonx/` expose `ticker`, `artwork-prepare`,
+legacy top-level chain ID remains 4663. JSON POSTs under `/v1/agent/{entry-id}/` expose `ticker`, `artwork-prepare`,
 `artwork-publish`, `artwork-status`, `prepare`, `reserve` and `status`. These routes
 retain contract checks, independent client validation and durable recovery. The
 SDK accepts name, ticker, artwork and optional description/website/Twitter links.
@@ -233,7 +232,8 @@ not deployment timestamps. Names match after Unicode, whitespace and case
 normalization; this differs from fuzzy popularity groups in the visual feed.
 
 Automatic deployment acts only on fresh data and matching search/deployment
-target lists: `["long"]` or `["stonx"]` for the configured SDK platform.
+target lists: one of `["long"]`, `["stonx"]`, `["o1"]`, `["longbow"]` or `["pons"]`
+for the configured SDK platform.
 The source feed remains Robinhood even when Stonx on Base is the deployment target. Preserve journals across restarts to prevent duplicates.
 Image modes are provided, Grok through USDG/x402, and none; none uses a neutral
 placeholder because current Long publication still requires an image. Grok
@@ -321,3 +321,22 @@ Preflight verifies the configured 99% sale and 1% platform allocation as well as
 the exact transaction, fees and current ticker availability. Theme automation
 uses `["longbow"]` for both target lists. Image and optional metadata inputs
 follow the same local signing workflow, without per-launch confirmation prompts.
+
+
+## Pons agent deployments
+
+Use `/v1/agent/pons/` with `pons:deploy`, the configured Pons backend and
+chain ID 4663. The same ticker, artwork, prepare, reserve and status operations
+apply. Discovery returns `pons-native` for ETH. Configure an independently
+reviewed Pons profile (`launchpad: "pons"`), a Robinhood RPC and its own journal.
+
+Pons accepts the same name, ticker options, image and optional description,
+website and Twitter. It permits duplicate tickers, so the first valid option is
+selected with `tickerPolicy: "duplicates_allowed"`. Pons launches use zero
+creator tax, disabled buyback and no developer purchase. The SDK verifies live
+launch economics, supply, dependencies, launch permission, fees and calldata
+before signing locally. Theme automation uses `["pons"]` for both target lists.
+
+Support in the repository does not provision hosted credentials or enable a
+backend. Operators must configure the corresponding backend and grant each
+requested deployment scope. Existing clients retain only their existing scopes.
