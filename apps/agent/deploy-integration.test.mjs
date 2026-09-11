@@ -19,6 +19,7 @@ import { generatePrivateKey, privateKeyToAccount } from "viem/accounts";
 import { FungunAgent } from "./index.mjs";
 import { stonxFixture } from "./stonx-fixture.mjs";
 import { o1Fixture } from "./o1-fixture.mjs";
+import { longbowFixture } from "./longbow-fixture.mjs";
 import { Budget } from "../api/src/budget.mjs";
 import { ServiceError } from "../api/src/errors.mjs";
 import { createAgentHandler } from "../api/src/agent-api.mjs";
@@ -56,7 +57,7 @@ async function fixture(t, { loseBroadcast = false, losePublication = false,
   stonxMode = false, platform = stonxMode ? "stonx" : "long", targetChain = platform === "stonx" ? 8453 : 4663,
   wrongChain = false } = {}) {
   const independent = platform === "stonx" ? stonxFixture()
-    : platform === "o1" ? o1Fixture(targetChain) : null;
+    : platform === "o1" ? o1Fixture(targetChain) : platform === "longbow" ? longbowFixture() : null;
   const effectiveProfile = independent?.profile ?? profile;
   const chainId = targetChain;
   const launchpad = platform === "o1" && chainId === 8453 ? "o1-base" : platform;
@@ -499,7 +500,7 @@ test("Stonx wrong-chain RPC fails before reservation or signing", async t => {
   assert.equal(f.counts.broadcast, 0);
 });
 
-for (const [platform, targetChain] of [["o1", 4663], ["o1", 8453]]) {
+for (const [platform, targetChain] of [["o1", 4663], ["o1", 8453], ["longbow", 4663]]) {
   const route = platform === "o1" && targetChain === 8453 ? "o1-base" : platform;
   test(`${platform} chain ${targetChain} deploy traverses authenticated HTTP, IPFS and signing once`, async t => {
     const f = await fixture(t, { platform, targetChain, tickers: ["QVXL", "LATER"] });

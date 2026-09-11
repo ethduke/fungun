@@ -1,3 +1,4 @@
+import { preflightLongbow } from "./longbow-preflight.mjs";
 import { preflightO1 } from "./o1-preflight.mjs";
 import { safeSdkError } from "./errors.mjs";
 import { keccak256, parseTransaction, decodeFunctionResult, encodeFunctionData, serializeTransaction, parseAbi, isAddress, zeroAddress } from "viem";
@@ -191,6 +192,7 @@ function validateSignedTransaction(raw, tx) {
 
 export async function preflight(...args) {
   try {
+    if (args[3]?.launchpad === "longbow") return await preflightLongbow(...args);
     if (args[3]?.launchpad === "o1") return await preflightO1(...args);
     return await preflightPlan(...args);
   } catch (error) {

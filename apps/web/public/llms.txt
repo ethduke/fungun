@@ -144,3 +144,21 @@ For example, deployment input can be
 `{"name":"Quorvix","tickers":["QVXL","QVX"],"pairId":"native"}`.
 Theme automation uses `["o1"]` for both target lists and keeps the Robinhood
 source feed. Signing stays local, and recovery reuses the original transaction.
+
+
+## Longbow agent deployments
+
+Use `/v1/agent/longbow/` with `longbow:deploy`, the configured Longbow backend,
+and chain ID 4663. It exposes the same ticker, artwork and launch lifecycle
+operations as Long. Longbow uses Long's shared ticker registry; ordered ticker
+alternatives select the first available option and retry only before signing.
+Single ticker results use the `longbow` result key.
+
+Configure an independently reviewed Longbow profile (`launchpad: "longbow"`),
+a Robinhood RPC and a separate journal. Discover enabled `longbow-` pairs.
+The SDK automatically adds `launchpad: "longbow"` to the publication draft;
+direct HTTP clients must supply this marker in artwork and prepare drafts.
+Preflight verifies the configured 99% sale and 1% platform allocation as well as
+the exact transaction, fees and current ticker availability. Theme automation
+uses `["longbow"]` for both target lists. Image and optional metadata inputs
+follow the same local signing workflow, without per-launch confirmation prompts.

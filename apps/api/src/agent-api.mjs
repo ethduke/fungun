@@ -7,6 +7,7 @@ import { IMAGE_BYTE_LIMIT } from "./launch-image.mjs";
 
 // Route names bind resources to one launchpad and chain, including O1's two networks.
 const targets = {
+  longbow: { chainId: 4663, config: "longbowLaunch", scope: "longbow:deploy", registry: true, pair: id => id.startsWith("longbow-") },
   long: { chainId: 4663, config: "longLaunch", scope: "long:deploy", registry: true, pair: id => id.startsWith("long-") },
   stonx: { chainId: 8453, config: "stonxLaunch", scope: "stonx:deploy", pair: id => /^stonx-[a-f0-9]{24}$/.test(id) },
   o1: { chainId: 4663, config: "o1Launch", scope: "o1:deploy", pair: id => /^(native|rwa-[a-f0-9]{24}|crypto-USDG)$/.test(id) },
@@ -331,7 +332,7 @@ export function createAgentHandler(
         // Keep the public route bound to its chain; translate only this envelope.
         const assetInput = { ...input, chainId: 4663 };
         validateAssetInput(kind, assetInput);
-        if (input.wallet.toLowerCase() !== client.wallet || (input.draft && Boolean(input.draft.launchpad)))
+        if (input.wallet.toLowerCase() !== client.wallet || (input.draft && (pad === "longbow" ? input.draft.launchpad !== "longbow" : Boolean(input.draft.launchpad))))
           fail("forbidden", 403);
         if (kind !== "launch-prepare") own("artwork", input.id, client, pad);
         else budget.debit([[`agent:${client.id}:artwork`, 30, 86400000]]);
