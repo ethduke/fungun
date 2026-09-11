@@ -1,6 +1,12 @@
 import { IMAGE_LIMIT, imageFileError, imageKind } from './launch-model.ts';
 
 export const COPIED_IMAGE_ERROR = 'Image unavailable—upload one.';
+export const MISSING_IMAGE_METADATA_ERROR = 'No image metadata found for this token. Upload an image.';
+
+export function copiedImageError(error: unknown): string {
+  return error instanceof Error && error.message === MISSING_IMAGE_METADATA_ERROR
+    ? MISSING_IMAGE_METADATA_ERROR : COPIED_IMAGE_ERROR;
+}
 export type TokenImageSource =
   | { chainId: 4663; address: string; provider?: undefined }
   | { chainId: 4663 | 8453; address: string; provider: 'doppler' }
@@ -59,7 +65,6 @@ export async function copiedTokenImage(
     signal: AbortSignal.any([signal, AbortSignal.timeout(20_000)]),
   });
   if (
-    !response.ok ||
     response.headers.get('content-type')?.split(';')[0] !==
       'application/json' ||
     Number(response.headers.get('content-length')) > 3 * 1024 * 1024 ||
@@ -89,6 +94,9 @@ export async function copiedTokenImage(
     offset += chunk.length;
   }
   const data = JSON.parse(new TextDecoder().decode(payload));
+  if (!response.ok)
+    throw new Error(response.status === 404 && data?.error === 'image_metadata_missing'
+      ? MISSING_IMAGE_METADATA_ERROR : COPIED_IMAGE_ERROR);
   if (
     data.chainId !== source.chainId ||
     data.address !== source.address ||

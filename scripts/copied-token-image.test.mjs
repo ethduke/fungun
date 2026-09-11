@@ -104,3 +104,21 @@ test('copied artwork uses image decode and dimension validation before attachmen
     else delete globalThis.createImageBitmap;
   }
 });
+
+test('missing image metadata gets a specific message while other failures remain generic', async () => {
+  const { copiedImageError, MISSING_IMAGE_METADATA_ERROR, COPIED_IMAGE_ERROR } =
+    await import('../apps/web/lib/copied-token-image.ts');
+  for (const [status, code, expected] of [
+    [404, 'image_metadata_missing', MISSING_IMAGE_METADATA_ERROR],
+    [503, 'timeout', COPIED_IMAGE_ERROR],
+    [404, 'image_unavailable', COPIED_IMAGE_ERROR],
+    [404, '<script>untrusted message</script>', COPIED_IMAGE_ERROR],
+  ]) {
+    await assert.rejects(copiedTokenImage({ ...source, provider: 'doppler' }, new AbortController().signal,
+      async () => Response.json({ error: code }, { status })), error => {
+      assert.equal(copiedImageError(error), expected);
+      return true;
+    });
+  }
+  assert.equal(copiedImageError(new Error('network failed')), COPIED_IMAGE_ERROR);
+});

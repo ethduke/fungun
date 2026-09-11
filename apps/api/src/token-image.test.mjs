@@ -188,3 +188,44 @@ test('provider dispatch preserves legacy O1 and isolates Doppler', async () => {
   assert.deepEqual(service.get({ ...source, provider: 'doppler' }), { provider: 'doppler', ...source });
   assert.deepEqual(service.get({ ...source, provider: 'o1' }), { provider: 'o1', ...source });
 });
+
+test('missing tokenURI and contractURI return a distinct no-metadata result without image downloads', async () => {
+  for (const absent of ['0x', encodeAbiParameters([{ type: 'string' }], ['']), new ServiceError('reverted')]) {
+    const f = fixture();
+    const calls = [];
+    f.service.rpc.batch = async (_chain, requests) => {
+      if (requests[0].method === 'eth_chainId') return ['0x1237'];
+      calls.push(requests[0].params[0].data);
+      if (absent instanceof Error) throw absent;
+      return [absent];
+    };
+    await assert.rejects(f.service.get(source), { code: 'image_metadata_missing', status: 404 });
+    assert.deepEqual(calls, ['0x3c130d90', '0xe8a3d485']);
+    assert.equal(f.requests.length, 0);
+  }
+});
+
+test('contractURI can provide artwork when tokenURI is absent', async () => {
+  const f = fixture();
+  f.service.rpc.batch = async (_chain, requests) => requests[0].method === 'eth_chainId'
+    ? ['0x1237'] : requests[0].params[0].data === '0x3c130d90'
+      ? ['0x'] : [encodeAbiParameters([{ type: 'string' }], [`ipfs://${document}`])];
+  assert.equal((await f.service.get(source)).mime, 'image/webp');
+});
+
+test('transient failures and unsupported metadata are not labelled missing', async () => {
+  for (const code of ['timeout', 'upstream_unavailable', 'invalid_response', 'rate_limited']) {
+    const f = fixture();
+    f.service.rpc.batch = async (_chain, requests) => {
+      if (requests[0].method === 'eth_chainId') return ['0x1237'];
+      throw new ServiceError(code, code === 'rate_limited' ? 429 : 503);
+    };
+    await assert.rejects(f.service.get(source), { code });
+  }
+  const unsupported = fixture();
+  unsupported.state.uri = 'data:application/json;base64,e30=';
+  await assert.rejects(unsupported.service.get(source), { code: 'image_unavailable' });
+  const missingImage = fixture();
+  missingImage.bodies.set(document, Buffer.from(JSON.stringify({ name: 'No artwork' })));
+  await assert.rejects(missingImage.service.get(source), { code: 'image_metadata_missing' });
+});

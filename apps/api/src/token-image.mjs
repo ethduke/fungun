@@ -1,4 +1,4 @@
-import { parseAbi } from "viem";
+import { parseAbi, encodeFunctionData, decodeFunctionResult } from "viem";
 import { CID } from "multiformats/cid";
 import { ServiceError } from "./errors.mjs";
 import { validAddress } from "./fee-contracts.mjs";
@@ -8,6 +8,7 @@ import { O1TokenImages } from "./o1-token-image.mjs";
 import { ReadCache, withinReadDeadline } from "./upstream.mjs";
 
 const unavailable = () => { throw new ServiceError("image_unavailable", 404); };
+const noMetadata = () => { throw new ServiceError("image_metadata_missing", 404); };
 const metadataLimit = 128 * 1024;
 const ponsTokenAbi = parseAbi([
   "struct Socials { string twitter; string telegram; string discord; string website; string farcaster; }",
@@ -130,6 +131,8 @@ export class DopplerTokenImages {
       if (!metadataAllowed || bytes.length > metadataLimit) unavailable();
       let metadata;
       try { metadata = JSON.parse(bytes.toString("utf8")); } catch { unavailable(); }
+      if (metadata && typeof metadata === "object" && !Array.isArray(metadata)
+        && [metadata.image, metadata.image_hash].every(value => value == null || value === "")) noMetadata();
       const candidates = new Set();
       for (const field of [metadata?.image, metadata?.image_hash]) {
         try { candidates.add(imageCid(field)); } catch { /* Try the other supported field. */ }
@@ -150,9 +153,28 @@ export class DopplerTokenImages {
     return { mime: image.mime, size: image.bytes.length, base64: image.bytes.toString("base64") };
   }
 
+  async metadataUri(input, functionName) {
+    const abi = [{ ...tokenAbi[0], name: functionName }];
+    let result;
+    try {
+      [result] = await this.rpc.batch(input.chainId, [{ method: "eth_call", params: [
+        { to: input.address, data: encodeFunctionData({ abi, functionName }) }, "latest",
+      ] }]);
+    } catch (error) {
+      // A revert can mean the optional metadata function is absent. Do not
+      // misreport timeouts, rate limits or malformed RPC replies as no metadata.
+      if (error?.code === "reverted") return null;
+      throw error;
+    }
+    if (result === "0x") return null;
+    try { return decodeFunctionResult({ abi, functionName, data: result }) || null; }
+    catch { throw new ServiceError("invalid_response"); }
+  }
+
   async loadImage(input, signal) {
-    const [uri] = await this.rpc.calls(input.chainId, [{ address: input.address,
-      abi: tokenAbi, functionName: "tokenURI" }]);
+    const uri = await this.metadataUri(input, "tokenURI")
+      || await this.metadataUri(input, "contractURI");
+    if (!uri) noMetadata();
     return this.resolve(imageCid(uri), true, signal);
   }
 
@@ -197,6 +219,7 @@ export class PonsTokenImages extends DopplerTokenImages {
     const [info] = await this.rpc.calls(input.chainId, [{ address: input.address,
       abi: ponsTokenAbi, functionName: "getTokenInfo" }]);
     const logo = info?.[1];
+    if (logo === "") noMetadata();
     if (typeof logo === "string" && logo.startsWith("ipfs://"))
       return this.resolve(imageCid(logo), false, signal);
     const url = ponsLogoUrl(logo);
