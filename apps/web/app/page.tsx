@@ -144,7 +144,7 @@ export default function Home() {
         if (request.isCurrent()) setImagePending(false);
       }
     },
-    [setImage],
+    [setImage, setImageError, setImagePending],
   );
 
   useEffect(() => {

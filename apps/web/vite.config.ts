@@ -34,7 +34,7 @@ export default defineConfig(async ({ command }) => {
       host: '127.0.0.1',
       strictPort: true,
       proxy: {
-        '^/api/(fomo|catalog|ticker|fees|claim-prepare|tracked-prices|o1-token-image)(?:[/?]|$)': {
+        '^/api/(fomo|catalog|ticker|fees|claim-prepare|tracked-prices|token-image|o1-token-image)(?:[/?]|$)': {
           target: `http://127.0.0.1:${apiPort}`,
           rewrite: (path: string) => path.replace(/^\/api(?=\/)/, '/v1'),
           configure: configureReadServiceProxy,

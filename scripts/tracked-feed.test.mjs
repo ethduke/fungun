@@ -71,7 +71,7 @@ test("COPY uses the token ticker, never its quote symbol or contract address", (
         quote_kind: "shares",
       }),
     ),
-    { name: "Moon Club", ticker: "MOON" },
+    { name: "Moon Club", ticker: "MOON", imageSource: { chainId: 4663, address: "0x" + "1".padStart(40, "0"), provider: "doppler" } },
   );
   assert.deepEqual(trackedTokenDraft({ sym: "TOKEN" }), { name: "TOKEN", ticker: "TOKEN" });
   assert.deepEqual(trackedTokenDraft({ name: "Only a name" }), { name: "Only a name", ticker: "" });
