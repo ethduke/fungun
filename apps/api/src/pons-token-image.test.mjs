@@ -1,3 +1,6 @@
+import { EventEmitter } from 'node:events';
+import { Readable } from 'node:stream';
+import { PublicImageReader } from './public-image.mjs';
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import sharp from 'sharp';
@@ -41,10 +44,13 @@ function fixture(logo = axiom, extra = {}) {
   const config = { readsEnabled: true, rpcUrl: 'https://rpc.example.invalid', rpcBatchRequests: false, ...extra.config };
   const upstream = new Upstream({ upstream(provider) { charges.push(provider); } }, fetcher);
   const images = new TokenImages(config, upstream, fetcher, () => now);
+  // Metadata/decoder fixtures use mocked HTTP. The actual pinned transport and
+  // redirect/DNS policy have dedicated coverage in public-image.test.mjs.
+  images.pons.publicImages = { get: async (url, signal) => images.pons.fetchUrls([url], signal) };
   return { images, upstream, requests, charges, state, advance(ms) { now += ms; } };
 }
 
-for (const logo of [axiom, twitter, catbox, `ipfs://${cid}`]) test(`Pons reads tokenLogo and decodes ${new URL(logo).hostname}`, async () => {
+for (const logo of [axiom, twitter, catbox, 'https://images.example.com/asset?id=123', `ipfs://${cid}`]) test(`Pons reads tokenLogo and decodes ${new URL(logo).hostname}`, async () => {
   const f = fixture(logo);
   const result = await f.images.get(source);
   assert.equal(result.chainId, 4663);
@@ -56,32 +62,14 @@ for (const logo of [axiom, twitter, catbox, `ipfs://${cid}`]) test(`Pons reads t
   assert.equal(f.requests[2].url, logo.startsWith('ipfs:') ? `https://ipfs.io/ipfs/${cid}` : logo);
 });
 
-test('Pons CDN validation rejects arbitrary URLs, credentials, queries and path escapes', async () => {
+test('Pons accepts public HTTPS URL shapes while rejecting unsafe targets before HTTP', async () => {
   for (const logo of ['http://localhost/image.png', 'https://169.254.169.254/latest/meta-data',
-    axiom.replace('axiom-cdn.io', 'axiom-cdn.io.example.invalid'),
-    credentialUrl.href, `${axiom}?target=http://localhost`,
-    `${axiom}#fragment`, axiom.replace('.io/', '.io:443/'),
-    axiom.replace('.io/', '.io/x/../'), 'https://pbs.twimg.com/anything.jpg',
-    'https://pbs.twimg.com/profile_images/123456789/%2e%2e/image.jpg',
-    'https://axiomtrading-v2.axiom-cdn.io/api/proxy',
-    catbox.replace('catbox.moe', 'catbox.moe.example.invalid'),
-    catbox.replace('https:', 'http:'), `${catbox}?download=1`, `${catbox}#image`,
-    catbox.replace('/abc123', '/nested/abc123'), catbox.replace('.png', '.svg'),
-    catbox.replace('/abc123', '/abc12'), catbox.replace('/abc123', '/%61bc123'), 'ipfs://not-a-cid', '']) {
+    credentialUrl.href, `${axiom}#fragment`, 'https://service.internal/logo', 'ipfs://not-a-cid', '']) {
     const f = fixture(logo);
     await assert.rejects(f.images.get(source));
-    assert.equal(f.requests.length, 2, 'invalid logo never starts an HTTP fetch');
+    assert.equal(f.requests.length, 2);
   }
-  assert.equal(ponsLogoUrl(twitter), twitter);
-});
-
-test('Pons HTTPS logos never redirect, even to another allowed CDN path', async () => {
-  for (const location of ['http://localhost', twitter, axiom, catbox]) {
-    const f = fixture(axiom, { response() { return new Response(null, { status: 302, headers: { location } }); } });
-    await assert.rejects(f.images.get(source));
-    assert.equal(f.requests.length, 3);
-    assert.equal(f.upstream.active, 0);
-  }
+  assert.equal(ponsLogoUrl('https://cdn.example.org/image?width=500'), 'https://cdn.example.org/image?width=500');
 });
 
 test('Pons logo means an image, not a second JSON metadata document', async () => {
@@ -130,4 +118,32 @@ test('aborted Pons fetch cannot start a CDN request', async () => {
   const controller = new AbortController(); controller.abort();
   await assert.rejects(images.fetchUrls([axiom], controller.signal));
   assert.equal(reads, 0);
+});
+
+
+test('Pons token metadata uses the public downloader across an unknown-host redirect and decodes the result', async () => {
+  const f = fixture('https://images.example.com/art?id=123');
+  const destinations = [];
+  f.images.pons.publicImages = new PublicImageReader(f.upstream, {
+    lookup: async () => [{ address: '8.8.8.8', family: 4 }],
+    request(url, options, callback) {
+      const req = new EventEmitter();
+      req.end = () => queueMicrotask(() => {
+        destinations.push(url.href);
+        assert.equal(options.rejectUnauthorized, true);
+        const redirected = destinations.length === 1;
+        const response = Readable.from(redirected ? [] : [png]);
+        response.statusCode = redirected ? 302 : 200;
+        response.headers = redirected ? { location: 'https://another.example.org/content?format=png' } : {};
+        callback(response);
+      });
+      return req;
+    },
+  });
+  const result = await f.images.get(source);
+  const decoded = await sharp(Buffer.from(result.base64, 'base64')).metadata();
+  assert.deepEqual([decoded.width, decoded.height], [4, 5]);
+  assert.deepEqual(destinations, ['https://images.example.com/art?id=123', 'https://another.example.org/content?format=png']);
+  assert.deepEqual(f.charges, ['rpc', 'rpc', 'token-image', 'token-image']);
+  assert.equal(f.upstream.active, 0);
 });

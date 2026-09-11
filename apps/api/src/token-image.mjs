@@ -1,4 +1,5 @@
 import { parseAbi, encodeFunctionData, decodeFunctionResult } from "viem";
+import { PublicImageReader, publicImageUrl } from "./public-image.mjs";
 import { CID } from "multiformats/cid";
 import { ServiceError } from "./errors.mjs";
 import { validAddress } from "./fee-contracts.mjs";
@@ -196,26 +197,13 @@ export class DopplerTokenImages {
   }
 }
 
-// Pons stores an image URI directly in getTokenInfo().tokenLogo. These static
-// CDN paths were verified on live v2 tokens; no arbitrary HTTP proxy is exposed.
-export function ponsLogoUrl(value) {
-  if (typeof value !== "string" || value.length > 512) unavailable();
-  let url;
-  try { url = new URL(value); } catch { unavailable(); }
-  if (url.protocol !== "https:" || url.username || url.password || url.port
-    || url.search || url.hash || url.href !== value) unavailable();
-  const axiom = url.hostname === "axiomtrading-v2.axiom-cdn.io"
-    && /^\/[a-zA-Z0-9_-]{16,128}\.(?:webp|png|jpe?g)$/.test(url.pathname);
-  const twitter = url.hostname === "pbs.twimg.com"
-    && /^\/profile_images\/\d{1,24}\/[a-zA-Z0-9_-]{1,128}\.(?:webp|png|jpe?g)$/.test(url.pathname);
-  const catbox = url.hostname === "files.catbox.moe"
-    && /^\/[a-z0-9]{6}\.(?:webp|png|jpe?g|gif)$/.test(url.pathname);
-  if (!axiom && !twitter && !catbox) unavailable();
-  return url.href;
-}
+// Pons stores a direct image URI. Public HTTPS URLs use DNS-pinned reads;
+// the caller still supplies only a token identity, never an arbitrary URL.
+export const ponsLogoUrl = publicImageUrl;
 
 export class PonsTokenImages extends DopplerTokenImages {
   provider = "pons-v2";
+  publicImages = new PublicImageReader(this.upstream);
 
   async loadImage(input, signal) {
     const [info] = await this.rpc.calls(input.chainId, [{ address: input.address,
@@ -227,7 +215,7 @@ export class PonsTokenImages extends DopplerTokenImages {
     const url = ponsLogoUrl(logo);
     // HTTPS resources can change independently of the token's metadata.
     return this.content.get(`https:${url}`, 60_000, async () =>
-      this.decode(await this.fetchUrls([url], signal), signal));
+      this.decode(await this.publicImages.get(url, signal), signal));
   }
 }
 
