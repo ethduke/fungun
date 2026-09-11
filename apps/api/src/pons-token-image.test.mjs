@@ -14,6 +14,7 @@ const axiom = `https://axiomtrading-v2.axiom-cdn.io/${'a'.repeat(44)}.webp`;
 const credentialUrl = new URL(axiom);
 credentialUrl.username = 'EXAMPLE';
 credentialUrl.password = 'EXAMPLE';
+const catbox = 'https://files.catbox.moe/abc123.png';
 const twitter = 'https://pbs.twimg.com/profile_images/123456789/example_400x400.jpg';
 const outputs = [{ type: 'address' }, { type: 'string' }, { type: 'string' },
   { type: 'tuple', components: Array.from({ length: 5 }, () => ({ type: 'string' })) }];
@@ -43,7 +44,7 @@ function fixture(logo = axiom, extra = {}) {
   return { images, upstream, requests, charges, state, advance(ms) { now += ms; } };
 }
 
-for (const logo of [axiom, twitter, `ipfs://${cid}`]) test(`Pons reads tokenLogo and decodes ${new URL(logo).hostname}`, async () => {
+for (const logo of [axiom, twitter, catbox, `ipfs://${cid}`]) test(`Pons reads tokenLogo and decodes ${new URL(logo).hostname}`, async () => {
   const f = fixture(logo);
   const result = await f.images.get(source);
   assert.equal(result.chainId, 4663);
@@ -62,7 +63,11 @@ test('Pons CDN validation rejects arbitrary URLs, credentials, queries and path 
     `${axiom}#fragment`, axiom.replace('.io/', '.io:443/'),
     axiom.replace('.io/', '.io/x/../'), 'https://pbs.twimg.com/anything.jpg',
     'https://pbs.twimg.com/profile_images/123456789/%2e%2e/image.jpg',
-    'https://axiomtrading-v2.axiom-cdn.io/api/proxy', 'ipfs://not-a-cid', '']) {
+    'https://axiomtrading-v2.axiom-cdn.io/api/proxy',
+    catbox.replace('catbox.moe', 'catbox.moe.example.invalid'),
+    catbox.replace('https:', 'http:'), `${catbox}?download=1`, `${catbox}#image`,
+    catbox.replace('/abc123', '/nested/abc123'), catbox.replace('.png', '.svg'),
+    catbox.replace('/abc123', '/abc12'), catbox.replace('/abc123', '/%61bc123'), 'ipfs://not-a-cid', '']) {
     const f = fixture(logo);
     await assert.rejects(f.images.get(source));
     assert.equal(f.requests.length, 2, 'invalid logo never starts an HTTP fetch');
@@ -71,7 +76,7 @@ test('Pons CDN validation rejects arbitrary URLs, credentials, queries and path 
 });
 
 test('Pons HTTPS logos never redirect, even to another allowed CDN path', async () => {
-  for (const location of ['http://localhost', twitter, axiom]) {
+  for (const location of ['http://localhost', twitter, axiom, catbox]) {
     const f = fixture(axiom, { response() { return new Response(null, { status: 302, headers: { location } }); } });
     await assert.rejects(f.images.get(source));
     assert.equal(f.requests.length, 3);
@@ -80,7 +85,7 @@ test('Pons HTTPS logos never redirect, even to another allowed CDN path', async 
 });
 
 test('Pons logo means an image, not a second JSON metadata document', async () => {
-  for (const logo of [axiom, `ipfs://${cid}`]) {
+  for (const logo of [axiom, catbox, `ipfs://${cid}`]) {
     const f = fixture(logo);
     f.state.bytes = Buffer.from(JSON.stringify({ image: `ipfs://${cid}` }));
     await assert.rejects(f.images.get(source));

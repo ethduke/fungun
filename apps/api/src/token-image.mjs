@@ -208,7 +208,9 @@ export function ponsLogoUrl(value) {
     && /^\/[a-zA-Z0-9_-]{16,128}\.(?:webp|png|jpe?g)$/.test(url.pathname);
   const twitter = url.hostname === "pbs.twimg.com"
     && /^\/profile_images\/\d{1,24}\/[a-zA-Z0-9_-]{1,128}\.(?:webp|png|jpe?g)$/.test(url.pathname);
-  if (!axiom && !twitter) unavailable();
+  const catbox = url.hostname === "files.catbox.moe"
+    && /^\/[a-z0-9]{6}\.(?:webp|png|jpe?g|gif)$/.test(url.pathname);
+  if (!axiom && !twitter && !catbox) unavailable();
   return url.href;
 }
 

@@ -15,6 +15,7 @@ invalidates pending image requests. Unsupported artwork leaves text COPY usable.
 
 - Root IPFS image CIDs, using the existing approved gateways and CID validation.
 - Static raster files at `https://axiomtrading-v2.axiom-cdn.io/<filename>`.
+- Static raster files at `https://files.catbox.moe/<six-character-id>.<extension>`.
 - Profile images at `https://pbs.twimg.com/profile_images/<id>/<filename>`.
 
 HTTPS paths are strictly validated; credentials, custom ports, query strings,
@@ -68,3 +69,12 @@ Pons-v2 continues to resolve `getTokenInfo().tokenLogo`; no new UniV4 metadata
 formats or image hosts are introduced. The provider, browser client, and proxy
 integration tests cover Pons IPFS/CDN images and existing O1/Doppler behavior.
 The frontend must be deployed together with the API for the live route to work.
+
+## Catbox logo fix
+
+A reported token exposed `https://files.catbox.moe/c45xq8.png` through
+`getTokenInfo().tokenLogo`. The file returned HTTP 200 and decoded successfully
+(155,203-byte PNG, 1254 × 1254), but the previous host allowlist rejected it.
+Catbox support accepts only the exact HTTPS file host and six-character raster
+file paths. Existing byte, dimension, timeout, animation, and redirect checks
+remain in force. The fixture covers successful fetch/decode and unsafe variants.
