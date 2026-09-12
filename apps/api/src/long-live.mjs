@@ -1,10 +1,12 @@
+import { readLongbowConfig } from './longbow-config.mjs';
+import { isIndependentLongbow, isCanonicalLaunchAsset } from '../../web/lib/long-encoding/long-launch.mjs';
+import { verifyLongbowLauncher, confirmLongbow } from './longbow-live.mjs';
 import { readLaunchTokens, launchPairId } from "./launch-catalog.mjs";
 import { LongRecovery } from "./long-recovery.mjs";
 import { LongRpc } from "./long-rpc.mjs";
 import { createHash, createHmac } from "node:crypto";
 import { decodeEventLog, decodeFunctionResult, isAddress, keccak256, parseAbi, toBytes, toHex, zeroAddress } from "viem";
 import { buildUnsignedLongLaunchAsync, LONG_CREATE_ABI, readLongLaunchProfile } from "./long-launch.mjs";
-import { isCanonicalLongAsset } from '../../web/lib/long-encoding/long-salt.mjs';
 import { LONG_MARKET_TICKERS } from '../../web/lib/long-encoding/long-markets.mjs';
 import { LONG_NATIVE_ETH_QUOTE, isNativeLongQuote } from '../../web/lib/long-encoding/long-launch.mjs';
 import { normalizeLaunchDetails } from "./launch-metadata.mjs";
@@ -52,16 +54,18 @@ export function validateLongInput(kind, value) {
     return value;
   }
   if (kind === "launch-prepare") {
-    if (!exact(value, ["chainId", "wallet", "draft", "pairId", "publication", ...(Object.hasOwn(value ?? {}, "editableMetadata") ? ["editableMetadata"] : [])]) || (![4663, 8453].includes(value.chainId) || (value.chainId === 8453 && !/^(?:native|rwa-[a-f0-9]{24}|(?:stonks|stonx)-[a-f0-9]{24})$/.test(value.pairId)))
+    if (!exact(value, ["chainId", "wallet", "draft", "pairId", "publication", ...(Object.hasOwn(value ?? {}, "editableMetadata") ? ["editableMetadata"] : []), ...(Object.hasOwn(value ?? {}, "feeRecipient") ? ["feeRecipient"] : [])]) || (![4663, 8453].includes(value.chainId) || (value.chainId === 8453 && !/^(?:native|rwa-[a-f0-9]{24}|(?:stonks|stonx)-[a-f0-9]{24})$/.test(value.pairId)))
       || typeof value.wallet !== "string" || !isAddress(value.wallet) || same(value.wallet, zeroAddress)
       || typeof value.pairId !== "string" || !/^(?:(?:long|longbow)-[A-Z0-9._-]{1,24}|rwa-[a-f0-9]{24}|native|crypto-USDG|pons-native|(?:stonks|stonx)-[a-f0-9]{24})$/.test(value.pairId)
       || (value.editableMetadata !== undefined && (typeof value.editableMetadata !== "boolean" || value.pairId.startsWith("long") || value.pairId === "pons-native"))
       || !exact(value.publication, ["id", "imageHash", "metadataHash"])
       || !id(value.publication.id, 48) || !id(value.publication.imageHash) || !id(value.publication.metadataHash)) fail("invalid_request", 400);
     if (/^(stonks|stonx)-/.test(value.pairId) && (value.chainId !== 8453 || value.editableMetadata !== undefined)) fail('invalid_request', 400);
+    if (value.feeRecipient !== undefined && (!value.pairId.startsWith('longbow-') || typeof value.feeRecipient !== 'string'
+      || !isAddress(value.feeRecipient) || same(value.feeRecipient, zeroAddress))) fail('invalid_longbow_beneficiary', 400);
     const draft = normalizeLaunchDetails(value.draft);
     if ((draft.launchpad === "longbow") !== value.pairId.startsWith("longbow-")) fail("invalid_request", 400);
-    return { ...value, wallet: value.wallet.toLowerCase(), draft };
+    return { ...value, wallet: value.wallet.toLowerCase(), draft, ...(value.feeRecipient !== undefined ? { feeRecipient: value.feeRecipient.toLowerCase() } : {}) };
   }
   if (kind === "launch-reserve") {
     if (!exact(value, ["id", "binding"]) || !id(value.id) || !id(value.binding)) fail("invalid_request", 400);
@@ -73,6 +77,7 @@ export function validateLongInput(kind, value) {
 }
 
 export function readLongLiveConfig(env, pad = "long") {
+  if (pad === "longbow") return readLongbowConfig(env);
   if (env.LONG_WALLET_LAUNCH !== "true") return null;
   try {
     let profile = readLongLaunchProfile(JSON.parse(env.LONG_LAUNCH_PROFILE_JSON));
@@ -91,11 +96,10 @@ export function readLongLiveConfig(env, pad = "long") {
     if (tokens.length) {
       const template = profile.quotes[0], guard = guards[template.id];
       profile = readLongLaunchProfile({ ...profile,
-        ...(pad === "longbow" ? { launchpad: "longbow", platformAllocation: env.LONGBOW_ALLOCATION_RECIPIENT } : {}),
         quotes: tokens.map(token => ({ id: launchPairId(pad, token), token: { address: token.address, codeHash: template.token.codeHash },
           decimals: 18, symbol: token.symbol, priceSource: "robinhood" })) });
       for (const q of profile.quotes) guards[q.id] = { tokenBeacon: guard.tokenBeacon, tokenImplementation: guard.tokenImplementation };
-    } else if (pad === "longbow") return null;
+    }
     if (env.LONG_EXTRA_QUOTES_JSON) {
       const extra = JSON.parse(env.LONG_EXTRA_QUOTES_JSON);
       if (!Array.isArray(extra) || extra.length > 16) fail("long_configuration");
@@ -204,7 +208,7 @@ export class LongLive {
     const selected = this.live.profile.quotes.find(q => q.id === input.pairId);
     const p = { ...this.live.profile, quotes: selected ? [selected] : [] }, q = selected;
     // Keep legacy NVDA IDs recoverable; other pairings have distinct transaction intents.
-    const key = createHmac("sha256", this.budget.key).update(`${input.wallet}:${input.publication.metadataHash}${input.pairId === "long-NVDA" ? "" : `:${input.pairId}`}`).digest("hex");
+    const key = createHmac("sha256", this.budget.key).update(`${input.wallet}:${input.publication.metadataHash}${input.pairId === "long-NVDA" ? "" : `:${input.pairId}`}${isIndependentLongbow(p) && input.feeRecipient && !same(input.feeRecipient, input.wallet) ? `:beneficiary:${input.feeRecipient}` : ""}`).digest("hex");
     const context = JSON.stringify(input), prior = this.row(key);
     if (prior && prior.context !== context) {
       // Re-publication can issue a new upload ID for identical immutable content.
@@ -223,7 +227,7 @@ export class LongLive {
     if (retry && (await this.recovery.find(key, retry.transaction)).status !== "retryable") return resume();
     if (!retry && prior && prior.expires > this.now()) {
       const cached = JSON.parse(prior.plan);
-      if (isCanonicalLongAsset(cached.predictedAsset) && Number.isInteger(cached.saltAttempt)
+      if (JSON.stringify(cached.profile) === JSON.stringify(p) && isCanonicalLaunchAsset(cached.predictedAsset, p) && Number.isInteger(cached.saltAttempt)
         && same(cached.profile?.quotes.find(entry => entry.id === input.pairId)?.token.address, q?.token.address)) return cached;
     }
     if (!q) throw new UnsupportedPairError(this.live.profile.quotes.map(q => q.id));
@@ -239,13 +243,16 @@ export class LongLive {
     const g = this.live.guards[q.id];
     await this.rpc.verify(4663, [...roles.map((r) => p[r]), ...(isNativeLongQuote(q) ? [] : [q.token]), ...(q.oracle ? [q.oracle] : [])], true, block);
     await this.rpc.verify(4663, [g.tokenBeacon, g.tokenImplementation, g.oracle, g.oracleAggregator].filter(Boolean), true, block);
-    const [airlock, factory, duration, paused, ...moduleStates] = await this.rpc.calls(4663, [
-      call(p.launcher.address, "AIRLOCK"), call(p.launcher.address, "TRUSTED_TOKEN_FACTORY"),
-      call(p.launcher.address, "RESERVATION_DURATION"), call(p.launcher.address, "paused"),
-      ...["tokenFactory", "governanceFactory", "poolInitializer", "liquidityMigrator"].map((r) => call(p.airlock.address, "getModuleState", [p[r].address])),
-    ], block);
-    if (!same(airlock, p.airlock.address) || !same(factory, p.tokenFactory.address) || Number(duration) !== 86400
-      || paused || moduleStates.some((v, i) => v !== i + 1)) fail("contract_unverified");
+    if (isIndependentLongbow(p)) await verifyLongbowLauncher(this.rpc, p, block);
+    else {
+      const [airlock, factory, duration, paused, ...moduleStates] = await this.rpc.calls(4663, [
+        call(p.launcher.address, "AIRLOCK"), call(p.launcher.address, "TRUSTED_TOKEN_FACTORY"),
+        call(p.launcher.address, "RESERVATION_DURATION"), call(p.launcher.address, "paused"),
+        ...["tokenFactory", "governanceFactory", "poolInitializer", "liquidityMigrator"].map((r) => call(p.airlock.address, "getModuleState", [p[r].address])),
+      ], block);
+      if (!same(airlock, p.airlock.address) || !same(factory, p.tokenFactory.address) || Number(duration) !== 86400
+        || paused || moduleStates.some((v, i) => v !== i + 1)) fail("contract_unverified");
+    }
     const tick = q.priceSource === "robinhood"
       ? await this.robinhoodTick(input, p, q, g, block)
       : q.priceSource === "market" ? await this.marketTick(input, p, q, g, block)
@@ -255,7 +262,7 @@ export class LongLive {
     const intentId = `${key.slice(0,8)}-${key.slice(8,12)}-${key.slice(12,16)}-${key.slice(16,20)}-${key.slice(20,32)}`;
     const miningStarted = this.miningNow();
     const plan = await buildUnsignedLongLaunchAsync({ chainId: 4663, wallet: input.wallet, draft: input.draft, pairId: q.id,
-      metadataUri: ipfsUri(publication.ipfs.metadataCid), startingTick: tick, intentId }, p, undefined, () => {
+      metadataUri: ipfsUri(publication.ipfs.metadataCid), startingTick: tick, intentId, ...(isIndependentLongbow(p) ? { feeRecipient: input.feeRecipient ?? input.wallet } : {}) }, p, undefined, () => {
         checkReadDeadline();
         // Yield a recoverable response before the request deadline. The encoder
         // keeps its exact-context checkpoint; the next request rechecks all inputs.
@@ -333,7 +340,7 @@ export class LongLive {
     if (Math.abs(this.now() / 1000 - timestamp) > 30 || tokenDecimals !== 18 || feedDecimals !== 8
       || !/^0x0{24}[a-f0-9]{40}$/i.test(beacon) || !same(`0x${beacon.slice(-40)}`, g.tokenBeacon.address)
       || !same(implementation, g.tokenImplementation.address) || !same(aggregator, g.oracleAggregator.address)) fail("contract_unverified");
-    if (!available) fail("ticker_reserved");
+    if (!isIndependentLongbow(p) && !available) fail("ticker_reserved");
     // Fail closed outside a fresh trading observation, including corporate-action pauses.
     const [roundId, answer, started, updated, answered] = round;
     if (oraclePaused || answer <= 0n || answer > 10n ** 20n || started === 0n || started > updated
@@ -344,12 +351,12 @@ export class LongLive {
     const [decimals, symbol, implementation, paused, multiplier, available] = await this.rpc.calls(4663, [
       call(q.token.address, "decimals"), call(q.token.address, "symbol"), call(g.tokenBeacon.address, "implementation"),
       call(q.token.address, "oraclePaused"), call(q.token.address, "uiMultiplier"),
-      call(p.launcher.address, "isTickerAvailable", [input.draft.ticker]),
+      ...(isIndependentLongbow(p) ? [] : [call(p.launcher.address, "isTickerAvailable", [input.draft.ticker])]),
     ], block);
     const [beacon] = await this.rpc.batch(4663, [{ method: "eth_getStorageAt", params: [q.token.address, beaconSlot, block] }]);
     if (decimals !== 18 || symbol !== q.symbol || !same(implementation, g.tokenImplementation.address)
       || !/^0x0{24}[a-f0-9]{40}$/i.test(beacon) || !same(`0x${beacon.slice(-40)}`, g.tokenBeacon.address)) fail("contract_unverified");
-    if (!available) fail("ticker_reserved");
+    if (!isIndependentLongbow(p) && !available) fail("ticker_reserved");
     if (paused || multiplier <= 0n || multiplier > 10n ** 36n) fail("oracle_stale");
     let quote;
     try { quote = await this.cache.get(`stock-price:${q.symbol}`, 15000, async () => {
@@ -388,10 +395,10 @@ export class LongLive {
     const nativeEth = isNativeLongQuote(q);
     const [decimals, symbol, available] = await this.rpc.calls(4663, [
       ...(nativeEth ? [] : [call(q.token.address, "decimals"), call(q.token.address, "symbol")]),
-      call(p.launcher.address, "isTickerAvailable", [input.draft.ticker]),
+      ...(isIndependentLongbow(p) ? [] : [call(p.launcher.address, "isTickerAvailable", [input.draft.ticker])]),
     ], block).then(values => nativeEth ? [18, 'ETH', ...values] : values);
     if (decimals !== q.decimals || symbol !== (nativeEth ? 'ETH' : g.symbol)) fail("contract_unverified");
-    if (!available) fail("ticker_reserved");
+    if (!isIndependentLongbow(p) && !available) fail("ticker_reserved");
     if (g.storageSlot) {
       const [word] = await this.rpc.batch(4663, [{ method: "eth_getStorageAt", params: [q.token.address, g.storageSlot, block] }]);
       if (!/^0x0{24}[a-f0-9]{40}$/i.test(word) || !same(`0x${word.slice(-40)}`, g.tokenImplementation.address)) fail("contract_unverified");
@@ -423,6 +430,7 @@ export class LongLive {
     if (!row || JSON.parse(row.plan).binding !== input.binding) fail("invalid_request", 400);
     if (row.expires <= this.now()) fail("quote_expired");
     const plan = JSON.parse(row.plan), context = JSON.parse(row.context);
+    if (isIndependentLongbow(this.live.profile) && JSON.stringify(plan.profile) !== JSON.stringify({ ...this.live.profile, quotes: this.live.profile.quotes.filter(q => q.id === context.pairId) })) fail("quote_expired");
     if (context.pairId === 'long-ETH' && !isNativeLongQuote(plan.profile?.quotes.find(q => q.id === 'long-ETH')))
       fail('quote_expired');
     const changed = this.db.prepare("UPDATE long_launches SET state='wallet' WHERE id=? AND state IN ('prepared','wallet') AND tx_hash IS NULL AND expires>?").run(input.id, this.now());
@@ -487,6 +495,7 @@ export class LongLive {
     return rpcNumber(receipt.gasUsed) * rpcNumber(receipt.effectiveGasPrice);
   }
   async confirm(plan, context, receipt, block) {
+    if (isIndependentLongbow(plan.profile)) return confirmLongbow(this.rpc, plan, context, receipt, block);
     const expected = plan.transaction;
       const p = plan.profile, q = p.quotes.find((q) => q.id === context.pairId);
       const events = receipt.logs.filter((l) => same(l.address, p.launcher.address)).flatMap((l) => {

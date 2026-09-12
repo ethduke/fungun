@@ -280,3 +280,11 @@ await test('production four-pad drafts gain pons without losing existing choices
   const oldest = await decodeLaunchDraft(legacy);
   assert.equal(oldest?.selection.destinations.length, 6);
 });
+
+await test('Longbow beneficiary survives draft reload without entering artwork identity', async () => {
+  const original = draft(), artwork = await draftArtworkKey(original, original.image!.blob!);
+  original.selection.destinations = original.selection.destinations.map(p => p.id === 'longbow' ? { ...p, feeRecipient: `0x${'2'.repeat(40)}` } : p);
+  const restored = await decodeLaunchDraft(await encodeLaunchDraft(original));
+  assert.equal(restored?.selection.destinations.find(p => p.id === 'longbow')?.feeRecipient, `0x${'2'.repeat(40)}`);
+  assert.equal(await draftArtworkKey(original, original.image!.blob!), artwork);
+});

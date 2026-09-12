@@ -94,3 +94,7 @@
   text-decoration: underline;
   text-underline-offset: 3px;
 }
+
+.longbow-beneficiary { display: grid; gap: 6px; width: 100%; margin: 8px 0; font-size: 12px; }
+.longbow-beneficiary input { width: 100%; min-width: 0; box-sizing: border-box; padding: 8px; border: 1px solid var(--border); border-radius: 6px; background: transparent; color: inherit; font: inherit; }
+.longbow-beneficiary small { opacity: .72; line-height: 1.4; }

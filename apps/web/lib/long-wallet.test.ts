@@ -214,3 +214,17 @@ void test('service limits disclose the actual retry interval instead of claiming
   assert.match(launchMessage(new LaunchError('rate_limited', 60)), /1 minute\./);
   assert.match(launchMessage(new LaunchError('rate_limited', 5)), /5 seconds/);
 });
+
+void test('browser binds the independent Longbow beneficiary and refuses a legacy-route downgrade', () => {
+  const f = response();
+  const profile = { ...f.profile, launchpad: 'longbow', route: 'independent', quotes: [{ ...f.profile.quotes[0], id: 'longbow-NVDA' }] };
+  const input = { ...f.input, pairId: 'longbow-NVDA', draft: { ...f.input.draft, launchpad: 'longbow' as const }, feeRecipient: addr(2001) };
+  const plan = buildUnsignedLongLaunch({ chainId: 4663, wallet: input.wallet, feeRecipient: input.feeRecipient,
+    draft: input.draft, pairId: input.pairId, metadataUri: `ipfs://${f.published.ipfs!.metadataCid}`,
+    startingTick: f.startingTick, intentId: f.intentId }, profile);
+  const raw = { ...f.raw, profile, binding: plan.binding, review: plan.review, saltAttempt: plan.saltAttempt,
+    predictedAsset: plan.predictedAsset, transaction: { ...f.raw.transaction, data: plan.transaction.data } };
+  assert.equal(validateLongPlan(raw, input, f.published, performance.now()).transaction.data, plan.transaction.data);
+  assert.throws(() => validateLongPlan(raw, { ...input, feeRecipient: addr(2002) }, f.published, performance.now()));
+  assert.throws(() => validateLongPlan({ ...raw, profile: { ...f.profile, launchpad: 'longbow', platformAllocation: addr(15) } }, input, f.published, performance.now()));
+});

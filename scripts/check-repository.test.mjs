@@ -190,7 +190,7 @@ test('CLI reports filenames and rules without credential contents', (t) => {
 
 
 test('only exact reviewed public deployment files may contain literal contract identities', () => {
-  for (const path of ['apps/api/src/o1-fee-profiles.mjs', 'docs/o1-fee-verification.md']) {
+  for (const path of ['apps/api/src/o1-fee-profiles.mjs', 'docs/o1-fee-verification.md', 'apps/web/lib/long-encoding/long-launch.mjs']) {
     const content = readFileSync(new URL('../' + path, import.meta.url));
     assert.deepEqual(analyzeBlob(path, content), []);
     assert.ok(analyzeBlob('unreviewed.mjs', content).includes('literal-evm-address-key-or-signature'));

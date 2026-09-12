@@ -317,3 +317,30 @@ test("recipient ordering is numeric and salt exhaustion never produces a fallbac
     code: "long_salt_unavailable",
   });
 });
+
+test('independent Longbow binds both beneficiary streams, burns routing control and sells the full supply', async () => {
+  const { LONGBOW_HOOK_PARAMETERS, LONGBOW_LOCKED } = await import('../../web/lib/long-encoding/long-launch.mjs');
+  const p = { ...profile(), launchpad: 'longbow', route: 'independent', quotes: [{ ...profile().quotes[0], id: 'longbow-EXAMPLE' }] };
+  const request = { ...input(), pairId: 'longbow-EXAMPLE', draft: { ...input().draft, launchpad: 'longbow' }, feeRecipient: address(2001) };
+  const plan = await buildUnsignedLongLaunchAsync(request, p, publicOrigin);
+  assert.match(plan.predictedAsset, /1337$/i);
+  assert.equal(plan.review.feeRecipient, request.feeRecipient);
+  const params = decodeFunctionData({ abi: LONG_CREATE_ABI, data: plan.transaction.data }).args[0];
+  const pool = decodeAbiParameters(LONG_POOL_PARAMETERS, params.poolInitializerData)[0];
+  const hook = decodeAbiParameters(LONGBOW_HOOK_PARAMETERS, pool.onInitializationDopplerHookCalldata)[0];
+  assert.equal(params.numTokensToSell, params.initialSupply);
+  assert.deepEqual(decodeAbiParameters(LONG_TOKEN_PARAMETERS, params.tokenFactoryData).slice(2, 6), [[], [], [], []]);
+  assert.equal(hook.buybackDst.toLowerCase(), LONGBOW_LOCKED);
+  assert.equal(hook.feeRoutingMode, 1);
+  assert.equal(hook.integratorConfig.feeShare, 300000);
+  assert.deepEqual(hook.feeDistributionInfo, [0n, 0n, 10n**18n, 0n, 0n, 0n, 10n**18n, 0n]);
+  assert.equal(hook.feeBeneficiaries[0].beneficiary.toLowerCase(), request.feeRecipient);
+  assert.equal(hook.feeBeneficiaries[0].shares, 10n**18n);
+  assert.equal(pool.beneficiaries.find(b => b.beneficiary.toLowerCase() === request.feeRecipient).shares, 95n*10n**16n);
+  assert.ok(!pool.beneficiaries.some(b => b.beneficiary.toLowerCase() === request.wallet));
+  assert.deepEqual(buildUnsignedLongLaunch(request, p, publicOrigin, plan.saltAttempt), plan);
+  for (const feeRecipient of [zeroAddress, LONGBOW_LOCKED, p.integrator, p.protocolBeneficiary, 'invalid'])
+    assert.throws(() => buildUnsignedLongLaunch({ ...request, feeRecipient }, p, publicOrigin), /invalid_longbow_beneficiary/);
+  assert.throws(() => readLongLaunchProfile({ ...p, platformAllocation: address(15) }));
+  assert.throws(() => buildUnsignedLongLaunch({ ...input(), feeRecipient: address(2001) }, profile(), publicOrigin));
+});

@@ -18,9 +18,11 @@ function remember(key, value) {
 
 // Bind the first 28 salt bytes to the launch context; enumerate with the last
 // four. Hash bytes directly, avoiding per-candidate hex/checksum allocations.
-function search(factory, numeraire, binding, suppliedAttempt) {
+function search(factory, numeraire, binding, suppliedAttempt, suffix = '1e18') {
+  if (!['1e18', '1337'].includes(suffix)) throw new ServiceError('invalid_long_salt');
+  const suffixHigh = parseInt(suffix.slice(0, 2), 16), suffixLow = parseInt(suffix.slice(2), 16);
   const native = BigInt(numeraire) === 0n;
-  if (!native && BigInt(numeraire) <= 0x1e18n) throw new ServiceError('long_salt_unavailable');
+  if (!native && BigInt(numeraire) <= BigInt(`0x${suffix}`)) throw new ServiceError('long_salt_unavailable');
   if (suppliedAttempt !== undefined && (!Number.isInteger(suppliedAttempt)
     || suppliedAttempt < 0 || suppliedAttempt >= LONG_SALT_ATTEMPTS))
     throw new ServiceError('invalid_long_salt');
@@ -31,7 +33,7 @@ function search(factory, numeraire, binding, suppliedAttempt) {
   bytes.set(hexToBytes(factory.initCodeHash), 53);
   const view = new DataView(bytes.buffer);
   const quote = hexToBytes(numeraire);
-  const key = `${factory.address}:${factory.initCodeHash}:${numeraire}:${binding}`;
+  const key = `${factory.address}:${factory.initCodeHash}:${numeraire}:${binding}:${suffix}`;
   const known = suppliedAttempt ?? cache.get(key)?.saltAttempt;
   const start = known ?? cache.get(key)?.nextAttempt ?? 0;
   const end = known === undefined ? LONG_SALT_ATTEMPTS : known + 1;
@@ -39,7 +41,7 @@ function search(factory, numeraire, binding, suppliedAttempt) {
     for (let attempt = start; attempt < end; attempt++) {
       view.setUint32(49, attempt);
       const digest = keccak256(bytes, 'bytes');
-      if (digest[30] === 0x1e && digest[31] === 0x18) {
+      if (digest[30] === suffixHigh && digest[31] === suffixLow) {
         let lower = false;
         for (let i = 0; i < 20; i++) {
           if (digest[i + 12] !== quote[i]) { lower = digest[i + 12] < quote[i]; break; }
@@ -62,13 +64,13 @@ function search(factory, numeraire, binding, suppliedAttempt) {
   return candidates();
 }
 
-export function mineLongSalt(factory, numeraire, binding, suppliedAttempt) {
-  const iterator = search(factory, numeraire, binding, suppliedAttempt);
+export function mineLongSalt(factory, numeraire, binding, suppliedAttempt, suffix = '1e18') {
+  const iterator = search(factory, numeraire, binding, suppliedAttempt, suffix);
   for (;;) { const next = iterator.next(); if (next.done) return next.value; }
 }
 
-export async function mineLongSaltAsync(factory, numeraire, binding, check = () => {}) {
-  const iterator = search(factory, numeraire, binding);
+export async function mineLongSaltAsync(factory, numeraire, binding, check = () => {}, suffix = '1e18') {
+  const iterator = search(factory, numeraire, binding, undefined, suffix);
   for (;;) {
     check();
     const next = iterator.next();

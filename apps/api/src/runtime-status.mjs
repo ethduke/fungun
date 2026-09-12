@@ -72,6 +72,11 @@ export function runtimeStatus(env) {
         ],
         ["READ_UPSTREAMS", "LONG_WALLET_LAUNCH"],
       ),
+      feature("longbow_wallet_launch", [rpc,
+        ["LONGBOW_LAUNCH_PROFILE_JSON", !!config.longbowLaunch],
+        ["LONGBOW_LAUNCH_GUARDS_JSON", present(env.LONGBOW_LAUNCH_GUARDS_JSON)],
+        ["LAUNCH_ASSET_SERVICE_ORIGIN", present(env.LAUNCH_ASSET_SERVICE_ORIGIN)],
+      ], ["READ_UPSTREAMS", "LONGBOW_WALLET_LAUNCH"]),
       feature("pons_wallet_launch", [
         rpc,
         ["PONS_LAUNCH_PROFILE_JSON", present(env.PONS_LAUNCH_PROFILE_JSON)],

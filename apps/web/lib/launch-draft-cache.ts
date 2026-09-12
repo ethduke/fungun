@@ -111,6 +111,7 @@ function selection(value: unknown): LaunchDraft['selection'] {
       !text(item.pairId, 160) ||
       !/^[A-Za-z0-9-]+$/.test(item.pairId) ||
       typeof item.editableMetadata !== 'boolean'
+      || (item.feeRecipient !== undefined && (item.id !== 'longbow' || !text(item.feeRecipient, 42)))
     )
       return invalid();
     // Only copy recognized fields: credentials or arbitrary cache properties
@@ -122,6 +123,7 @@ function selection(value: unknown): LaunchDraft['selection'] {
       route: item.route as Destination['route'],
       pairId: item.pairId as Destination['pairId'],
       editableMetadata: item.editableMetadata,
+      ...(item.feeRecipient !== undefined ? { feeRecipient: item.feeRecipient as string } : {}),
     };
   });
   if (new Set(destinations.map((item) => item.id)).size !== destinations.length) return invalid();

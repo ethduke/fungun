@@ -1,7 +1,7 @@
 import { STONX_ABI, STONX_ROLES, buildUnsignedStonxLaunch, readStonxProfile } from './long-encoding/stonx-launch.mjs';
 import { decodeFunctionResult, encodeFunctionData, toHex, toBytes, keccak256, type EIP1193Provider } from 'viem';
-import { buildUnsignedLongLaunch, readLongLaunchProfile, isNativeLongQuote } from './long-encoding/long-launch.mjs';
-import { LONG_SALT_ATTEMPTS, isCanonicalLongAsset } from './long-encoding/long-salt.mjs';
+import { buildUnsignedLongLaunch, readLongLaunchProfile, isNativeLongQuote, isIndependentLongbow, isCanonicalLaunchAsset, LONG_CREATE_ABI } from './long-encoding/long-launch.mjs';
+import { LONG_SALT_ATTEMPTS } from './long-encoding/long-salt.mjs';
 import { assetDraft, assetWallet, type AssetDraft, type PublishedAsset } from './asset-protocol.ts';
 import { parseLaunchFunding, fundingMessage, type LaunchFunding } from './launch-funding.ts';
 import { parseLaunchFeeSource, type LaunchFeeSource } from './launch-fee-source.ts';
@@ -24,7 +24,7 @@ export const isEnabledLaunchPair = (pairId: string | undefined): pairId is strin
   typeof pairId === 'string' && /^(?:(?:long|longbow)-[A-Z0-9._-]{1,24}|(?:rwa|stonks|stonx)-[a-f0-9]{24}|native|crypto-USDG|pons-native)$/.test(pairId);
 
 export type LaunchInput = { chainId: ChainId; wallet: string; draft: AssetDraft; pairId: string;
-  publication: { id: string; imageHash: string; metadataHash: string }; editableMetadata?: boolean };
+  publication: { id: string; imageHash: string; metadataHash: string }; editableMetadata?: boolean; feeRecipient?: string };
 export type LongPlan = {
   id: string; binding: string; chainId: ChainId; quotedAt: number; expiresAt: number; deadline: number;
   transaction: { chainId: '0x1237' | '0x2105'; from: string; to: string; data: `0x${string}`; value: `0x${string}`; nonce: `0x${string}`; gas: `0x${string}`; gasPrice: `0x${string}` };
@@ -79,6 +79,7 @@ export function launchMessage(error: unknown) {
   }
   const code = error instanceof Error ? error.message : '';
   const messages: Record<string, string> = {
+    invalid_longbow_beneficiary: 'Enter a valid beneficiary wallet or vault, different from the protocol and Longbow fee wallets.',
     long_address_pending: 'Token address preparation is taking longer than usual. Your draft is saved. Try Launch coin again to continue.',
     long_salt_unavailable: 'A Long-compatible token address could not be prepared in time. No transaction was sent. Try preparing again.',
     invalid_long_salt: 'The prepared token address does not meet Long’s requirements. Refresh the launch estimate.',
@@ -165,11 +166,13 @@ export function validateLongPlan(raw: unknown, input: LaunchInput, published: Pu
       && buildInput.chainDeadline * 1000 > p.expiresAt && buildInput.chainDeadline * 1000 <= p.serverTime + 1800000);
     rebuilt = buildUnsignedO1Launch(buildInput, p.profile, p.saltAttempt);
   } else {
+    const profile = readLongLaunchProfile(p.profile);
+    assert(!input.pairId.startsWith('longbow-') || isIndependentLongbow(profile));
     assert(input.pairId !== 'long-ETH' || isNativeLongQuote(readLongLaunchProfile(p.profile).quotes.find((q: { id: string }) => q.id === 'long-ETH')));
     assert(input.chainId === 4663 && Number.isInteger(p.saltAttempt) && p.saltAttempt >= 0 && p.saltAttempt < LONG_SALT_ATTEMPTS
-      && isCanonicalLongAsset(p.predictedAsset));
+      && isCanonicalLaunchAsset(p.predictedAsset, profile));
     rebuilt = buildUnsignedLongLaunch({ chainId: 4663, wallet: assetWallet(input.wallet), draft: inputDraft,
-      pairId: input.pairId, metadataUri: `ipfs://${published.ipfs!.metadataCid}`, startingTick: p.startingTick, intentId: p.intentId }, p.profile, undefined, p.saltAttempt);
+      pairId: input.pairId, metadataUri: `ipfs://${published.ipfs!.metadataCid}`, startingTick: p.startingTick, intentId: p.intentId, ...(isIndependentLongbow(profile) ? { feeRecipient: input.feeRecipient ?? input.wallet } : {}) }, p.profile, undefined, p.saltAttempt);
   }
   if (!rebuilt) throw new LaunchError('launch_transaction_changed');
   assert(rebuilt.binding === p.binding && (pons || ('predictedAsset' in rebuilt && same(rebuilt.predictedAsset, p.predictedAsset)))
@@ -263,6 +266,17 @@ export async function sendLongWallet(provider: EIP1193Provider, plan: LongPlan, 
     const result = await provider.request({ method: 'eth_call', params: [{ from: tx.from, to: tx.to, data: tx.data, value: tx.value } as never, 'pending'] });
     const [asset, curve] = decodeFunctionResult({ abi: PONS_ABI, functionName: 'launchToken', data: result });
     if (!same(asset, plan.predictedAsset) || !same(curve, plan.predictedPool)) throw new LaunchError('launch_transaction_changed');
+    await check();
+  }
+  if (isIndependentLongbow(plan.profile)) {
+    const profile = readLongLaunchProfile(plan.profile);
+    for (const contract of ['airlock', 'poolInitializer', 'dopplerHook'].map(role => (profile as unknown as Record<string, { address: `0x${string}`; codeHash: string }>)[role])) {
+      const code = await provider.request({ method: 'eth_getCode', params: [contract.address as `0x${string}`, 'latest'] });
+      if (code === '0x' || !same(keccak256(code), contract.codeHash)) throw new LaunchError('contract_unverified');
+    }
+    const result = await provider.request({ method: 'eth_call', params: [{ from: tx.from, to: tx.to, data: tx.data, value: tx.value } as never, 'pending'] });
+    const [asset, pool] = decodeFunctionResult({ abi: LONG_CREATE_ABI, functionName: 'create', data: result });
+    if (!same(asset, plan.predictedAsset) || !same(pool, plan.predictedPool)) throw new LaunchError('launch_transaction_changed');
     await check();
   }
   await reserve();

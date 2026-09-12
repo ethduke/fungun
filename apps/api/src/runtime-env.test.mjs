@@ -72,6 +72,10 @@ test("RPC batch compatibility is forwarded only as server runtime configuration"
 test("all four Long wallet launch settings stay API-only and are forwarded together", () => {
   assert.deepEqual(LONG_WALLET_LAUNCH_RUNTIME_NAMES, [
     "LONG_WALLET_LAUNCH",
+    "LONGBOW_WALLET_LAUNCH",
+    "LONGBOW_LAUNCH_PROFILE_JSON",
+    "LONGBOW_LAUNCH_GUARDS_JSON",
+    "LONGBOW_EXTRA_QUOTES_JSON",
     "LONG_LAUNCH_PROFILE_JSON",
     "LONG_LAUNCH_GUARDS_JSON",
     "LAUNCH_ASSET_SERVICE_ORIGIN",

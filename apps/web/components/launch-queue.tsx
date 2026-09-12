@@ -34,9 +34,10 @@ export function LaunchQueue({ destinations, enabled, ready, tickerReserved, name
         <LongLaunch
           enabled={enabled}
           chainId={pad.chainId}
-          ready={ready && !conflicting && (!['long', 'longbow'].includes(pad.id) || !tickerReserved)}
+          ready={ready && !conflicting && (pad.id !== 'long' || !tickerReserved)}
           pairId={pad.pairId}
           editableMetadata={pad.editableMetadata}
+          feeRecipient={pad.id === "longbow" ? pad.feeRecipient || undefined : undefined}
           showPadName={destinations.length > 1}
           buttonLabel={step.label}
           autoStart={pad.id === step.current && step.autoStart}

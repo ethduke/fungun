@@ -44,6 +44,9 @@ async function fixture(t, pad = 'long') {
     verify: async (...args) => { seen.push(args); if (changes.code) throw new ServiceError('contract_unverified'); },
     calls: async (_chain, entries) => entries.map((e) => {
       switch(e.functionName) {
+        case 'airlock': return p.airlock.address;
+        case 'owner': return p.protocolBeneficiary;
+        case 'isDopplerHookEnabled': return changes.flags ?? 3n;
         case 'AIRLOCK': return p.airlock.address;
         case 'TRUSTED_TOKEN_FACTORY': return p.tokenFactory.address;
         case 'RESERVATION_DURATION': return 86400;
@@ -115,7 +118,7 @@ test('preparation binds metadata, verifies dependencies at one block and returns
   assert.ok(!f.requests.some((m) => /send|sign/i.test(m)));
 });
 
-test('LONG config resolves ETH to native currency while Longbow retains its ERC-20 quote', async t => {
+test('LONG config resolves ETH to native currency without enabling Longbow implicitly', async t => {
   const f = await fixture(t);
   const weth = { quote: { symbol: 'ETH', token: contract(35), decimals: 18, onchainSymbol: 'WETH' },
     guards: { tokenImplementation: contract(36), storageSlot: hash(37) } };
@@ -126,8 +129,7 @@ test('LONG config resolves ETH to native currency while Longbow retains its ERC-
   const long = readLongLiveConfig(env), bow = readLongLiveConfig(env, 'longbow');
   assert.deepEqual(long.profile.quotes.find(q => q.id === 'long-ETH'), LONG_NATIVE_ETH_QUOTE);
   assert.deepEqual(long.guards['long-ETH'], {});
-  assert.equal(bow.profile.quotes.find(q => q.id === 'longbow-ETH').token.address, weth.quote.token.address);
-  assert.deepEqual(bow.guards['longbow-ETH'], { ...weth.guards, symbol: 'WETH' });
+  assert.equal(bow, null);
 });
 
 test('native ETH preparation makes no ERC-20 reads and invalidates unsent WETH quotes', async t => {
@@ -517,4 +519,41 @@ test('background launch fee requires current verified contract code and includes
   assert.ok(f.seen.some(([,contracts,,block])=>contracts.length===1&&contracts[0].address===f.p.launcher.address&&block==='0x64'));
   f.advance(301000);f.changes.code=true;
   await assert.rejects(f.service.run('launch-estimate',input),/unverified/);
+});
+
+test('independent Longbow preparation never calls LONG registry or pause controls and binds recipient changes', async t => {
+  const f = await fixture(t, 'longbow');
+  delete f.p.platformAllocation; f.p.route = 'independent';
+  f.p.quotes = [{ id: 'longbow-NVDA', token: f.p.quotes[0].token, symbol: 'NVDA', priceSource: 'robinhood', decimals: 18 }];
+  f.service.robinhoodTick = async () => -160000;
+  const called = [], original = f.options.rpc.calls;
+  f.options.rpc.calls = async (...args) => { called.push(...args[1].map(c => c.functionName)); return original(...args); };
+  f.changes.paused = true; f.changes.reserved = true;
+  const input = { ...f.input, feeRecipient: addr(2001) };
+  const plan = await f.service.run('launch-prepare', input);
+  assert.match(plan.predictedAsset, /1337$/i);
+  assert.equal(plan.review.feeRecipient, input.feeRecipient);
+  assert.equal(plan.review.tokensForSale, plan.review.totalSupply);
+  assert.ok(!called.some(name => ['AIRLOCK', 'paused', 'isTickerAvailable', 'RESERVATION_DURATION', 'TRUSTED_TOKEN_FACTORY'].includes(name)));
+  assert.deepEqual(await f.service.run('launch-prepare', input), plan);
+  const changed = await f.service.run('launch-prepare', { ...input, feeRecipient: addr(2002) });
+  assert.notEqual(changed.id, plan.id); assert.notEqual(changed.binding, plan.binding);
+  const legacy = { ...plan, profile: { ...plan.profile, route: undefined, platformAllocation: addr(15) } };
+  f.budget.db.prepare('UPDATE long_launches SET plan=? WHERE id=?').run(JSON.stringify(legacy), plan.id);
+  assert.equal((await f.service.run('launch-estimate', { chainId: 4663, pairId: input.pairId })).launchpadFeeWei, '0');
+  f.changes.flags = 0n;
+  await assert.rejects(f.service.run('launch-prepare', { ...input, feeRecipient: addr(2003) }), /contract_unverified/);
+});
+
+test('Longbow requires its own enabled independent profile and valid beneficiary requests', async t => {
+  const f = await fixture(t);
+  assert.equal(readLongLiveConfig({ LONG_WALLET_LAUNCH: 'true', LONG_LAUNCH_PROFILE_JSON: JSON.stringify(f.p) }, 'longbow'), null);
+  const p = { ...f.p, launchpad: 'longbow', route: 'independent', quotes: [{ id: 'longbow-NVDA', token: f.p.quotes[0].token, decimals: 18, symbol: 'NVDA', priceSource: 'robinhood' }] };
+  const env = { LONGBOW_WALLET_LAUNCH: 'true', LONGBOW_LAUNCH_PROFILE_JSON: JSON.stringify(p),
+    LONGBOW_LAUNCH_GUARDS_JSON: JSON.stringify({ 'longbow-NVDA': { tokenBeacon: f.g.tokenBeacon, tokenImplementation: f.g.tokenImplementation } }),
+    LAUNCH_ASSET_SERVICE_ORIGIN: 'https://assets.example.com' };
+  assert.equal(readLongLiveConfig(env, 'longbow').profile.route, 'independent');
+  assert.throws(() => readLongLiveConfig({ ...env, LONGBOW_LAUNCH_PROFILE_JSON: JSON.stringify({ ...f.p, launchpad: 'longbow', platformAllocation: addr(15) }) }, 'longbow'));
+  assert.throws(() => readLongLiveConfig({ ...env, LONGBOW_LAUNCH_GUARDS_JSON: '{}' }, 'longbow'));
+  assert.throws(() => validateLongInput('launch-prepare', { ...f.input, feeRecipient: addr(2001) }), /invalid_longbow_beneficiary/);
 });

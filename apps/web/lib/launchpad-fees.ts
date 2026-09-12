@@ -30,13 +30,13 @@ const FEE_INFO = {
     sourceUrl: 'https://docs.o1.exchange/launchpad/trading/fees-referrals',
   },
   longbow: {
-    label: 'Your LP fee share',
-    creatorPercent: 95,
-    remainder: '5% protocol beneficiary',
+    label: 'Beneficiary hook fee share',
+    creatorPercent: 65,
+    remainder: '30% Longbow · 5% Doppler',
     details:
-      'Longbow’s default LongLauncher route allocates 95% of LP fees to you and 5% to the protocol beneficiary. Separate hook fees are not included in this split. This route also allocates 1% of the token supply to Longbow at launch; that is separate from fee revenue. Longbow’s alternate launch routes use different fee splits.',
-    sourceLabel: 'Longbow default launch route',
-    sourceUrl: 'https://longbow.gg/launch?route=long',
+      'Fungun uses the independent Longbow launcher. The beneficiary receives 65% of hook fees; Longbow receives 30% and Doppler 5%. Separately, the beneficiary receives 95% of the 0.1% LP fee. Hook fees start at 80% and decay to 1% over 10 seconds. The full supply goes on the curve. The beneficiary can be your wallet or a compatible vault and claims fees in the currencies collected. No stock conversion or holder distribution is performed by Fungun. Doppler retains control over hook availability.',
+    sourceLabel: 'Longbow independent launch route',
+    sourceUrl: 'https://longbow.gg/launch?route=longbow',
   },
 } as const;
 

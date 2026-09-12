@@ -48,6 +48,7 @@ type LongLaunchProps = {
   enabled: boolean;
   ready: boolean;
   editableMetadata?: boolean;
+  feeRecipient?: string;
   showPadName?: boolean;
   buttonLabel?: string;
   autoStart?: boolean;
@@ -68,14 +69,14 @@ type LongLaunchProps = {
 export function LongLaunch(props: LongLaunchProps) {
   const { address } = useConnectedAccount();
   const { hydrated } = useDraftCache();
-  const { chainId, name, ticker, description, image, pairId, editableMetadata = false } = props;
+  const { chainId, name, ticker, description, image, pairId, editableMetadata = false, feeRecipient } = props;
   const identity = JSON.stringify([
     address?.toLowerCase(),
     name,
     ticker,
     description,
     image?.url,
-    pairId, editableMetadata, chainId,
+    pairId, editableMetadata, feeRecipient, chainId,
   ]);
   const [resolved, setResolved] = useState<{
     identity: string;
@@ -89,7 +90,7 @@ export function LongLaunch(props: LongLaunchProps) {
       .then((blob) =>
         launchRecoveryScope(
           address,
-          editableMetadata ? `${pairId}:editable` : pairId,
+          feeRecipient ? `${pairId}:beneficiary:${feeRecipient.toLowerCase()}` : editableMetadata ? `${pairId}:editable` : pairId,
           { name, ticker, description },
           blob, chainId,
         ),
@@ -104,7 +105,7 @@ export function LongLaunch(props: LongLaunchProps) {
     return () => {
       active = false;
     };
-  }, [hydrated, address, name, ticker, description, image, pairId, editableMetadata, chainId, identity]);
+  }, [hydrated, address, name, ticker, description, image, pairId, editableMetadata, feeRecipient, chainId, identity]);
   if (!props.enabled) return null;
   if (!address || !image || !pairId || !hydrated)
     return <ScopedLongLaunch key={identity} {...props} recoveryScope="" />;
@@ -135,6 +136,7 @@ function ScopedLongLaunch({
   enabled,
   ready,
   editableMetadata = false,
+  feeRecipient,
   showPadName = false,
   buttonLabel,
   autoStart = false,
@@ -189,7 +191,7 @@ function ScopedLongLaunch({
     description,
     image?.url,
     account.address?.toLowerCase(),
-    pairId, editableMetadata, chainId,
+    pairId, editableMetadata, feeRecipient, chainId,
     ready,
     enabled,
   ]);
@@ -343,6 +345,7 @@ function ScopedLongLaunch({
             draft,
             pairId,
             ...(padId === 'o1' ? { editableMetadata } : {}),
+            ...(padId === 'longbow' && feeRecipient ? { feeRecipient } : {}),
             publication: {
               id: artwork.id,
               imageHash: artwork.imageHash,
@@ -580,9 +583,12 @@ function ScopedLongLaunch({
               <p>
                 {name} · ${ticker} · {Number(wei(validPlan.review.totalSupply) / 10n ** 18n).toLocaleString()} tokens · no creator allocation ·
                 {padId === 'stonks' ? 'launch details recorded on-chain' : validPlan.review.metadataMutable ? "editable metadata" : "fixed metadata"}
-                {padId === "longbow" && " · 1% Longbow allocation"}
+                {padId === "longbow" && " · full supply on the curve"}
                 {padId === "pons" && " · 0% creator tax · buybacks off"}
               </p>
+              {padId === 'longbow' && 'feeRecipient' in validPlan.review && <p>
+                Fee beneficiary: {String(validPlan.review.feeRecipient)}. Receives 65% of hook fees and 95% of LP fees.
+              </p>}
               {padId === 'stonks' && <p>
                 Creator share: {validPlan.terms!.creatorBps / 100}% of the 1% trading fee. Liquidity is locked.
                 {!validPlan.condition!.priceFresh && ' The stock price uses its saved anchor.'}

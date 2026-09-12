@@ -31,25 +31,25 @@ const draft = {
 };
 const destinations = () => structuredClone(DEFAULT_DESTINATIONS);
 
-await test('selecting Long or Longbow switches the shared ticker destination and preserves O1 and pairings', () => {
+await test('selecting Longbow preserves Long and O1 selections', () => {
   let selected = destinations().map(pad => pad.id === 'o1' ? { ...pad, selected: true } : pad);
   const original = structuredClone(selected);
   selected = selectDestination(selected, { ...selected[2], selected: true });
-  assert.deepEqual(selected.map(pad => pad.selected), [false, true, true, false, false, false]);
+  assert.deepEqual(selected.map(pad => pad.selected), [true, true, true, false, false, false]);
   assert.deepEqual(validateDraft(draft, selected, 4663), {});
   selected = selectDestination(selected, { ...selected[0], selected: true });
-  assert.deepEqual(selected.map(pad => pad.selected), [true, true, false, false, false, false]);
+  assert.deepEqual(selected.map(pad => pad.selected), [true, true, true, false, false, false]);
   assert.deepEqual(selected.map(pad => pad.pairId), original.map(pad => pad.pairId));
   selected = selectDestination(selected, { ...selected[0], selected: false });
-  assert.deepEqual(selected.map(pad => pad.selected), [false, true, false, false, false, false]);
+  assert.deepEqual(selected.map(pad => pad.selected), [false, true, true, false, false, false]);
   assert.deepEqual(original.map(pad => pad.selected), [true, true, false, false, false, false]);
 });
 
-await test('a restored legacy selection with both ticker-sharing pads cannot launch', () => {
+await test('Long and independent Longbow can launch together', () => {
   const selected = destinations().map(pad => ({ ...pad, selected: pad.chainId === 4663 }));
-  assert.equal(hasSharedTickerConflict(selected), true);
-  assert.match(validateDraft(draft, selected, 4663).destinations, /Choose Long or Longbow/);
-  assert.equal(draftStatus(validateDraft(draft, selected, 4663), false), 'incomplete');
+  assert.equal(hasSharedTickerConflict(selected), false);
+  assert.equal(validateDraft(draft, selected, 4663).destinations, undefined);
+  assert.notEqual(draftStatus(validateDraft(draft, selected, 4663), false), 'incomplete');
   assert.equal(hasSharedTickerConflict(selectDestination(selected, { ...selected[0], selected: true })), false);
 });
 
@@ -340,10 +340,10 @@ await test('Longbow accepts only its registry pairs independently of a live O1 c
     );
 });
 
-await test('Longbow shares Long ticker reads, coalescing the registry for mixed selections', () => {
-  assert.deepEqual(readablePads(['longbow']), ['long']);
+await test('Longbow does not read LONG ticker reservations', () => {
+  assert.deepEqual(readablePads(['longbow']), []);
   assert.deepEqual(readablePads(['long', 'longbow']), ['long']);
-  assert.deepEqual(readablePads(['o1', 'longbow']), ['o1', 'long']);
+  assert.deepEqual(readablePads(['o1', 'longbow']), ['o1']);
   assert.deepEqual(readablePads(['long', 'o1', 'longbow']), ['long', 'o1']);
 });
 
@@ -474,7 +474,7 @@ await test('pons uses its own ETH route on Robinhood without a ticker reservatio
   assert.deepEqual(validateDraft(draft, [pons], 4663), {});
   assert.equal(pairingName(pons.pairId), 'ETH');
   assert.deepEqual(readablePads(['pons']), []);
-  assert.deepEqual(readablePads(['pons', 'longbow']), ['long']);
+  assert.deepEqual(readablePads(['pons', 'longbow']), []);
   assert.equal(supportsChain('pons', 8453), false);
   for (const change of [{ chainId: 8453 }, { pairId: 'native' }, { route: 'rwa' }, { editableMetadata: true }])
     assert.ok(validateDraft(draft, [{ ...pons, ...change } as Destination], 4663).destinations);

@@ -26,6 +26,21 @@ export const LONG_HOOK_PARAMETERS = parseAbiParameters(
   "address numeraire,address buybackDestination,uint256 startFee,uint256 endFee,uint256 duration,uint256 startingTime,uint256 routingMode,uint256 assetFeesToAssetBuybackWad,uint256 assetFeesToNumeraireBuybackWad,uint256 assetFeesToBeneficiaryWad,uint256 assetFeesToLpWad,uint256 numeraireFeesToAssetBuybackWad,uint256 numeraireFeesToNumeraireBuybackWad,uint256 numeraireFeesToBeneficiaryWad,uint256 numeraireFeesToLpWad",
 );
 
+export const isIndependentLongbow = profile => profile?.launchpad === 'longbow' && profile.route === 'independent';
+export const launchAssetSuffix = profile => isIndependentLongbow(profile) ? '1337' : '1e18';
+export const isCanonicalLaunchAsset = (asset, profile) => typeof asset === 'string'
+  && new RegExp(`^0x[a-f0-9]{36}${launchAssetSuffix(profile)}$`, 'i').test(asset);
+export const LONGBOW_HOOK_PARAMETERS = parseAbiParameters(
+  '(address numeraire,address buybackDst,uint24 startFee,uint24 endFee,uint32 durationSeconds,uint32 startingTime,uint8 feeRoutingMode,(uint64,uint64,uint64,uint64,uint64,uint64,uint64,uint64) feeDistributionInfo,(address beneficiary,uint96 shares)[] feeBeneficiaries,(address integrator,uint24 feeShare,uint32 assetFeesToNumeraireRatio,uint32 numeraireFeesToAssetRatio,bool automaticPayout) integratorConfig)',
+);
+export const LONGBOW_LOCKED = '0x000000000000000000000000000000000000dead';
+export function longbowBeneficiary(value, wallet, profile) {
+  const recipient = (value ?? wallet)?.toLowerCase();
+  if (!address(recipient) || [LONGBOW_LOCKED, profile.integrator, profile.protocolBeneficiary].includes(recipient))
+    throw new ServiceError('invalid_longbow_beneficiary', 400);
+  return recipient;
+}
+
 const roles = [
   "launcher",
   "airlock",
@@ -79,8 +94,8 @@ function contract(value, factory = false) {
 
 export function readLongLaunchProfile(value) {
   if (
-    !exactObject(value, ["chainId", ...roles, "integrator", "protocolBeneficiary", "quotes", ...(value?.launchpad === "longbow" ? ["launchpad", "platformAllocation"] : [])]) ||
-    (value?.launchpad === "longbow" && !address(value.platformAllocation)) ||
+    !exactObject(value, ["chainId", ...roles, "integrator", "protocolBeneficiary", "quotes", ...(value?.launchpad === "longbow" ? ["launchpad", ...(isIndependentLongbow(value) ? ["route"] : ["platformAllocation"])] : [])]) ||
+    (value?.launchpad === "longbow" && !isIndependentLongbow(value) && !address(value.platformAllocation)) ||
     value.chainId !== 4663 ||
     roles.some((role) => !contract(value[role], role === "tokenFactory")) ||
     !address(value.integrator) ||
@@ -119,7 +134,7 @@ export function readLongLaunchProfile(value) {
     throw new ServiceError("invalid_long_launch_profile");
   return Object.freeze({
     chainId: 4663,
-    ...(value.launchpad === "longbow" ? { launchpad: "longbow", platformAllocation: value.platformAllocation.toLowerCase() } : {}),
+    ...(value.launchpad === "longbow" ? { launchpad: "longbow", ...(isIndependentLongbow(value) ? { route: "independent" } : { platformAllocation: value.platformAllocation.toLowerCase() }) } : {}),
     ...Object.fromEntries(roles.map((role) => [role, normalizeContract(value[role])])),
     integrator: value.integrator.toLowerCase(),
     protocolBeneficiary: value.protocolBeneficiary.toLowerCase(),
@@ -146,6 +161,7 @@ function launchContext(input, configuredProfile, publicOrigin) {
       "metadataUri",
       "startingTick",
       "intentId",
+      ...(isIndependentLongbow(profile) && input.feeRecipient !== undefined ? ["feeRecipient"] : []),
     ]) ||
     input.chainId !== 4663 ||
     !address(input.wallet) ||
@@ -164,6 +180,7 @@ function launchContext(input, configuredProfile, publicOrigin) {
   if ((draft.launchpad === "longbow") !== (profile.launchpad === "longbow")) throw new ServiceError("invalid_long_launch", 400);
   const metadataUri = validatePublishedUri(input.metadataUri, "metadata", publicOrigin);
   const wallet = input.wallet.toLowerCase();
+  const feeRecipient = isIndependentLongbow(profile) ? longbowBeneficiary(input.feeRecipient, wallet, profile) : wallet;
   const binding = sha256(toBytes(
       JSON.stringify([
         'fungun:long:canonical:2',
@@ -174,25 +191,26 @@ function launchContext(input, configuredProfile, publicOrigin) {
         metadataUri,
         input.startingTick,
         input.intentId,
+        ...(isIndependentLongbow(profile) ? [feeRecipient] : []),
       ]),
     )).slice(2);
-  return { profile, quote, draft, metadataUri, wallet, binding, input };
+  return { profile, quote, draft, metadataUri, wallet, feeRecipient, binding, input };
 }
 
 export function buildUnsignedLongLaunch(input, configuredProfile, publicOrigin, saltAttempt) {
   const context = launchContext(input, configuredProfile, publicOrigin);
-  return assembleLaunch(context, mineLongSalt(context.profile.tokenFactory, context.quote.token.address, context.binding, saltAttempt));
+  return assembleLaunch(context, mineLongSalt(context.profile.tokenFactory, context.quote.token.address, context.binding, saltAttempt, launchAssetSuffix(context.profile)));
 }
 
 export async function buildUnsignedLongLaunchAsync(input, configuredProfile, publicOrigin, check) {
   const context = launchContext(input, configuredProfile, publicOrigin);
-  const mined = await mineLongSaltAsync(context.profile.tokenFactory, context.quote.token.address, context.binding, check);
+  const mined = await mineLongSaltAsync(context.profile.tokenFactory, context.quote.token.address, context.binding, check, launchAssetSuffix(context.profile));
   return assembleLaunch(context, mined);
 }
 
-function assembleLaunch({ profile, quote, draft, metadataUri, wallet, binding, input }, { salt, predictedAsset, saltAttempt }) {
+function assembleLaunch({ profile, quote, draft, metadataUri, wallet, feeRecipient, binding, input }, { salt, predictedAsset, saltAttempt }) {
   const nativeEth = isNativeLongQuote(quote);
-  const allocation = profile.launchpad === "longbow" ? supply / 100n : 0n;
+  const allocation = profile.launchpad === "longbow" && !isIndependentLongbow(profile) ? supply / 100n : 0n;
   const tokenFactoryData = encodeAbiParameters(LONG_TOKEN_PARAMETERS, [
     draft.name,
     draft.ticker,
@@ -206,7 +224,14 @@ function assembleLaunch({ profile, quote, draft, metadataUri, wallet, binding, i
     zeroAddress,
     [],
   ]);
-  const hook = encodeAbiParameters(LONG_HOOK_PARAMETERS, [
+  const hook = isIndependentLongbow(profile) ? encodeAbiParameters(LONGBOW_HOOK_PARAMETERS, [{
+    numeraire: quote.token.address, buybackDst: LONGBOW_LOCKED, startFee: 800000, endFee: 10000,
+    durationSeconds: 10, startingTime: 0, feeRoutingMode: 1,
+    feeDistributionInfo: [0n, 0n, 10n ** 18n, 0n, 0n, 0n, 10n ** 18n, 0n],
+    feeBeneficiaries: [{ beneficiary: feeRecipient, shares: 10n ** 18n }],
+    integratorConfig: { integrator: profile.integrator, feeShare: 300000,
+      assetFeesToNumeraireRatio: 0, numeraireFeesToAssetRatio: 0, automaticPayout: true },
+  }]) : encodeAbiParameters(LONG_HOOK_PARAMETERS, [
     quote.token.address,
     profile.integrator,
     800000n,
@@ -225,7 +250,7 @@ function assembleLaunch({ profile, quote, draft, metadataUri, wallet, binding, i
   ]);
   const beneficiaries = [
     { beneficiary: profile.protocolBeneficiary, shares: 5n * 10n ** 16n },
-    { beneficiary: wallet, shares: 95n * 10n ** 16n },
+    { beneficiary: feeRecipient, shares: 95n * 10n ** 16n },
   ].sort((left, right) => (left.beneficiary < right.beneficiary ? -1 : 1));
   const poolInitializerData = encodeAbiParameters(LONG_POOL_PARAMETERS, [
     {
@@ -293,6 +318,7 @@ function assembleLaunch({ profile, quote, draft, metadataUri, wallet, binding, i
       totalSupply: supply.toString(),
       tokensForSale: (supply - allocation).toString(),
       creatorAllocation: "0",
+      ...(isIndependentLongbow(profile) ? { feeRecipient, hookBeneficiaryBps: 6500, lpBeneficiaryBps: 9500, platformAllocation: "0" } : {}),
       metadataMutable: false,
       launchpadValueWei: "0",
     }),

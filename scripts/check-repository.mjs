@@ -7,6 +7,8 @@ import { pathToFileURL } from 'node:url';
 // These exact reviewed files contain public deployment addresses and code hashes.
 // Any edit invalidates the exception; every other credential rule still applies.
 const reviewedPublicDeployments = new Map([
+  // Canonical public burn address used to disable Longbow fee-routing control.
+  ['apps/web/lib/long-encoding/long-launch.mjs', '41ad7d751560a12cae1417d93480462aec752431ba2bbe599b1d86d13bfde98a'],
   ['apps/api/src/o1-fee-profiles.mjs', '71a27ba20027adc67d057c8ca98e0236f710031eaa5efe9ea405776802c10f7c'],
   ['docs/o1-fee-verification.md', 'aca46910c7223b6610f9a47c2c6950cbc216f08cbd822b47ee58dd21f519c0fa'],
 ]);

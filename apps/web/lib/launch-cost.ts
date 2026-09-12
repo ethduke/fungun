@@ -126,7 +126,7 @@ export function launchCostKey(input: {
     input.walletChainId ?? null,
     input.destinations
       .filter((pad) => pad.selected)
-      .map((pad) => [pad.id, pad.chainId, pad.pairId, pad.editableMetadata])
+      .map((pad) => [pad.id, pad.chainId, pad.pairId, pad.editableMetadata, ...(pad.feeRecipient ? [pad.feeRecipient.toLowerCase()] : [])])
       .sort((a, b) => String(a[0]).localeCompare(String(b[0]))),
   ]);
 }

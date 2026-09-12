@@ -86,8 +86,8 @@ export default function Home() {
   const availability = tickerAvailability(reads.check, chainId, ticker, readPads);
   const tickerReserved = availability === 'reserved';
   const reservationLabel = active
-    .filter((pad) => pad.id === 'long' || pad.id === 'longbow')
-    .map((pad) => pad.id === 'longbow' ? 'Longbow' : 'Long')
+    .filter((pad) => pad.id === 'long')
+    .map(() => 'Long')
     .join(' / ');
   const errors = validateDraft(
     { name, ticker, description, hasImage: !!image },
@@ -581,7 +581,7 @@ export default function Home() {
               >
                 <LaunchQueue
                   key={JSON.stringify([chainId, account.address?.toLowerCase(), name, ticker, description, image?.url,
-                    active.map(pad => [pad.id, pad.pairId, pad.editableMetadata])])}
+                    active.map(pad => [pad.id, pad.pairId, pad.editableMetadata, pad.feeRecipient])])}
                   destinations={active}
                   enabled={isWebviewChain(chainId)}
                   ready={!imagePending && !Object.keys(errors).length}

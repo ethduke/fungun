@@ -34,6 +34,7 @@ export interface Destination {
   route: Route;
   pairId: PairId;
   editableMetadata: boolean;
+  feeRecipient?: string;
 }
 
 export interface CoinDraft {
@@ -92,19 +93,14 @@ export function launchpadName(id: LaunchpadId) {
 }
 
 export function readablePads(pads: LaunchpadId[]): PadId[] {
-  // Long and Longbow use the same on-chain ticker reservation registry.
-  return [...new Set(pads.filter((pad): pad is PadId | 'longbow' => pad !== 'pons' && pad !== 'stonx').map((pad) => pad === 'longbow' ? 'long' : pad))];
+  return [...new Set(pads.filter((pad): pad is PadId => pad !== 'longbow' && pad !== 'pons' && pad !== 'stonx'))];
 }
 export function hasSharedTickerConflict(destinations: Destination[]) {
-  return destinations.some(pad => pad.selected && pad.id === 'long')
-    && destinations.some(pad => pad.selected && pad.id === 'longbow');
+  return destinations.filter(pad => pad.selected && pad.id === 'long').length > 1;
 }
 
 export function selectDestination(destinations: Destination[], destination: Destination) {
-  const sharesTicker = destination.id === 'long' || destination.id === 'longbow';
-  return destinations.map(pad => pad.id === destination.id ? destination
-    : destination.selected && sharesTicker && (pad.id === 'long' || pad.id === 'longbow')
-      ? { ...pad, selected: false } : pad);
+  return destinations.map(pad => pad.id === destination.id ? destination : pad);
 }
 export const LONG_PAIRS = LONG_MARKET_TICKERS.map((symbol) => ({
   id: `long-${symbol}` as const,
@@ -194,7 +190,9 @@ export function validateDraft(
   if (!draft.hasImage) errors.image = 'Add a coin image to continue.';
   if (!active.length) errors.destinations = 'Select at least one launchpad.';
   if (hasSharedTickerConflict(destinations))
-    errors.destinations = 'Choose Long or Longbow. They share a 24-hour ticker reservation.';
+    errors.destinations = 'Select each launchpad only once.';
+  if (active.some(pad => pad.feeRecipient && (pad.id !== 'longbow' || !/^0x[a-f0-9]{40}$/i.test(pad.feeRecipient) || /^0x0+$/i.test(pad.feeRecipient) || /^0x0+dead$/i.test(pad.feeRecipient))))
+    errors.destinations = 'Enter a valid Longbow beneficiary address.';
   if (new Set(active.map((pad) => pad.chainId)).size > 1)
     errors.destinations = 'Select launchpads on one chain at a time.';
   if (
