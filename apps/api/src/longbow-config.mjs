@@ -40,6 +40,8 @@ export function readLongbowConfig(env) {
           || !/^0x[a-f0-9]{40}$/i.test(c.address) || /^0x0+$/i.test(c.address)
           || !/^0x[a-f0-9]{64}$/i.test(c.codeHash) || /^0x0+$/i.test(c.codeHash)) throw new Error();
     }
-    return { profile, guards, assetOrigin: origin.origin };
+    const rpcUrl = env.LONGBOW_RPC || '';
+    if (rpcUrl && (new URL(rpcUrl).protocol !== 'https:' || new URL(rpcUrl).username || new URL(rpcUrl).password)) throw new Error();
+    return { profile, guards, assetOrigin: origin.origin, ...(rpcUrl ? { rpcUrl } : {}) };
   } catch { throw new ServiceError('long_configuration', 503); }
 }

@@ -72,7 +72,7 @@ export function runtimeStatus(env) {
         ],
         ["READ_UPSTREAMS", "LONG_WALLET_LAUNCH"],
       ),
-      feature("longbow_wallet_launch", [rpc,
+      feature("longbow_wallet_launch", [["LONGBOW_RPC or ROBINHOOD_RPC", present(config.longbowLaunch?.rpcUrl || config.rpcUrl)],
         ["LONGBOW_LAUNCH_PROFILE_JSON", !!config.longbowLaunch],
         ["LONGBOW_LAUNCH_GUARDS_JSON", present(env.LONGBOW_LAUNCH_GUARDS_JSON)],
         ["LAUNCH_ASSET_SERVICE_ORIGIN", present(env.LAUNCH_ASSET_SERVICE_ORIGIN)],

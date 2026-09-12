@@ -15,7 +15,7 @@ export class Launches {
       stonx: new StonxLive(config, upstream, budget),
       pons: new PonsLive(config, upstream, budget),
       long: new LongLive(config, upstream, budget),
-      longbow: new LongLive({ ...config, longLaunch: config.longbowLaunch }, upstream, budget),
+      longbow: new LongLive({ ...config, rpcUrl: config.longbowLaunch?.rpcUrl || config.rpcUrl, longLaunch: config.longbowLaunch }, upstream, budget),
       o1: new O1Live(config, upstream, budget),
       o1Base: new O1Live({ ...config, o1Launch: config.o1BaseLaunch }, upstream, budget),
     };

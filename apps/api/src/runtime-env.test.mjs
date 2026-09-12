@@ -73,6 +73,7 @@ test("all four Long wallet launch settings stay API-only and are forwarded toget
   assert.deepEqual(LONG_WALLET_LAUNCH_RUNTIME_NAMES, [
     "LONG_WALLET_LAUNCH",
     "LONGBOW_WALLET_LAUNCH",
+    "LONGBOW_RPC",
     "LONGBOW_LAUNCH_PROFILE_JSON",
     "LONGBOW_LAUNCH_GUARDS_JSON",
     "LONGBOW_EXTRA_QUOTES_JSON",

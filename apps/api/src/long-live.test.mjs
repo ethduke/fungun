@@ -553,6 +553,9 @@ test('Longbow requires its own enabled independent profile and valid beneficiary
     LONGBOW_LAUNCH_GUARDS_JSON: JSON.stringify({ 'longbow-NVDA': { tokenBeacon: f.g.tokenBeacon, tokenImplementation: f.g.tokenImplementation } }),
     LAUNCH_ASSET_SERVICE_ORIGIN: 'https://assets.example.com' };
   assert.equal(readLongLiveConfig(env, 'longbow').profile.route, 'independent');
+  assert.equal(readLongLiveConfig({ ...env, LONGBOW_RPC: 'https://rpc.example.invalid' }, 'longbow').rpcUrl, 'https://rpc.example.invalid');
+  assert.throws(() => readLongLiveConfig({ ...env, LONGBOW_RPC: 'http://rpc.example.invalid' }, 'longbow'));
+  assert.equal(readLongLiveConfig(env, 'longbow').rpcUrl, undefined);
   assert.throws(() => readLongLiveConfig({ ...env, LONGBOW_LAUNCH_PROFILE_JSON: JSON.stringify({ ...f.p, launchpad: 'longbow', platformAllocation: addr(15) }) }, 'longbow'));
   assert.throws(() => readLongLiveConfig({ ...env, LONGBOW_LAUNCH_GUARDS_JSON: '{}' }, 'longbow'));
   assert.throws(() => validateLongInput('launch-prepare', { ...f.input, feeRecipient: addr(2001) }), /invalid_longbow_beneficiary/);

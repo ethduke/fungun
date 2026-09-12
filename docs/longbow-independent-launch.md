@@ -35,6 +35,8 @@ block Longbow or force the user to deselect LONG.
 Set these API-only variables independently:
 
 - `LONGBOW_WALLET_LAUNCH=true`
+- `LONGBOW_RPC`: optional dedicated HTTPS RPC for Longbow launch checks. Omit to
+  use the existing Robinhood RPC; it never changes the other launchpads.
 - `LONGBOW_LAUNCH_PROFILE_JSON`: the standard dependency/hash profile with
   `launchpad: "longbow"` and `route: "independent"`; omit `platformAllocation`.
 - `LONGBOW_LAUNCH_GUARDS_JSON`: token beacon and implementation pins for the stock
@@ -54,7 +56,9 @@ On 2026-09-12, read-only Foundry checks at block 61,241,544 matched all seven
 configured dependency runtime hashes, the wrapper's Airlock, protocol owner,
 module states and enabled hook flags. The new encoder successfully simulated an
 independent creation with a beneficiary different from the sender. No transaction
-was broadcast. A saved existing launch event matched the Longbow ABI, and both fee
+was broadcast. The production shared RPC was returning monthly-capacity errors;
+Longbow is configured with Robinhood’s public RPC while the other routes keep
+their original provider. Public RPC rate limits and historical retention still apply. A saved existing launch event matched the Longbow ABI, and both fee
 shares were checked at current state. The public RPC did not retain that launch's
 historical state; this was not a historical transaction replay.
 
