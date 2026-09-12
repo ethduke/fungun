@@ -26,10 +26,10 @@ Start with [llms.txt](/llms.txt) for the site overview.
    It uses the same name, ticker, image and description, no dev buy, and permanently locked liquidity.
    The current creator share is shown before launching; operator changes may follow a 24-hour delay.
 5. Read the inline launch section. Draft validation does not confirm ticker
-   availability, token eligibility, costs or launch readiness. Long and Longbow
-   check their shared reservation registry after a typing pause; focus or Enter
-   checks again. O1 allows any ticker within the form's input rules and makes no
-   reservation request. Mixed selections retain each platform's status.
+   availability, token eligibility, costs or launch readiness. Long checks its reservation registry after a typing pause; focus or Enter
+   checks again. O1 and independent Longbow make no LONG reservation request.
+   Longbow allows an optional fee beneficiary wallet or compatible vault and can
+   be selected alongside Long. Mixed selections retain each platform's status.
    Results expire and edits invalidate them. Launch availability also depends on server configuration.
 
 The launch cost panel separates launchpad fees and complete network fees in ETH,

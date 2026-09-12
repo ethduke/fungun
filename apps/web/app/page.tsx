@@ -542,9 +542,6 @@ export default function Home() {
                       onPairingOpen={reads.ensureCatalog}
                     />
                   ))}
-                {chainId === 4663 && <p className="launch-disclosure">
-                  Long and Longbow share a 24-hour ticker reservation. Choose one; selecting the other switches your choice.
-                </p>}
                 {errors.destinations && (
                   <p role="alert" className="field-error">
                     {errors.destinations}

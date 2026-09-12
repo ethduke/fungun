@@ -78,15 +78,6 @@ export function LaunchpadCard({
         </span>
         <strong className="pad-title">{title}</strong>
       </label>
-      {pad.selected && pad.id === 'longbow' && (
-        <label className="longbow-beneficiary">
-          <span>Fee beneficiary</span>
-          <input aria-label="Longbow fee beneficiary" placeholder="Connected wallet (default)" maxLength={42}
-            value={pad.feeRecipient ?? ''} spellCheck={false} autoComplete="off"
-            onChange={event => onChange({ ...pad, feeRecipient: event.target.value.trim() })} />
-          <small>Optional wallet or vault. Receives 65% of hook fees and 95% of LP fees. A vault must support claiming both fees.</small>
-        </label>
-      )}
       {pad.selected && (
         <Select
           value={pad.pairId}
@@ -144,6 +135,15 @@ export function LaunchpadCard({
             )}
           </SelectContent>
         </Select>
+      )}
+      {pad.selected && pad.id === 'longbow' && (
+        <label className="longbow-beneficiary">
+          <span>Fee beneficiary</span>
+          <input aria-label="Longbow fee beneficiary" placeholder="Connected wallet (default)" maxLength={42}
+            value={pad.feeRecipient ?? ''} spellCheck={false} autoComplete="off"
+            onChange={event => onChange({ ...pad, feeRecipient: event.target.value.trim() })} />
+          <small>Optional wallet or vault. Receives 65% of hook fees and 95% of LP fees. A vault must support claiming both fees.</small>
+        </label>
       )}
       {stonx && <p className="pad-pons-details">{STONX_PAIRS.length} wrapped-stock pairs · Doppler · locked liquidity. <a href="https://stonx.ai/docs/instant-launch" target="_blank" rel="noopener noreferrer">Launch terms</a></p>}
       {stonks && <p className="pad-conditions">1% trading fee · LP locked forever · No dev buy<br />

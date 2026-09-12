@@ -3,9 +3,9 @@
 > Noncustodial launchpad composer for Long, O1 and Longbow on Robinhood Chain and O1/Stonks on Base, with optional guarded fee reads and wallet claims. Wallet launches require configured, verified server profiles; USDG/x402 image generation requires runtime configuration.
 
 Agents can help prepare a coin draft and explain its validation. Configured
-backends can load RWA catalogs and check the shared Long/Longbow ticker registry
-after typing, on focus, or on Enter. External reads default to disabled. O1 allows
-any ticker within the form's input rules and needs no reservation check. Fees supports paginated
+backends can load RWA catalogs and check the Long ticker registry
+after typing, on focus, or on Enter. External reads default to disabled. O1 and independent Longbow allow
+any ticker within the form's input rules and need no LONG reservation check. Longbow has an optional fee beneficiary and can be selected alongside Long. Fees supports paginated
 Long/Longbow beneficiary-pool discovery and O1 wallet-index positions, with claims for
 reviewed contracts. Each launchpad's Claim all queues its eligible discovered positions with
 separate review, wallet confirmation and receipt proof for every claim. Stonks creator-fee

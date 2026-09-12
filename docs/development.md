@@ -78,14 +78,11 @@ external reads default to disabled.
   O1 offers ETH and a complete saved 194-entry Robinhood RWA catalog, verified
   4 September 2026. Live results replace the saved list; opening an expired
   menu checks availability again. No refresh button or periodic background calls.
-- Long and Longbow check their shared ticker reservation registry after a typing
-  pause, on focus, or on Enter. Selecting both uses one read. O1 says any ticker
-  is allowed and makes no reservation request. Longbow's separate fee adapter
-  supports reviewed locked pools on Robinhood.
-- Longbow's fee row shows the default LongLauncher route's 95% creator / 5%
-  Doppler LP-fee split. Its details distinguish separate hook fees, the 1% launch
-  supply allocation, and alternate routes. Sources: [default launch route](https://longbow.gg/launch?route=long)
-  and [published fee constants](https://longbow.gg/ref_constants.js), checked 4 September 2026.
+- Long checks its ticker reservation registry after a typing pause, on focus, or
+  on Enter. Independent Longbow and O1 make no LONG reservation request.
+- Longbow uses its own launcher, full curve supply, and an optional fee beneficiary.
+  The beneficiary receives 65% of hook fees and 95% of LP fees. See
+  [independent Longbow integration](longbow-independent-launch.md).
 - The inline launch section updates coin details, destinations and draft validation as you edit.
 - Image checks show an inline loading state; O1's metadata-update toggle stays in the launch section.
 - Review a Grok/x402 USDG quote, authorize one image in the wallet, and recover its saved result. Requires [image runtime setup](image-generation.md).
