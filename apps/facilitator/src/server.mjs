@@ -2,6 +2,7 @@ import { Buffer } from "node:buffer";
 import { timingSafeEqual } from "node:crypto";
 import http from "node:http";
 import { PaymentPolicyError, validateFacilitatorRequest, X402_NETWORK } from "./policy.mjs";
+import { safeReason } from "./diagnostics.mjs";
 
 const BODY_LIMIT = 32 * 1024;
 const activeLimit = 8;
@@ -11,8 +12,7 @@ const baseHeaders = {
   "referrer-policy": "no-referrer",
   "x-content-type-options": "nosniff",
 };
-const safeReason = value =>
-  typeof value === "string" && /^[a-z0-9_]{1,96}$/.test(value) ? value : "unexpected_error";
+const routes = new Set(["/healthz", "/supported", "/verify", "/settle"]);
 const safeHash = value =>
   typeof value === "string" && /^0x[0-9a-f]{64}$/i.test(value) ? value.toLowerCase() : "";
 
@@ -65,7 +65,7 @@ export function createFacilitatorServer({ facilitator, config, relayerAddress, l
     let counted = false;
     try {
       const url = new URL(request.url || "/", "http://facilitator.invalid");
-      route = url.pathname;
+      route = routes.has(url.pathname) ? url.pathname : "unknown";
       if (url.search) {
         status = 404;
         return send(response, status, { error: "not_found" });
@@ -151,7 +151,7 @@ export function createFacilitatorServer({ facilitator, config, relayerAddress, l
         result.errorReason.startsWith("invalid_exact_evm_transaction_failed");
       return send(response, status, {
         success: false,
-        errorReason: ambiguousBroadcast ? "settlement_pending" : safeReason(result.errorReason),
+        errorReason: ambiguousBroadcast ? "settlement_pending" : safeReason(result.errorReason, "settlement_pending"),
         transaction,
         network: X402_NETWORK,
         payer: checked.payer,

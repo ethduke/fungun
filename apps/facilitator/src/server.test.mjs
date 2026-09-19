@@ -3,6 +3,7 @@ import test from "node:test";
 import { once } from "node:events";
 import { createFacilitatorServer } from "./server.mjs";
 import { PAYMENT_TIMEOUT_SECONDS } from "./policy.mjs";
+import { safeStartupReason } from "./diagnostics.mjs";
 
 const asset = `0x${"11".repeat(20)}`;
 const payTo = `0x${"22".repeat(20)}`;
@@ -61,6 +62,7 @@ function body() {
 }
 
 async function fixture(facilitator = {}) {
+  const logs = [];
   const server = createFacilitatorServer({
     facilitator: {
       verify: async () => ({ isValid: true, payer }),
@@ -74,13 +76,14 @@ async function fixture(facilitator = {}) {
     },
     config: { bearerToken: facilitatorCredential, asset, payTo, maxAmount: 100_000n },
     relayerAddress: `0x${"88".repeat(20)}`,
-    logger: { info() {}, error() {} },
+    logger: { info: entry => logs.push(entry), error: entry => logs.push(entry) },
   });
   server.listen(0, "127.0.0.1");
   await once(server, "listening");
   const origin = `http://127.0.0.1:${server.address().port}`;
   return {
     server,
+    logs,
     get: path =>
       fetch(`${origin}${path}`, {
         headers: { ["authorization"]: `Bearer ${facilitatorCredential}` },
@@ -167,4 +170,46 @@ test("keeps an empty-hash transaction submission failure pending for chain recon
   assert.equal(result.success, false);
   assert.equal(result.errorReason, "settlement_pending");
   assert.equal(result.transaction, "");
+});
+
+test("never emits arbitrary SDK reasons or exception text, including code-shaped secrets", async t => {
+  const marker = ["synthetic", "credential", "1234567890"].join("_");
+  for (const secret of [marker, `https://rpc.example/v2/${marker}`, `Bearer ${marker}`]) {
+    const f = await fixture({
+      verify: async () => ({ isValid: false, invalidReason: secret }),
+      settle: async () => ({ success: false, transaction: "", errorReason: secret }),
+    });
+    t.after(() => f.server.close());
+    assert.equal((await (await f.post("/verify")).json()).invalidReason, "unexpected_error");
+    assert.equal((await (await f.post("/settle")).json()).errorReason, "settlement_pending");
+    const throwing = await fixture({ verify: async () => { throw new Error(secret); } });
+    t.after(() => throwing.server.close());
+    const response = await throwing.post("/verify");
+    assert.equal(response.status, 500);
+    assert.deepEqual(await response.json(), { error: "unexpected_error" });
+    assert.ok(!JSON.stringify([...f.logs, ...throwing.logs]).includes(marker));
+    assert.equal(safeStartupReason(secret), "startup_validation_failed");
+  }
+  assert.equal(safeStartupReason("missing_robinhood_rpc"), "missing_robinhood_rpc");
+});
+
+test("logs only known routes, excluding credentials in paths and queries", async t => {
+  const f = await fixture();
+  t.after(() => f.server.close());
+  const marker = ["synthetic", "path", "credential"].join("_");
+  assert.equal((await f.get(`/v2/${marker}`)).status, 404);
+  assert.equal((await f.get(`/verify?key=${marker}`)).status, 404);
+  assert.deepEqual(f.logs.map(entry => entry.route), ["unknown", "/verify"]);
+  assert.ok(!JSON.stringify(f.logs).includes(marker));
+});
+
+test("retains known SDK rejection codes", async t => {
+  const reason = "invalid_exact_evm_insufficient_balance";
+  const f = await fixture({
+    verify: async () => ({ isValid: false, invalidReason: reason }),
+    settle: async () => ({ success: false, transaction: "", errorReason: reason }),
+  });
+  t.after(() => f.server.close());
+  assert.equal((await (await f.post("/verify")).json()).invalidReason, reason);
+  assert.equal((await (await f.post("/settle")).json()).errorReason, reason);
 });

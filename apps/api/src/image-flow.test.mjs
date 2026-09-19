@@ -1,13 +1,13 @@
 import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
-import { mkdtempSync, realpathSync, rmSync } from "node:fs";
+import { mkdtempSync, realpathSync, rmSync, readFileSync, readdirSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { join, dirname } from "node:path";
 import test from "node:test";
 import { privateKeyToAccount } from "viem/accounts";
 import { ServiceError } from "./errors.mjs";
 import { GROK_IMAGE_PRODUCT } from "./grok-image-provider.mjs";
-import { createImageWorker } from "./image-generation.mjs";
+import { createImageWorker, imageJobResult } from "./image-generation.mjs";
 import { ImageJobStore, initializeImageJobs } from "./image-job-store.mjs";
 import {
   createImageHandler,
@@ -499,6 +499,42 @@ test("restart treats an interrupted generation as unknown and never calls the pr
   assert.equal(f.counts.generate, 1);
   assert.equal(f.counts.process, 0);
   assert.equal(f.counts.settle, 0);
+});
+
+test("provider credentials never reach the image journal, WAL, or status response", async (t) => {
+  const marker = ["synthetic", "provider", "credential"].join("_");
+  const f = fixture(t, { generate: async () => {
+    throw Object.assign(new Error(`Request failed https://rpc.example/v2/${marker}`), { code: marker });
+  } });
+  const job = await quote(f);
+  await f.post(operation(), await signedProof(job));
+  await f.worker.idle();
+  assert.equal(f.store.get(job.id).error, "image_outcome_unknown");
+  assert.equal(f.store.get(job.id).state, "unknown");
+  assert.equal((await (await f.get(job.id)).json()).error, "image_outcome_unknown");
+  assert.equal(f.counts.settle, 0);
+  for (const file of readdirSync(dirname(f.path)))
+    assert.ok(!readFileSync(join(dirname(f.path), file)).includes(Buffer.from(marker)));
+  await f.restart();
+  assert.equal(f.store.get(job.id).error, "image_outcome_unknown");
+});
+
+test("journal failure methods enforce allowlists independently of the worker", async (t) => {
+  const f = fixture(t);
+  const marker = ["synthetic", "journal", "credential"].join("_");
+  const first = await quote(f, operation(1));
+  f.store.authorize(first.id, await signedProof(first));
+  f.store.fail(first.id, marker);
+  assert.equal(f.store.get(first.id).error, "image_outcome_unknown");
+  const second = await quote(f, operation(2));
+  f.store.authorize(second.id, await signedProof(second));
+  f.store.claim(second.id);
+  f.store.generated(second.id, raw);
+  f.store.stageImage(second.id, { bytes: sanitized, width: 1024, height: 1024 });
+  f.store.failSettlement(second.id, marker);
+  assert.equal(f.store.get(second.id).error, "image_outcome_unknown");
+  // Older records also cannot re-expose arbitrary text through the API.
+  assert.equal(imageJobResult({ ...f.store.get(first.id), error: marker }).error, "image_outcome_unknown");
 });
 
 test("pending settlement survives restart and retries the same proof without regenerating", async (t) => {

@@ -1,6 +1,7 @@
 import { isAddress, zeroAddress } from "viem";
 import { buildGrokImageRequest, ImagePromptError } from "./image-prompt.mjs";
 import { ServiceError } from "./errors.mjs";
+import { safeImageErrorCode } from "./image-errors.mjs";
 
 export function validateImageOperation(value) {
   const fields = ["requestId", "wallet", "name", "ticker", "prompt"];
@@ -43,7 +44,7 @@ export function imageJobResult(job) {
       transaction: job.transaction_hash || job.settlement_transaction,
       network: "eip155:4663",
     },
-    ...(job.error ? { error: job.error } : {}),
+    ...(job.error ? { error: safeImageErrorCode(job.error) } : {}),
     ...(job.state === "completed"
       ? {
           image: {
@@ -141,9 +142,7 @@ export function createImageWorker(store, provider, processor, payments, settleme
                 else store.settlementPending(job.id, error?.transactionHash, error?.code);
                 continue;
               }
-              const code = /^[a-z0-9_]{1,64}$/.test(error?.code ?? "")
-                ? error.code
-                : "image_outcome_unknown";
+              const code = safeImageErrorCode(error?.code);
               store.fail(job.id, code, code.includes("unknown") || code.includes("timeout"));
             }
           }

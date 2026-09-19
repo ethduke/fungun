@@ -11,6 +11,7 @@ import {
 import { DatabaseSync } from "node:sqlite";
 import { basename, dirname, join } from "node:path";
 import { ServiceError } from "./errors.mjs";
+import { safeImageErrorCode } from "./image-errors.mjs";
 
 export const IMAGE_PAYMENT_TIMEOUT_SECONDS = 300;
 
@@ -272,14 +273,14 @@ export class ImageJobStore {
       .prepare(
         "UPDATE image_jobs SET state=?,error=?,accounting='not_charged',raw_image=NULL WHERE id=? AND state IN ('authorized','generating','generated')",
       )
-      .run(unknown ? "unknown" : "failed", code, id);
+      .run(unknown ? "unknown" : "failed", safeImageErrorCode(code), id);
   }
   failSettlement(id, code = "image_settlement_failed") {
     this.db
       .prepare(
         "UPDATE image_jobs SET state='failed',error=?,accounting='not_charged' WHERE id=? AND state='settlement_pending'",
       )
-      .run(code, id);
+      .run(safeImageErrorCode(code), id);
   }
   settlementPending(id, transaction, code = "image_settlement_pending") {
     const error = code === "image_settlement_review_required" ? code : "image_settlement_pending";
