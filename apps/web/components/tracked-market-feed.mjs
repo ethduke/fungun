@@ -2,7 +2,6 @@ import { fomoHighlightsHTML, fomoStatus } from '../lib/fomo-highlights.mjs';
 import { TrackedFeedPoller } from '../lib/tracked-feed-poller.mjs';
 import { feedLaunchpad } from '../lib/tracked-feed-labels.mjs';
 import {
-  gmgnTokenUrl,
   TrackedInflowQueue,
 } from '../lib/tracked-feed-inflow.mjs';
 
@@ -229,57 +228,11 @@ export function binCells(trail) {
   }));
 }
 
-function ladder(trail) {
-  const cells = binCells(trail);
-  if (!cells.length) return '<p class="empty">Flow data unavailable</p>';
-  return `<div class="ladder" role="list" tabindex="0" aria-label="ETH-equivalent per bin">${cells
-    .map((cell) => {
-      const label = cell.pending
-        ? 'Not reached yet'
-        : `${number(cell.value)} ETH-equivalent${cell.buys === null ? '' : ` · ${cell.buys} buys`}${cell.current ? ' · Latest observed' : ''}`;
-      const intensity =
-        cell.value === null || cell.value <= 0
-          ? 0
-          : Math.min(1, Math.log10(1 + cell.value) / Math.log10(181));
-      const background =
-        cell.pending || !intensity
-          ? 'transparent'
-          : `rgba(61,125,255,${(0.14 + 0.86 * intensity).toFixed(3)})`;
-      return `<span role="listitem" class="bin ${cell.pending ? 'pending' : cell.current ? 'current' : ''}" style="background:${background}" title="${esc(label)}" aria-label="${esc(label)}">${cell.pending ? '·' : number(cell.value)}</span>`;
-    })
-    .join('')}</div>`;
-}
-
-function card(row) {
-  const address = token(row),
-    name = String(row.name || row.sym || 'Unnamed token');
-  const draft = trackedTokenDraft(row);
-  const {
-    label: launchpad,
-    title: launchpadTitle,
-    isLong,
-  } = feedLaunchpad(row);
-  const launchpadIcon = isLong
-    ? '<span class="launchpad-icon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M7 7h10v10"/><path d="M7 17 17 7"/></svg></span>'
-    : '';
-  const quote =
-    row.quote_symbol || (row.quote_kind === 'eth' ? 'ETH' : 'SHARES');
-  const chart = gmgnTokenUrl(row);
-  const short = address
-    ? `${address.slice(0, 8)}…${address.slice(-6)}`
-    : 'Address unavailable';
-  return `<div class="metadata"><span class="launchpad" title="${esc(launchpadTitle)}">${launchpadIcon}${esc(launchpad)}</span><button class="copy-button" type="button" aria-label="Copy ${esc(name)} to launch form"${!draft.name && !draft.ticker ? ' disabled' : ''}>COPY</button></div>
-    <div class="flow"><div class="metric-title">ETH-equivalent per bin</div>${ladder(row.trail)}</div>
-    <div class="identity"><strong title="${esc(name)}">${esc(name)}</strong><span class="quote">/ ${esc(quote)}</span></div>
-    <div class="address">${chart ? `<a href="${esc(chart)}" target="_blank" rel="noopener noreferrer" title="${esc(address)}">${esc(short)} ↗</a>` : esc(short)}${row.sym && row.name ? ` <span>${esc(row.sym)}</span>` : ''}</div>
-    <div class="totals"><span>Total inflow <b>${number(row.total_in)} ETH</b></span><span>${number(row.swaps)} swaps</span></div>`;
-}
-
 const styles = `
   :host{display:block;color:var(--feed-text,#223a2c);font:14px/1.4 var(--font-site,'Quicksand',sans-serif)}
-  :host([compact]) .heading,:host([compact]) .popular,:host([compact]) .inflow,:host([compact]) .columns{display:none}:host([compact]) .top{border-bottom:0}:host([compact]) .fomo{margin-top:0}
+  :host([compact]) .heading,:host([compact]) .popular,:host([compact]) .inflow{display:none}:host([compact]) .top{border-bottom:0}:host([compact]) .fomo{margin-top:0}
   *{box-sizing:border-box}section{border:1px solid var(--feed-border);border-radius:16px;background:var(--feed-bg);overflow:hidden}
-  .top{padding:14px 16px;border-bottom:1px solid var(--feed-border)}.heading,.metadata,.identity,.totals{display:flex;align-items:center;justify-content:space-between;gap:10px}
+  .top{padding:14px 16px}.heading{display:flex;align-items:center;justify-content:space-between;gap:10px}
   .statuses{display:flex;align-items:center;justify-content:flex-end;gap:8px;flex-wrap:wrap}.price-status{font-size:13px;color:var(--feed-muted)}.price-status[data-error=true]{color:#92520e}
   h2,h3,p{margin:0}h2{font-size: 16px}.status{font-size: 13px;color:var(--feed-muted)}.status[data-error=true]{color:#92520e}
   .popular{display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-top:10px}.popular-label{font-size: 13px;letter-spacing:.08em;font-weight:750;color:var(--feed-muted)}
@@ -288,21 +241,9 @@ const styles = `
   .fomo-line{display:flex;align-items:baseline;gap:9px;min-width:0}.fomo-label{color:var(--feed-accent);font-size:14px;font-weight:750;letter-spacing:.08em;flex-shrink:0}.fomo-buys{display:flex;align-items:baseline;gap:6px;overflow-x:auto;min-width:0;padding:3px 0;scrollbar-width:thin;font-size:14px}.fomo-buy{white-space:nowrap}.fomo-token{font-weight:750}.fomo-buy time,.fomo-separator,.fomo-empty{color:var(--feed-muted)}.fomo-buy time{font-size:12px}.fomo-health{display:block;color:var(--feed-muted);font-size:12px;margin-top:3px}
   .inflow{display:flex;align-items:center;gap:8px;margin-top:7px;min-width:0}.inflow>.popular-label{flex-shrink:0}
   .inflow-tokens{display:flex;align-items:center;gap:6px;min-width:0;overflow-x:auto;padding:3px;white-space:nowrap;scrollbar-width:thin}.inflow-tokens a{display:inline-flex;align-items:center;gap:5px;flex-shrink:0;padding:4px 7px;border:1px solid var(--feed-border);border-radius:5px;background:var(--feed-panel);font-size: 13px;font-weight:600}.inflow-ticker{max-width:110px;overflow:hidden;text-overflow:ellipsis}.price-change{font-variant-numeric:tabular-nums;color:var(--feed-muted)}.price-change[data-direction=up]{color:#268044}.price-change[data-direction=down]{color:#b13b33}.price-change[data-stale=true]{color:var(--feed-muted)}.inflow-tokens .empty{padding:4px 0;font-size: 13px}
-  .columns{display:grid;grid-template-columns:1fr 1fr;gap:1px;background:var(--feed-border)}.lane{min-width:0;background:var(--feed-bg);padding:10px}
-  h3{font-size: 14px;letter-spacing:.1em;margin:0 4px 8px}h3 span{font-weight:400;color:var(--feed-muted);letter-spacing:0}
-  .list{max-height:320px;overflow:auto;scrollbar-gutter:stable;display:flex;flex-direction:column;gap:8px;overscroll-behavior:contain}
-  article{background:var(--feed-panel);padding:10px;border:1px solid var(--feed-border);border-radius:8px;min-width:0}
-  .metadata{align-items:center;color:var(--feed-muted);margin-bottom:6px;overflow-wrap:anywhere}.metadata>.launchpad{display:inline-flex;align-items:center;gap:6px;font-size: 14px;font-weight:700;color:var(--feed-text)}
-  .launchpad-icon{display:grid;place-items:center;width:22px;height:22px;flex-shrink:0;border-radius:6px;color:#2f5034;background:#e6efcf}.launchpad-icon svg{width:16px;height:16px}
-  .copy-button{flex-shrink:0;border:1px solid var(--feed-border);border-radius:4px;background:var(--feed-panel);color:var(--feed-text);font:600 13px/1 var(--font-site,'Quicksand',sans-serif);padding:6px 9px;cursor:pointer}.copy-button:hover{background:var(--feed-bg)}.copy-button:disabled{opacity:.5;cursor:not-allowed}
-  .flow{margin-bottom:7px}.identity{justify-content:flex-start;gap:7px}.identity strong{font-size: 15px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.quote{flex-shrink:0;font-size: 13px;color:var(--feed-accent)}
-  a{color:var(--feed-accent);text-decoration:none}a:hover{text-decoration:underline}a:focus-visible,button:focus-visible,.ladder:focus-visible,.list:focus-visible{outline:2px solid var(--feed-accent);outline-offset:3px}
-  .address{font-size: 13px;color:var(--feed-muted);margin:2px 0 0;overflow-wrap:anywhere}.metric-title{font-size: 13px;color:var(--feed-muted);margin-bottom:4px}
-  .ladder{display:grid;grid-template-columns:repeat(11,minmax(44px,1fr));gap:3px;overflow-x:auto;padding:2px;scrollbar-width:thin}
-  .bin{border:1px solid var(--feed-border);border-radius:4px;text-align:center;padding:4px 2px;font:12px/1.25 var(--font-site,'Quicksand',sans-serif);min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
-  .pending{border-style:dashed;color:var(--feed-muted)}.current{outline:1px solid var(--feed-accent);outline-offset:0}.totals{font-size: 12px;color:var(--feed-muted);margin-top:6px}.totals b{font-size: 1rem;font-weight:500;color:var(--feed-text);white-space:nowrap}
+  a{color:var(--feed-accent);text-decoration:none}a:hover{text-decoration:underline}a:focus-visible{outline:2px solid var(--feed-accent);outline-offset:3px}
   .empty{color:var(--feed-muted);padding:12px 4px;font-size: 14px}
-  @media(max-width:760px){.columns{grid-template-columns:1fr}.top{padding:15px}.heading{align-items:flex-start;flex-direction:column;gap:4px}.list{max-height:280px}.inflow{align-items:stretch;flex-direction:column;gap:3px}}
+  @media(max-width:760px){.top{padding:15px}.heading{align-items:flex-start;flex-direction:column;gap:4px}.inflow{align-items:stretch;flex-direction:column;gap:3px}}
 `;
 
 if (
@@ -313,7 +254,7 @@ if (
     constructor() {
       super();
       this.attachShadow({ mode: 'open' });
-      this.shadowRoot.innerHTML = `<style>${styles}</style><section aria-label="Tracked market feed"><div class="top"><div class="heading"><h2>Market feed</h2><div class="statuses"><span class="status" role="status" aria-live="polite">Connecting…</span><span class="price-status" role="status" aria-live="polite" hidden></span></div></div><div class="popular"></div><div class="fomo" aria-label="FOMO trader purchases"><div class="fomo-line"><span class="fomo-label">FOMO:</span><div class="fomo-buys" tabindex="0" role="region" aria-label="Recorded trader buys"></div></div><span class="fomo-health" role="status"></span></div><div class="inflow"><span class="popular-label">&gt;10ETH INFL:</span><nav class="inflow-tokens" aria-label="Tokens over 10 ETH total inflow, oldest first"></nav></div></div><div class="columns"><div class="lane"><h3>ETH <span class="count-eth"></span></h3><div class="list" data-kind="eth" tabindex="0" role="region" aria-label="Tracked ETH pairs"></div></div><div class="lane"><h3>SHARES <span class="count-shares"></span></h3><div class="list" data-kind="shares" tabindex="0" role="region" aria-label="Tracked SHARES pairs"></div></div></div></section>`;
+      this.shadowRoot.innerHTML = `<style>${styles}</style><section aria-label="Tracked market feed"><div class="top"><div class="heading"><h2>Market feed</h2><div class="statuses"><span class="status" role="status" aria-live="polite">Connecting…</span><span class="price-status" role="status" aria-live="polite" hidden></span></div></div><div class="popular"></div><div class="fomo" aria-label="FOMO trader purchases"><div class="fomo-line"><span class="fomo-label">FOMO:</span><div class="fomo-buys" tabindex="0" role="region" aria-label="Recorded trader buys"></div></div><span class="fomo-health" role="status"></span></div><div class="inflow"><span class="popular-label">&gt;10ETH INFL:</span><nav class="inflow-tokens" aria-label="Tokens over 10 ETH total inflow, oldest first"></nav></div></div></section>`;
       this.rows = [];
       this.inflowQueue = new TrackedInflowQueue();
       this.inflows = [];
@@ -325,6 +266,7 @@ if (
       this.pageHidden = false;
       this.pauseReason = null;
       this.poller = new TrackedFeedPoller({
+        intervalMs: 15_000,
         getUrl: () => {
           const url = new URL(
             this.getAttribute('src') || '/api/tracked-feed',
@@ -397,24 +339,6 @@ if (
         this.pageHidden = false;
         this.updateActivity();
       };
-      this.nodes = new Map();
-      this.shadowRoot.addEventListener('click', (event) => {
-        const button =
-          event.target instanceof Element
-            ? event.target.closest('.copy-button')
-            : null;
-        if (!button || button.hasAttribute('disabled')) return;
-        const key = button.closest('article')?.dataset.rowKey;
-        const row = this.rows.find((item) => rowKey(item) === key);
-        if (!row) return;
-        this.dispatchEvent(
-          new CustomEvent('fungun:copy-tracked-token', {
-            bubbles: true,
-            composed: true,
-            detail: trackedTokenDraft(row),
-          }),
-        );
-      });
       this.render();
     }
 
@@ -653,75 +577,6 @@ if (
             .find((a) => a.getAttribute('href') === focusHref)
             ?.focus({ preventScroll: true });
       }
-      const present = new Set();
-      for (const kind of ['eth', 'shares']) {
-        const list = this.shadowRoot.querySelector(`[data-kind="${kind}"]`);
-        const rows = this.rows.filter((row) => row.quote_kind === kind);
-        this.shadowRoot.querySelector(`.count-${kind}`).textContent =
-          `(${rows.length})`;
-        list.querySelector('.empty-state')?.remove();
-        rows.forEach((row, i) => {
-          const key = rowKey(row);
-          if (present.has(key)) return;
-          present.add(key);
-          let node = this.nodes.get(key);
-          if (!node) {
-            node = document.createElement('article');
-            node.dataset.rowKey = key;
-            this.nodes.set(key, node);
-          }
-          const html = card(row);
-          if (node._html !== html) {
-            const focused = this.shadowRoot.activeElement;
-            const focusHref =
-              focused && node.contains(focused)
-                ? focused.getAttribute('href')
-                : null;
-            const previousLadder = node.querySelector('.ladder');
-            const focusCopy =
-              focused?.classList.contains('copy-button') &&
-              node.contains(focused);
-            const scrollLeft = previousLadder?.scrollLeft ?? 0;
-            const focusLadder = Boolean(
-              previousLadder && focused === previousLadder,
-            );
-            node.innerHTML = html;
-            node._html = html;
-            const nextLadder = node.querySelector('.ladder');
-            if (nextLadder) nextLadder.scrollLeft = scrollLeft;
-            if (focusLadder) nextLadder?.focus({ preventScroll: true });
-            if (focusCopy)
-              node
-                .querySelector('.copy-button')
-                ?.focus({ preventScroll: true });
-            if (focusHref)
-              [...node.querySelectorAll('a')]
-                .find((a) => a.getAttribute('href') === focusHref)
-                ?.focus({ preventScroll: true });
-          }
-          if (list.children[i] !== node) {
-            const focused = this.shadowRoot.activeElement;
-            list.insertBefore(node, list.children[i] || null);
-            if (focused && node.contains(focused))
-              focused.focus({ preventScroll: true });
-          }
-        });
-        if (!rows.length) {
-          const empty = document.createElement('p');
-          empty.className = 'empty empty-state';
-          empty.textContent = this.receivedAt
-            ? `No tracked ${kind === 'eth' ? 'ETH' : 'SHARES'} pairs right now`
-            : this.error
-              ? 'Waiting for the feed to reconnect…'
-              : 'Loading tracked pairs…';
-          list.append(empty);
-        }
-      }
-      for (const [key, node] of this.nodes)
-        if (!present.has(key)) {
-          node.remove();
-          this.nodes.delete(key);
-        }
     }
   }
   customElements.define('tracked-market-feed', TrackedMarketFeed);
