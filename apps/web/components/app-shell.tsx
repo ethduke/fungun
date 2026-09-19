@@ -8,7 +8,6 @@ import { Wallet } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { AccountContext, type ConnectedAccount } from '@/lib/account-context';
 import { LaunchDraftProvider } from '@/lib/launch-draft';
-import { MarketFeed } from '@/components/market-feed';
 
 const WalletConnection = lazy(() => import('@/components/connect-panel'));
 
@@ -83,7 +82,6 @@ export function AppShell({ children }: { children: ReactNode }) {
             )}
           </div>
         </header>
-        <MarketFeed compact={pathname !== '/'} />
         <LaunchDraftProvider>{children}</LaunchDraftProvider>
       </div>
     </AccountContext>

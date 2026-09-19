@@ -84,3 +84,19 @@ test("shared journal covers both watchlists while public highlights retain the w
   assert.deepEqual(service.snapshot().stream_highlights.map((row) => row.handle), ["runn3rrr"]);
   await service.stop();
 });
+
+
+test("shared collector no longer polls the retired all-token market feed", async (t) => {
+  const db = new DatabaseSync(":memory:");
+  const requests = t.mock.method(globalThis, "fetch", async () => {
+    throw new Error("Retired market feed must not request upstream data");
+  });
+  const service = createFomoService(db, { FOMO_ENABLED: "1" });
+  t.after(async () => { await service.stop(); db.close(); });
+  service.start();
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.equal(requests.mock.callCount(), 0);
+  assert.equal(service.snapshot().stream_status, "disabled");
+  assert.equal(service.snapshot().stream_last_seen_at, null);
+  assert.equal(service.journal(0).events.length, 0);
+});

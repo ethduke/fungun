@@ -1,12 +1,10 @@
 const operations = new Set([
   'token-image',
   'o1-token-image',
-  'fomo',
   'catalog',
   'ticker',
   'fees',
   'claim-prepare',
-  'tracked-prices',
   'launch-prepare',
   'launch-reserve',
   'launch-status',

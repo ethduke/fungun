@@ -1,8 +1,6 @@
 import { readFileSync } from "node:fs";
 import { FomoStore, fomoUsers } from "./fomo-store.mjs";
 import { FomoCollector } from "./fomo-collector.mjs";
-import { createTrackedFeedHandler } from "../../web/lib/tracked-feed-handler.mjs";
-import { getO1Hooks, getStableAssets } from "../../web/lib/tracked-feed-registry.mjs";
 
 export function createFomoService(db, env = process.env) {
   const users = fomoUsers(
@@ -18,49 +16,21 @@ export function createFomoService(db, env = process.env) {
   );
   const enabled = env.FOMO_ENABLED === "1";
   const collector = new FomoCollector(store, { enabled, key: env.FOMO_API_KEY || "" });
-  const handleFeed = createTrackedFeedHandler({
-    loadHookRegistry: getO1Hooks,
-    loadStableRegistry: getStableAssets,
-    onSnapshot: (snapshot) =>
-      store.register(snapshot.pools.map((row) => ({ ...row, chain_id: 4663 }))),
-  });
-  let stopped = false,
-    timer,
-    pending;
-  let streamStatus = enabled ? "connecting" : "disabled";
-  let streamLastSeenAt = null;
-  async function observe() {
-    try {
-      store.prune();
-      const response = await handleFeed(new Request("http://localhost/api/tracked-feed"));
-      if (response.ok) {
-        streamStatus = "connected";
-        streamLastSeenAt = Date.now() / 1000;
-      } else streamStatus = "unavailable";
-    } catch {
-      streamStatus = "unavailable";
-    }
-    if (!stopped) {
-      timer = setTimeout(kick, 4000);
-      timer.unref();
-    }
-  }
-  function kick() {
-    pending = observe();
-  }
+  let stopped = false;
+  // Keep the shared trader-event journal for relay consumers. The retired
+  // website feed no longer needs a four-second all-token snapshot observer.
   return {
     start() {
-      if (!enabled || stopped || pending) return;
+      if (!enabled || stopped) return;
       collector.start();
-      kick();
     },
     snapshot() {
       const snapshot = collector.snapshot();
       return {
         ...snapshot,
         stream_highlights: snapshot.stream_highlights.filter((row) => users.has(row.handle)),
-        stream_status: streamStatus,
-        stream_last_seen_at: streamLastSeenAt,
+        stream_status: "disabled",
+        stream_last_seen_at: null,
       };
     },
     journal(after) {
@@ -72,9 +42,7 @@ export function createFomoService(db, env = process.env) {
     },
     async stop() {
       stopped = true;
-      clearTimeout(timer);
       await collector.stop();
-      await pending;
     },
   };
 }

@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import { POST } from '../app/api/[operation]/route.ts';
+import { GET as retiredFeed } from '../app/api/tracked-feed/route.ts';
 
 await test('production proxy allowlists operations and origin without forwarding user credentials', async () => {
   const previousOrigin = process.env.APP_ORIGIN;
@@ -143,24 +144,16 @@ await test('proxy normalizes opaque gateway failures without erasing timeout sem
   const originalFetch = globalThis.fetch;
   const origin = 'https://app.example.invalid';
   const request = () =>
-    new Request(`${origin}/api/tracked-prices`, {
+    new Request(`${origin}/api/catalog`, {
       method: 'POST',
       headers: {
         origin,
         'content-type': 'application/json',
-        'x-fungun-intent': 'tracked-prices',
+        'x-fungun-intent': 'catalog',
       },
-      body: JSON.stringify({
-        pools: [
-          {
-            pool: `0x${'1'.repeat(64)}`,
-            token: `0x${'2'.repeat(40)}`,
-            version: 'v4',
-          },
-        ],
-      }),
+      body: JSON.stringify({ chainId: 4663 }),
     });
-  const params = Promise.resolve({ operation: 'tracked-prices' });
+  const params = Promise.resolve({ operation: 'catalog' });
   try {
     process.env.APP_ORIGIN = origin;
     process.env.READ_SERVICE_ORIGIN = 'https://backend.example.invalid';
@@ -315,4 +308,21 @@ await test('launch proxy fixes all routes, strips credentials and enforces the 4
     if (previousBackend === undefined) delete process.env.READ_SERVICE_ORIGIN;
     else process.env.READ_SERVICE_ORIGIN = previousBackend;
   }
+});
+
+
+await test('retired market endpoints never contact an upstream, even for old tabs', async (t) => {
+  const fetcher = t.mock.method(globalThis, 'fetch', async () => {
+    assert.fail('Retired endpoint contacted an upstream');
+  });
+  assert.equal(retiredFeed().status, 410);
+  for (const operation of ['tracked-prices', 'fomo']) {
+    const response = await POST(new Request(`https://app.example.invalid/api/${operation}`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', 'x-fungun-intent': operation },
+      body: '{}',
+    }), { params: Promise.resolve({ operation }) });
+    assert.equal(response.status, 404);
+  }
+  assert.equal(fetcher.mock.callCount(), 0);
 });

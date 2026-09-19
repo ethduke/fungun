@@ -46,6 +46,9 @@ test("HTTP boundary rejects spoofing, excess input and leaks while keeping reads
     });
   assert.equal((await fetch(base + "/healthz")).status, 200);
   assert.equal(calls, 0);
+  // A stale browser cannot trigger token-price RPC reads after feed removal.
+  assert.equal((await post("/v1/tracked-prices", { pools: [] })).status, 404);
+  assert.equal(calls, 0);
   const valid = await post("/v1/catalog", { chainId: 4663 });
   assert.equal(valid.status, 200);
   assert.equal(valid.headers.get("cache-control"), "no-store");

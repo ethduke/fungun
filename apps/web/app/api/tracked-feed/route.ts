@@ -1,11 +1,9 @@
-import { after } from 'next/server';
-import { handleTrackedFeed } from '../../../lib/tracked-feed-handler.mjs';
-
 export const dynamic = 'force-dynamic';
 
-export function GET(request: Request) {
-  const response = handleTrackedFeed(request);
-  // Keep the bounded shared refresh alive if its initiating viewer leaves.
-  after(response.then(() => undefined));
-  return response;
+// Older open tabs must not keep the retired market feed alive.
+export function GET() {
+  return Response.json(
+    { error: 'market_feed_removed' },
+    { status: 410, headers: { 'cache-control': 'no-store' } },
+  );
 }
