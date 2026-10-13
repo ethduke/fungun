@@ -268,6 +268,21 @@ await test('legacy three-pad drafts retain artwork and selections when Stonks is
   assert.equal(restored.selection.destinations.find(pad => pad.id === 'stonks')?.selected, false);
 });
 
+await test('saved Base Stonks selections retain their stock pairing and artwork', async () => {
+  const saved = await encodeLaunchDraft(draft());
+  const pairId: `stonks-${string}` = `stonks-${'b'.repeat(24)}`;
+  saved.selection.chainId = 8453;
+  saved.selection.destinations = saved.selection.destinations.map(pad => pad.id === 'stonks'
+    ? { ...pad, selected: true, pairId }
+    : { ...pad, selected: false });
+  const restored = await decodeLaunchDraft(saved);
+  assert.ok(restored?.image instanceof Blob);
+  assert.equal(restored.selection.chainId, 8453);
+  assert.deepEqual(restored.selection.destinations.filter(pad => pad.selected).map(pad => pad.id), ['stonks']);
+  assert.equal(restored.selection.destinations.find(pad => pad.id === 'stonks')?.pairId, pairId);
+  assert.deepEqual(await restored.image.arrayBuffer(), await saved.image!.arrayBuffer());
+});
+
 await test('production four-pad drafts gain pons without losing existing choices', async () => {
   const saved = await encodeLaunchDraft(draft());
   saved.selection.destinations = saved.selection.destinations.filter(pad => pad.id !== 'pons');
