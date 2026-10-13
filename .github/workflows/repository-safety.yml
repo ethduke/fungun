@@ -20,8 +20,8 @@ jobs:
         run: node --test scripts/check-repository.test.mjs
       - name: Audit tracked files
         run: node scripts/check-repository.mjs --tracked
-      - name: Audit reachable history
-        run: node scripts/check-repository.mjs --history
+      - name: Audit tested commit and ancestor history
+        run: node scripts/check-repository.mjs --history-current
       - name: Install pinned independent scanner
         shell: bash
         run: |

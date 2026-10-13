@@ -220,6 +220,30 @@ test('tracked scans unchanged index blobs and history finds removed data', (t) =
   assert.equal(scanRepository(repo.cwd, 'history').findings[0].path, 'old.json');
 });
 
+test('CI history scans every tested ancestor without importing unrelated branch findings', (t) => {
+  const repo = repository(t);
+  repo.write('safe.json', '{}');
+  repo.git('add', '.');
+  repo.git('commit', '-m', 'Clean fixture');
+  const branch = repo.git('branch', '--show-current').trim();
+  repo.git('switch', '-c', 'unrelated-fixture');
+  repo.write('unrelated.json', credential());
+  repo.git('add', '.');
+  repo.git('-c', 'core.hooksPath=/dev/null', 'commit', '-m', 'Unrelated synthetic fixture');
+  repo.git('switch', branch);
+  assert.deepEqual(scanRepository(repo.cwd, 'history-current').findings, []);
+  assert.equal(scanRepository(repo.cwd, 'history').findings[0].path, 'unrelated.json');
+  repo.write('removed.json', credential());
+  repo.git('add', '.');
+  repo.git('-c', 'core.hooksPath=/dev/null', 'commit', '-m', 'Tested synthetic fixture');
+  repo.git('rm', 'removed.json');
+  repo.git('commit', '-m', 'Remove tested fixture');
+  assert.deepEqual(scanRepository(repo.cwd, 'tracked').findings, []);
+  assert.deepEqual(scanRepository(repo.cwd, 'history-current').findings, [
+    { path: 'removed.json', rule: 'non-placeholder-credential-assignment' },
+  ]);
+});
+
 test('checks binary paths and file sizes from the index', (t) => {
   const repo = repository(t);
   repo.write('wallet.json', Buffer.from([0, 1, 2]));

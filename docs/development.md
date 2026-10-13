@@ -166,7 +166,10 @@ the standalone Node target independently of the Worker preview build. Its final
 image starts with no external network and must serve `/healthz`, `/`, `/fees` and
 `/llms.txt`; `scripts/smoke-production-web.mjs` checks actual HTTP responses.
 No workflow secrets or real wallet/provider credentials are required. Superseded
-runs for the same PR or branch are cancelled.
+runs for the same PR or branch are cancelled. The CI history scan includes the
+tested commit and all its ancestors (including deleted files), so fetched unrelated
+branches cannot change its result. The existing `--history` scan and pre-push hook
+still audit every local ref; CI uses the explicit `--history-current` mode.
 
 To require these checks before merging:
 
