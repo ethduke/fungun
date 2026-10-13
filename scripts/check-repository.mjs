@@ -146,8 +146,8 @@ function indexEntries(cwd, stagedOnly) {
   });
 }
 
-function historyEntries(cwd) {
-  const commits = git(cwd, ['rev-list', '--all']).toString('utf8').trim().split('\n').filter(Boolean);
+function historyEntries(cwd, currentOnly = false) {
+  const commits = git(cwd, ['rev-list', currentOnly ? 'HEAD' : '--all']).toString('utf8').trim().split('\n').filter(Boolean);
   const entries = new Map();
   for (const commit of commits) {
     for (const entry of git(cwd, ['ls-tree', '-rz', '--full-tree', commit]).toString('utf8').split('\0').filter(Boolean)) {
@@ -161,8 +161,8 @@ function historyEntries(cwd) {
 }
 
 export function scanRepository(cwd, mode = 'staged') {
-  if (!['staged', 'tracked', 'history'].includes(mode)) throw new Error('Invalid scan mode');
-  const entries = mode === 'history' ? historyEntries(cwd) : indexEntries(cwd, mode === 'staged');
+  if (!['staged', 'tracked', 'history', 'history-current'].includes(mode)) throw new Error('Invalid scan mode');
+  const entries = mode.startsWith('history') ? historyEntries(cwd, mode === 'history-current') : indexEntries(cwd, mode === 'staged');
   const findings = new Map();
   const contentRules = new Map();
   for (const entry of entries) {
@@ -192,8 +192,8 @@ export function scanRepository(cwd, mode = 'staged') {
 
 function main() {
   const args = process.argv.slice(2);
-  if (args.length > 1 || (args.length && !['--tracked', '--history'].includes(args[0]))) {
-    process.stderr.write('Usage: node scripts/check-repository.mjs [--tracked|--history]\n');
+  if (args.length > 1 || (args.length && !['--tracked', '--history', '--history-current'].includes(args[0]))) {
+    process.stderr.write('Usage: node scripts/check-repository.mjs [--tracked|--history|--history-current]\n');
     return 2;
   }
   const mode = args[0]?.slice(2) ?? 'staged';
