@@ -142,11 +142,49 @@ execution is enabled. Shared branding does not imply a shared token contract.
 
 ```sh
 npm test
+npm run test:mocked
 npm run typecheck
 npm run build
 npm run check:tracked
 npm run check:history
 ```
+
+### Pull-request CI and required checks
+
+`.github/workflows/webview-checks.yml` uses GitHub-hosted Linux runners. The
+`webview` check installs locked dependencies, runs the existing synthetic launch,
+wallet and payment suites in a read-only container with no external network,
+then runs the complete application/facilitator suites, TypeScript, lint, the
+Worker preview build and dependency audits. `npm run test:mocked` also runs those
+focused suites locally, without container isolation. HTTP fixtures use loopback;
+RPC, asset providers and x402 settlement use mocks. Signing fixtures use synthetic
+accounts only. Local captures and environment files are never needed for CI.
+
+The separate `production-build` check builds the existing web and API Dockerfiles
+without publishing or deploying. The web Dockerfile runs `build:fly`, validating
+the standalone Node target independently of the Worker preview build. Its final
+image starts with no external network and must serve `/healthz`, `/`, `/fees` and
+`/llms.txt`; `scripts/smoke-production-web.mjs` checks actual HTTP responses.
+No workflow secrets or real wallet/provider credentials are required. Superseded
+runs for the same PR or branch are cancelled.
+
+To require these checks before merging:
+
+1. Push the workflow changes and let them run on a PR so GitHub can discover the
+   check names.
+2. In the repository's **Settings → Rules → Rulesets**, create a **New branch
+   ruleset**, target the **default branch**, and set enforcement to **Active**.
+3. Enable **Require a pull request before merging** and **Require status checks
+   to pass**, adding `webview`, `production-build` and `repository-safety` from
+   GitHub Actions. These are job names, not workflow or step names.
+4. Enable **Require branches to be up to date before merging** and leave the
+   bypass list empty to enforce the checks for administrators too.
+5. Save the rule and verify that a deliberately failing test blocks a PR merge.
+
+An existing branch protection rule can require the same three checks instead.
+Rulesets for private repositories require GitHub Pro, Team or Enterprise; public
+repositories support them on GitHub Free. See the official [ruleset setup](https://docs.github.com/en/repositories/configuring-branches-and-merges-in-your-repository/managing-rulesets/creating-rulesets-for-a-repository).
+This step does not configure a merge queue or change GitHub repository settings.
 
 The optional browser WebMCP surface can read a redacted draft or stage a name and
 ticker. It cannot trigger ticker checks, connect wallets, transmit images, sign,
