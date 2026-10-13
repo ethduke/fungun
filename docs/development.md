@@ -153,7 +153,7 @@ npm run check:history
 
 `.github/workflows/webview-checks.yml` uses GitHub-hosted Linux runners. The
 `webview` check installs locked dependencies, runs the existing synthetic launch,
-wallet and payment suites in a read-only container with no external network,
+wallet and payment suites plus `test:agent` in a read-only container with no external network,
 then runs the complete application/facilitator suites, TypeScript, lint, the
 Worker preview build and dependency audits. `npm run test:mocked` also runs those
 focused suites locally, without container isolation. HTTP fixtures use loopback;

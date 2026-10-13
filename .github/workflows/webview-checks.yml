@@ -28,12 +28,14 @@ jobs:
             apps/web/package-lock.json
             apps/api/package-lock.json
             apps/facilitator/package-lock.json
+            apps/agent/package-lock.json
       - name: Install locked dependencies
         run: |
           npm --prefix apps/web ci
           npm --prefix apps/api ci --ignore-scripts
           npm --prefix apps/facilitator ci --ignore-scripts
-      - name: Mocked launch and payment tests (no external network)
+          npm --prefix apps/agent ci --ignore-scripts
+      - name: Mocked launch, agent and payment tests (no external network)
         # Dependencies are installed above; only loopback is available in this container.
         # Do not pass wallet, RPC, provider, or deployment credentials into this job.
         run: |
@@ -45,7 +47,7 @@ jobs:
             --mount "type=bind,src=$GITHUB_WORKSPACE,dst=/workspace,readonly" \
             --workdir /workspace \
             node:24-bookworm-slim@sha256:ba849c60be29959425b8734d57b8b4b7d56f98edd9504c9af091d5281095a71e \
-            npm run test:mocked
+            sh -c 'npm run test:mocked && npm run test:agent'
       - name: Application regression tests
         run: npm test
       - name: Facilitator regression tests

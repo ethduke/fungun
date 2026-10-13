@@ -73,3 +73,23 @@ test('the dev exclusion-name exception is exact and cannot hide adjacent credent
   assert.ok(!result.output.includes(token));
   assert.ok(!JSON.stringify(result.findings).includes(token));
 });
+
+test('the historical Stonx contract-role label exception cannot hide credential assignments', { skip: !available }, (t) => {
+  const scan = fixture(t, 'apps/api/src/stonx.test.mjs');
+  const role = ['doppler', 'ERC20V1', 'Implementation'].join('');
+  const mapping = `const mapping = { tokenImplementation: '${role}' };\n`;
+  assert.equal(scan(mapping).status, 0);
+  assert.equal(fixture(t, 'config.mjs')(mapping).status, 1, 'The exception is restricted to its reviewed path');
+  const token = createHash('sha256').update('synthetic contract-role regression').digest('hex');
+  for (const assignment of [
+    `const mapping = { tokenImplementation: '${token}' };\n`,
+    `const tokenImplementation = '${role}';\n`,
+    mapping + `const ${['API', 'KEY'].join('_')} = '${token}';\n`,
+  ]) {
+    const result = scan(assignment);
+    assert.equal(result.status, 1);
+    assert.ok(result.findings.some(finding => finding.RuleID === 'generic-api-key'));
+    assert.ok(!result.output.includes(token));
+    assert.ok(!JSON.stringify(result.findings).includes(token));
+  }
+});

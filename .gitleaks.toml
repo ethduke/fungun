@@ -21,3 +21,10 @@ condition = "AND"
 paths = ['''^scripts/dev\.test\.mjs$''']
 regexTarget = "match"
 regexes = ['''^X402_FACILITATOR_[T]OKEN", "X402_FACILITATOR_PRIVATE_[K]EY"$''']
+
+[[rules.allowlists]]
+description = "Reviewed SDK contract-role label in the historical Stonx fixture, not a credential"
+condition = "AND"
+paths = ['''^apps/api/src/stonx\.test\.mjs$''']
+regexTarget = "match"
+regexes = ['''^tokenImplementation: 'dopplerERC20V1Implementation'$''']
