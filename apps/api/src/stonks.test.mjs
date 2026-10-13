@@ -20,6 +20,9 @@ import { validateClaim, parseFees } from '../../web/lib/fee-service.ts';
 import { receiptPayouts } from '../../web/lib/claim-wallet.ts';
 import { DEFAULT_DESTINATIONS, selectChain, supportsChain, validateDraft } from '../../web/lib/launch-model.ts';
 import { apiEnvironment } from './runtime-env.mjs';
+import { readConfig } from './config.mjs';
+import { Adapters } from './adapters.mjs';
+import { sendWalletClaim } from '../../web/lib/claim-wallet.ts';
 
 const addr = n => toHex(BigInt(n), { size: 20 });
 const hash = n => toHex(BigInt(n), { size: 32 });
@@ -95,6 +98,7 @@ test('Stonks runtime settings remain API-only and require a reviewed Base profil
   assert.equal(readStonksConfig(env).launchesEnabled, true);
   assert.equal(readStonksConfig({ ...env, STONKS_BASE_WALLET_LAUNCH: 'false' }).launchesEnabled, false);
   assert.equal(readStonksConfig({}), null);
+  assert.deepEqual(readConfig(env).stonksLaunch.profile, readStonksConfig(env).profile);
   assert.deepEqual(apiEnvironment({}, { ...env, NEXT_PUBLIC_STONKS_BASE_PROFILE_JSON: 'LEAK' }), env);
   assert.throws(() => readStonksProfile({ ...profileFixture(), chainId: 4663 }));
   const p = profileFixture(); delete p.launcher.implementation;
@@ -114,6 +118,20 @@ test('Base offers O1 and Stonks while Robinhood keeps its existing destinations'
   assert.ok(validateDraft(draft, [destination], 8453, null).destinations);
 });
 
+test('Stonks stays available in the Base catalog independently of O1 and never enters Robinhood catalogs', async t => {
+  const f = await fixture(t);
+  f.db.exec('CREATE TABLE settings (name TEXT PRIMARY KEY, value TEXT NOT NULL)');
+  f.db.prepare('INSERT INTO settings VALUES (?, ?)').run('clock', String(f.now));
+  const adapters = new Adapters(f.config, f.upstream, () => f.now, f.budget);
+  adapters.stonks = f.live;
+  const catalog = parseCatalog(await adapters.catalog(8453), 8453);
+  assert.equal(catalog.pads.o1.status, 'unavailable');
+  assert.equal(catalog.pads.stonks.status, 'ready');
+  assert.deepEqual(catalog.pads.stonks.pairs.map(pair => pair.id), [f.input.pairId]);
+  const robinhood = parseCatalog(await adapters.catalog(4663), 4663);
+  assert.equal(Object.hasOwn(robinhood.pads, 'stonks'), false);
+});
+
 test('Stonks request routing is isolated by chain and pair, including persisted recovery', async t => {
   const f = await fixture(t), plan = await f.live.prepare(f.input);
   assert.deepEqual(validateLongInput('launch-prepare', f.input), f.input);
@@ -121,9 +139,13 @@ test('Stonks request routing is isolated by chain and pair, including persisted 
     assert.throws(() => validateLongInput('launch-prepare', { ...f.input, ...changed }));
   assert.deepEqual(validateInput('fees', { address: f.wallet, chainId: 8453, padId: 'stonks' }).padId, 'stonks');
   assert.throws(() => validateInput('fees', { address: f.wallet, chainId: 4663, padId: 'stonks' }));
+  assert.deepEqual(validateLongInput('launch-estimate', { chainId: 8453, pairId: f.input.pairId }),
+    { chainId: 8453, pairId: f.input.pairId });
+  assert.throws(() => validateLongInput('launch-estimate', { chainId: 4663, pairId: f.input.pairId }));
   const launches = new Launches(f.config, f.upstream, f.budget);
   launches.handlers.stonks.run = () => 'stonks'; launches.handlers.o1Base.run = () => 'o1';
   assert.equal(await launches.run('launch-status', { id: plan.id }), 'stonks');
+  assert.equal(await launches.run('launch-reserve', { id: plan.id, binding: plan.binding }), 'stonks');
   assert.equal(await launches.run('launch-prepare', { chainId: 8453, pairId: 'native' }), 'o1');
 });
 
@@ -146,21 +168,29 @@ test('Stonks composes exact metadata, bounds fees, and rejects transaction subst
 test('Stonks wallet rechecks proxy implementations and predicted address before one mocked submission', async t => {
   const f = await fixture(t), raw = { ...await f.live.prepare(f.input), serverTime: f.now };
   const plan = validateLongPlan(raw, f.input, f.published, performance.now());
-  let bad = false, sends = 0, reserved = false;
+  let bad = null, sends = 0, reserved = false;
   const provider = { request: async ({ method, params }) => {
     if (method === 'eth_getStorageAt') {
       const role = same(params[0], f.profile.launcher.address) ? f.profile.launcher : f.profile.locker;
-      return toHex(BigInt(bad ? addr(99) : role.implementation), { size: 32 });
+      return toHex(BigInt(bad === 'proxy' ? addr(99) : role.implementation), { size: 32 });
     }
-    if (method === 'eth_call') return encodeFunctionResult({ abi: STONKS_ABI, functionName: 'predictTokenAddress', result: f.token });
+    if (method === 'eth_call') return encodeFunctionResult({ abi: STONKS_ABI, functionName: 'predictTokenAddress', result: bad === 'prediction' ? addr(99) : f.token });
+    if (method === 'eth_getCode' && bad === 'implementation-code'
+      && [f.profile.launcher.implementation, f.profile.locker.implementation].some(address => same(address, params[0]))) return '0x02';
     if (method === 'eth_sendTransaction') { assert.ok(reserved); sends++; return hash(777); }
     const values = { eth_accounts: [f.wallet], eth_chainId: '0x2105', eth_getCode: '0x01', eth_getTransactionCount: '0x1', eth_getBalance: toHex(10n ** 18n) };
     assert.ok(Object.hasOwn(values, method)); return values[method];
   } };
-  bad = true;
-  await assert.rejects(sendLongWallet(provider, plan, () => true, async () => { reserved = true; }));
-  assert.equal(sends, 0); assert.equal(reserved, false);
-  bad = false;
+  for (const changed of ['proxy', 'implementation-code', 'prediction']) {
+    bad = changed;
+    await assert.rejects(sendLongWallet(provider, plan, () => true, async () => { reserved = true; }), error => {
+      assert.equal(error.message, 'launch_preflight');
+      assert.equal(error.cause.message, 'contract_unverified');
+      return true;
+    });
+    assert.equal(sends, 0); assert.equal(reserved, false);
+  }
+  bad = null;
   await sendLongWallet(provider, plan, () => true, async () => { reserved = true; });
   assert.equal(sends, 1);
 });
@@ -198,6 +228,8 @@ test('Stonks comparison discloses a Base gas ceiling, full data fees, and stale-
   const quote = approximateLaunchQuote(estimate, 'test', performance.now());
   const cost = calculateLaunchCosts(quote, { chainId: 8453, pads: ['stonks'], contextKey: 'test' }, performance.now());
   assert.equal(cost.total.totalWei, 8000001002600n);
+  for (const baseFees of [undefined, { l1DataFeeWei: 'invalid', operatorFeeWei: '200' }])
+    assert.throws(() => parseApproximateLaunchCost({ ...raw, baseFees, serverTime: f.now }, performance.now(), f.input.pairId));
   const plan = await f.live.prepare(f.input); assert.equal(plan.condition.priceFresh, false);
 });
 
@@ -232,6 +264,10 @@ test('Stonks claim calldata and receipts bind the collection token and only coun
   assert.equal(validateClaim(quote), quote);
   assert.throws(() => validateClaim({ ...quote, collectionToken: addr(99) }));
   assert.throws(() => validateClaim({ ...quote, chainId: 4663 }));
+  let requests = 0;
+  const provider = { request: async () => { requests++; assert.fail('Invalid claims must fail before contacting the wallet'); } };
+  await assert.rejects(sendWalletClaim(provider, { ...quote, collectionToken: addr(99) }), { code: 'invalid_response' });
+  assert.equal(requests, 0);
   const transfer = { address: f.token, topics: encodeEventTopics({ abi: STONKS_ABI, eventName: 'Transfer', args: { from: quote.target, to: f.wallet } }), data: encodeAbiParameters([{ type: 'uint256' }], [71n]) };
   const receipt = { status: '0x1', from: f.wallet, to: quote.target, logs: [transfer] };
   assert.equal(receiptPayouts(receipt, quote)[0].claimableRaw, '71');
