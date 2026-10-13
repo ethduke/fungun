@@ -1,0 +1,10 @@
+# Security fixes, including transitive braces updates, target the default branch.
+# Enabling Dependabot alerts and security updates in GitHub is also required.
+version: 2
+updates:
+  - package-ecosystem: "npm"
+    directory: "/apps/web"
+    schedule:
+      interval: "daily"
+    # Disable routine version PRs; security-fix PRs remain enabled.
+    open-pull-requests-limit: 0
