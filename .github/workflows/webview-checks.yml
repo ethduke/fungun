@@ -3,6 +3,11 @@ name: Webview checks
 on:
   push:
   pull_request:
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
 
 permissions:
   contents: read
@@ -23,13 +28,54 @@ jobs:
             apps/web/package-lock.json
             apps/api/package-lock.json
             apps/facilitator/package-lock.json
-      - run: npm --prefix apps/web ci
-      - run: npm --prefix apps/api ci --ignore-scripts
-      - run: npm --prefix apps/facilitator ci --ignore-scripts
-      - run: npm test
-      - run: npm --prefix apps/facilitator test
-      - run: npm run typecheck
-      - run: npm run lint
-      - run: npm run build
+      - name: Install locked dependencies
+        run: |
+          npm --prefix apps/web ci
+          npm --prefix apps/api ci --ignore-scripts
+          npm --prefix apps/facilitator ci --ignore-scripts
+      - name: Mocked launch and payment tests (no external network)
+        # Dependencies are installed above; only loopback is available in this container.
+        # Do not pass wallet, RPC, provider, or deployment credentials into this job.
+        run: |
+          docker run --rm --network none --read-only \
+            --cap-drop ALL --security-opt no-new-privileges \
+            --user "$(id -u):$(id -g)" \
+            --tmpfs /tmp:rw,nosuid,nodev,size=512m \
+            --env CI=true --env HOME=/tmp --env npm_config_cache=/tmp/npm-cache \
+            --mount "type=bind,src=$GITHUB_WORKSPACE,dst=/workspace,readonly" \
+            --workdir /workspace \
+            node:24-bookworm-slim@sha256:ba849c60be29959425b8734d57b8b4b7d56f98edd9504c9af091d5281095a71e \
+            npm run test:mocked
+      - name: Application regression tests
+        run: npm test
+      - name: Facilitator regression tests
+        run: npm --prefix apps/facilitator test
+      - name: TypeScript checks
+        run: npm run typecheck
+      - name: Lint
+        run: npm run lint
+      - name: Worker preview build
+        run: npm run build
       - run: npm --prefix apps/web audit --audit-level=high
       - run: npm --prefix apps/facilitator audit --audit-level=high
+
+  production-build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          persist-credentials: false
+      - name: Build production web image (standalone Node target)
+        run: docker build --file apps/web/Dockerfile --tag fungun-web:ci .
+      - name: Build production API image
+        run: docker build --file apps/api/Dockerfile --tag fungun-api:ci .
+      - name: Smoke-check packaged production web (no external network)
+        run: |
+          cleanup() {
+            docker logs fungun-web-ci || true
+            docker rm --force fungun-web-ci || true
+          }
+          trap cleanup EXIT
+          docker run --detach --network none --name fungun-web-ci fungun-web:ci
+          docker exec --interactive fungun-web-ci node --input-type=module < scripts/smoke-production-web.mjs
