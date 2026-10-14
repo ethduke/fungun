@@ -1,6 +1,7 @@
 import { readFacilitatorConfig } from "./config.mjs";
 import { createPrivateFacilitator } from "./facilitator.mjs";
 import { createFacilitatorServer } from "./server.mjs";
+import { safeStartupReason } from "./diagnostics.mjs";
 
 let server;
 try {
@@ -20,14 +21,10 @@ try {
       event: "facilitator_started",
       port: config.port,
       network: "eip155:4663",
-      relayerAddress: runtime.relayerAddress,
     });
   });
 } catch (error) {
-  const code =
-    typeof error?.message === "string" && /^[a-z0-9_]{1,96}$/.test(error.message)
-      ? error.message
-      : "startup_validation_failed";
+  const code = safeStartupReason(error?.message);
   console.error({ event: "facilitator_start_failed", code });
   process.exitCode = 1;
 }
