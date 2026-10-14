@@ -3,6 +3,7 @@ import test from "node:test";
 import { once } from "node:events";
 import { createFacilitatorServer } from "./server.mjs";
 import { PAYMENT_TIMEOUT_SECONDS } from "./policy.mjs";
+import { safeStartupReason } from "./diagnostics.mjs";
 
 const asset = `0x${"11".repeat(20)}`;
 const payTo = `0x${"22".repeat(20)}`;
@@ -255,4 +256,38 @@ test("keeps an empty-hash transaction submission failure pending for chain recon
   assert.equal(result.success, false);
   assert.equal(result.errorReason, "settlement_pending");
   assert.equal(result.transaction, "");
+});
+
+test("never emits arbitrary SDK reasons or exception text, including code-shaped secrets", async t => {
+  const marker = ["synthetic", "credential", "1234567890"].join("_");
+  for (const secret of [marker, `https://rpc.example/v2/${marker}`, `Bearer ${marker}`]) {
+    const logs = captureLogs();
+    const f = await fixture({
+      verify: async () => ({ isValid: false, invalidReason: secret }),
+      settle: async () => ({ success: false, transaction: "", errorReason: secret }),
+    }, logs.logger);
+    t.after(() => f.server.close());
+    assert.equal((await (await f.post("/verify")).json()).invalidReason, "unexpected_error");
+    assert.equal((await (await f.post("/settle")).json()).errorReason, "settlement_pending");
+    const throwing = await fixture({ verify: async () => { throw new Error(secret); } }, logs.logger);
+    t.after(() => throwing.server.close());
+    const response = await throwing.post("/verify");
+    assert.equal(response.status, 500);
+    assert.deepEqual(await response.json(), { error: "unexpected_error" });
+    assert.ok(!JSON.stringify([...logs.info, ...logs.error]).includes(marker));
+    assert.equal(safeStartupReason(secret), "startup_validation_failed");
+  }
+  assert.equal(safeStartupReason("missing_robinhood_rpc"), "missing_robinhood_rpc");
+});
+
+
+test("retains known SDK rejection codes", async t => {
+  const reason = "invalid_exact_evm_insufficient_balance";
+  const f = await fixture({
+    verify: async () => ({ isValid: false, invalidReason: reason }),
+    settle: async () => ({ success: false, transaction: "", errorReason: reason }),
+  });
+  t.after(() => f.server.close());
+  assert.equal((await (await f.post("/verify")).json()).invalidReason, reason);
+  assert.equal((await (await f.post("/settle")).json()).errorReason, reason);
 });
