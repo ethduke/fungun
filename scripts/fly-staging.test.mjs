@@ -22,7 +22,7 @@ function fixture({ first = false, failDeploy = false, failSmoke = false, failRes
         return JSON.stringify([image(service, 2)]);
       }
       if (args[0] === 'secrets') return JSON.stringify(secret ? [{ Name: 'PRIVATE_KEY' }] : []);
-      if (args[0] === 'machine') {
+      if (args[0] === 'machine' && args[1] === 'list') {
         const replacement = pending.get(service.key);
         const replacing = replacement?.remaining > 0;
         if (replacing) replacement.remaining--;
@@ -84,6 +84,23 @@ test('a Machine that never reports the target image still triggers verified roll
   assert.equal(f.records.at(-1).status, 'rolled_back');
   assert.equal(f.records.at(-1).failedPhase, 'verify-api');
   for (const service of services) assert.equal(f.current.get(service.key), image(service, 1));
+});
+
+for (const action of ['deploy', 'rollback']) test(`${action} starts idle Machines only after their desired image is applied`, async () => {
+  const f = fixture();
+  const started = new Set();
+  const run = async (service, bin, args) => {
+    const output = await f.options.run(service, bin, args);
+    if (args[0] === 'machine' && args[1] === 'start') { started.add(service.key); return ''; }
+    if (args[0] === 'machine' && args[1] === 'list' && f.current.get(service.key) === image(service, 2) && !started.has(service.key))
+      return JSON.stringify([{ id: `test-${service.key}`, state: 'stopped',
+        config: { image: image(service, 2) }, image_ref: {
+          registry: 'registry.fly.io', repository: service.app, digest: digest(1),
+        } }]);
+    return output;
+  };
+  assert.equal((await releaseStaging({ ...f.options, action, run })).status, 'healthy');
+  assert.deepEqual([...started], ['api', 'web']);
 });
 
 for (const scenario of [{ failDeploy: true }, { failSmoke: true }]) test(`partial staging failure restores both previous digests: ${JSON.stringify(scenario)}`, async () => {

@@ -21,6 +21,8 @@ Deployment uses the pushed digest rather than a mutable version tag.
 After an immediate update, Fly may briefly report the previous image while the
 Machine is `replacing`. Both deployment and recovery wait up to one minute for a
 started Machine with the expected digest before probing the HTTP endpoints.
+If an idle Machine remains stopped after an update, recovery explicitly starts
+it only once its desired configuration names the selected image digest.
 
 Before changing either Machine, the job captures both deployed image digests and
 refreshes a `rollback` tag for each previous image. A failed Fly deployment, wrong

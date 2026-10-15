@@ -72,12 +72,20 @@ export async function releaseStaging({ sha, version, action = 'deploy', run, smo
     '--image', image, '--strategy', 'immediate', '--ha=false', '--yes', '--wait-timeout', '120s']);
   const waitForImage = async (service, expected) => {
     const deadline = Date.now() + 60_000;
+    const started = new Set();
     for (let attempt = 0; attempt < imageAttempts; attempt++) {
       const current = await machines(service);
       if (current.length > 1) throw new Error('Staging must have at most one Machine per app.');
       // Immediate deployments can return while the Machine is still replacing,
       // with both config.image and image_ref describing its previous instance.
       if (current[0]?.state === 'started' && deployedImage(current, service) === expected) return;
+      const machine = current[0];
+      // With min_machines_running=0, an update can leave an idle Machine
+      // stopped. Start it only after its desired config names this digest.
+      if (machine?.state === 'stopped' && machine.config?.image === expected && machine.id && !started.has(machine.id)) {
+        started.add(machine.id);
+        await fly(service, ['machine', 'start', machine.id, '--app', service.app]);
+      }
       if (attempt + 1 === imageAttempts || Date.now() >= deadline) break;
       await sleep(2000);
     }
