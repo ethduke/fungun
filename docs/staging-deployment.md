@@ -68,11 +68,13 @@ matching environment secret without printing or committing the token. An expired
 token fails deployment; it does not bypass CI or fall back to production access.
 
 The `production` environment requires the repository owner's approval, disallows
-administrator bypass and permits protected branches only. There is no automatic
-production workflow and no production Fly token in GitHub Actions. Production
-remains an explicitly approved operator deployment; do not reuse staging's mock
-API process configuration for it. A future production Actions job must use the
-protected `production` environment and separately approved credentials.
+administrator bypass and permits protected branches only. The manual **Deploy
+production** workflow promotes a successful staging release's exact image digests
+using separate app-scoped credentials available only after approval. Production
+keeps its own runtime settings, process and storage; staging's mock process
+configuration is never promoted. See [production deployment](production-deployment.md)
+for the selection, approval and recovery steps. Merging this workflow does not
+start a production deployment.
 
 Each staging app uses one shared-CPU Machine, with no HA spare, no volumes, no
 dedicated IPv4 and no separate build server. The web Machine has 512 MiB and the

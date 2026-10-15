@@ -1,0 +1,100 @@
+name: Deploy production
+
+# Register this workflow on main without deploying. Only an explicit dispatch
+# can create a production job, which then waits for the owner's approval.
+on:
+  workflow_dispatch:
+    inputs:
+      staging_run_id:
+        description: Successful Deploy staging run ID to promote (not a CI run or rollback)
+        type: string
+        required: true
+
+permissions:
+  contents: read
+  actions: read
+  checks: read
+
+concurrency:
+  group: fly-production
+  cancel-in-progress: false
+
+jobs:
+  plan:
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+        with:
+          node-version: 24
+      - name: Validate successful staging release and required checks
+        run: node scripts/fly-production.mjs plan
+        env:
+          GH_TOKEN: ${{ github.token }}
+          STAGING_RUN_ID: ${{ inputs.staging_run_id }}
+          PRODUCTION_PLAN_PATH: ${{ runner.temp }}/production-plan.json
+      - name: Retain the exact candidate for review
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: production-plan-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/production-plan.json
+          if-no-files-found: error
+          retention-days: 30
+
+  production:
+    needs: plan
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    environment:
+      name: production
+      url: https://farmgun.fun
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+        with:
+          node-version: 24
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
+        with:
+          name: production-plan-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/production-plan
+      - name: Install pinned Fly CLI
+        shell: bash
+        run: |
+          set -euo pipefail
+          install_dir=$(mktemp -d "$RUNNER_TEMP/flyctl.XXXXXX")
+          curl --fail --silent --show-error --location --proto '=https' --tlsv1.2 \
+            https://github.com/superfly/flyctl/releases/download/v0.4.108/flyctl_0.4.108_Linux_x86_64.tar.gz \
+            --output "$install_dir/flyctl.tar.gz"
+          echo "38173df9dadd6a1f413ce435b6745b29ce2893c0ba918af17d7a1eced8089844  $install_dir/flyctl.tar.gz" | sha256sum --check --strict
+          tar -xzf "$install_dir/flyctl.tar.gz" -C "$install_dir" flyctl
+          echo "$install_dir" >> "$GITHUB_PATH"
+      - name: Promote tested images and restore previous images on failure
+        run: node scripts/fly-production.mjs release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          STAGING_RUN_ID: ${{ inputs.staging_run_id }}
+          RELEASE_ID: production-${{ github.run_id }}-${{ github.run_attempt }}
+          PRODUCTION_PLAN_PATH: ${{ runner.temp }}/production-plan/production-plan.json
+          DEPLOY_RECORD_PATH: ${{ runner.temp }}/production-release.json
+          FLY_PROMOTE_STAGING_API_TOKEN: ${{ secrets.FLY_PROMOTE_STAGING_API_TOKEN }}
+          FLY_PROMOTE_STAGING_WEB_TOKEN: ${{ secrets.FLY_PROMOTE_STAGING_WEB_TOKEN }}
+          FLY_PRODUCTION_API_TOKEN: ${{ secrets.FLY_PRODUCTION_API_TOKEN }}
+          FLY_PRODUCTION_WEB_TOKEN: ${{ secrets.FLY_PRODUCTION_WEB_TOKEN }}
+      - name: Retain image digests and rollback result
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: production-release-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/production-release.json
+          if-no-files-found: ignore
+          retention-days: 30
+      - name: Remove registry credentials
+        if: always()
+        run: docker logout registry.fly.io
