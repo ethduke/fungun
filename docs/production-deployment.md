@@ -89,6 +89,33 @@ The approval candidate artifact also lasts 30 days; expired staging records cann
 be promoted. Registry retention is not permanent; the previous-image tag protects
 the immediate predecessor, not an indefinite release archive.
 
+### Failure diagnostics
+
+The job's annotation and summary show a fixed phase, an allowlisted error code
+and explanation, and (when applicable) an allowlisted command type, a numeric
+command exit code or GitHub HTTP status. The release artifact records preparation phases too: `failed_preflight`
+means no Machine update was attempted, while `rolled_back` and `rollback_failed`
+describe recovery after an attempted update. It retains the original failed phase
+and code even if recovery also fails. Unknown exceptions become
+`UNEXPECTED_FAILURE`; their original text is never printed or serialized.
+
+| Example phase/code | Meaning |
+| --- | --- |
+| `revalidate-release` / `GITHUB_NETWORK_ERROR` | Final GitHub read failed after three attempts; no Machine update |
+| `copy-image-api` / `COMMAND_FAILED` | API registry preparation failed; numeric exit code retained |
+| `verify-api` / `RUNTIME_CHANGED` | Runtime comparison failed after API update; recovery attempted |
+| `RELEASE_ROLLED_BACK` | Previous images and health verified; original failure is in the record |
+
+Fly, Docker and artifact-download processes run asynchronously so Node can
+process idle HTTP connection closures while they work. Blocking those operations
+can otherwise leave the final GitHub revalidation using a closed keep-alive
+connection. GitHub metadata reads retry transport failures and HTTP 429/502/503/504
+at most three times, with bounded request deadlines and backoff. Authorization
+errors, invalid metadata and unsuccessful required checks still block deployment;
+no guard is bypassed. Production updates are never retried by this read helper.
+Raw CLI output, error stacks/causes, request/response bodies, URLs, headers,
+arguments and environment values remain excluded from logs and artifacts.
+
 For a later manual recovery, obtain the exact `services.<api|web>.previous` digest
 from that production artifact. After an explicit operator approval, update each
 existing Machine with `fly machine update <machine-id> --app <production-app>
