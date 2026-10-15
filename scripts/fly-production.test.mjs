@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import { releasePlan, verifyRelease, promoteProduction, productionServices } from './fly-production.mjs';
 import { smokeProduction, productionOrigins } from './smoke-production.mjs';
+import { deploymentFailure } from './deployment-runtime.mjs';
 
 const sha = 'a'.repeat(40);
 const digest = n => `sha256:${String(n).repeat(64)}`;
@@ -217,6 +218,49 @@ test('a superseded approval or out-of-band production change during preparation 
     return original(...args);
   } }));
   assert.equal(updates(changed).length, 0);
+});
+
+test('the final GitHub revalidation failure is recorded with a fixed code before any update', async () => {
+  const f = fixture(); let validations = 0;
+  await assert.rejects(promoteProduction({ ...f.options, verify: async () => {
+    if (++validations === 2) throw deploymentFailure('GITHUB_NETWORK_ERROR');
+    return plan;
+  } }));
+  const state = f.records.at(-1);
+  assert.equal(state.status, 'failed_preflight');
+  assert.equal(state.failedPhase, 'revalidate-release');
+  assert.equal(state.error.errorCode, 'GITHUB_NETWORK_ERROR');
+  assert.equal(updates(f).length, 0);
+});
+
+test('registry errors report the precise service/phase and safe exit code without private details', async () => {
+  const f = fixture(); const original = f.options.run;
+  await assert.rejects(promoteProduction({ ...f.options, run: async (...args) => {
+    if (args[2] === 'docker' && args[3][0] === 'push') throw deploymentFailure('COMMAND_FAILED', { exitCode: 7 });
+    return original(...args);
+  } }));
+  assert.equal(f.records.at(-1).status, 'failed_preflight');
+  assert.equal(f.records.at(-1).failedPhase, 'copy-image-api');
+  assert.equal(f.records.at(-1).error.exitCode, 7);
+  assert.equal(updates(f).length, 0);
+});
+
+test('unexpected error content never enters the preflight or rollback record', async () => {
+  const f = fixture(); const original = f.options.run;
+  const privateText = 'private diagnostic must not be recorded';
+  await assert.rejects(promoteProduction({ ...f.options, run: async (...args) => {
+    if (args[2] === 'docker') throw new Error(privateText);
+    return original(...args);
+  } }));
+  assert.equal(f.records.at(-1).error.errorCode, 'UNEXPECTED_FAILURE');
+  assert.equal(JSON.stringify(f.records).includes(privateText), false);
+  const recovery = fixture(); let probes = 0;
+  await assert.rejects(promoteProduction({ ...recovery.options, smoke: async () => {
+    if (++probes > 1) throw new Error(privateText);
+  } }));
+  assert.equal(recovery.records.at(-1).status, 'rollback_failed');
+  assert.equal(recovery.records.at(-1).rollbackErrors[0].errorCode, 'UNEXPECTED_FAILURE');
+  assert.equal(JSON.stringify(recovery.records).includes(privateText), false);
 });
 
 test('production health checks only GET public routes and reject staging responses', async () => {
