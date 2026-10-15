@@ -104,7 +104,8 @@ export function verifyProductionMachine(list, service) {
   const machine = list[0]; const config = machine.config; const env = config?.env;
   if (env?.NODE_ENV !== 'production' || env.APP_ORIGIN !== productionOrigins.web || env.FUNGUN_STAGING
     || (config.init?.cmd?.length ?? 0) || (config.init?.entrypoint?.length ?? 0)
-    || config.processes?.length || config.containers?.length)
+    || (config.init?.exec?.length ?? 0)
+    || Object.keys(config.processes ?? {}).length || Object.keys(config.containers ?? {}).length)
     fail('Unexpected production runtime or process override.');
   if (service.key === 'web' && (env.READ_SERVICE_ORIGIN !== productionOrigins.api || config.mounts?.length))
     fail('Unexpected production web configuration.');

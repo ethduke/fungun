@@ -194,6 +194,8 @@ test('unhealthy baseline, storage, topology and mock process configuration fail 
     m => { m.id = 'other'; }, m => { m.state = 'stopped'; }, m => { m.config.mounts = []; },
     m => { m.config.env.READS_MACHINE_ID = 'other'; }, m => { m.config.env.FUNGUN_STAGING = 'mock'; },
     m => { m.config.init.cmd = ['node', 'src/staging-server.mjs']; },
+    m => { m.config.init.exec = ['node', 'src/staging-server.mjs']; },
+    m => { m.config.processes = { mock: ['node', 'src/staging-server.mjs'] }; },
   ];
   for (const change of changes) {
     const f = fixture(); change(f.current.get('api'));

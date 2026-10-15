@@ -25,6 +25,9 @@ The workflow's registration and credential setup do not change running services.
    untouched. Self-review is allowed so the sole owner can explicitly approve
    a run they dispatched.
 
+To retry a failed release, start a new **Run workflow** and review its new plan;
+rerunning only the failed job cannot reuse an earlier attempt's approval artifact.
+
 The environment's rules are under repository **Settings → Environments →
 production**. These rules protect GitHub Actions jobs using that environment;
 they cannot prevent a separate operator with Fly credentials deploying by CLI.
