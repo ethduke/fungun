@@ -1,0 +1,92 @@
+name: Deploy staging
+
+on:
+  workflow_run:
+    workflows: [Webview checks]
+    types: [completed]
+    branches: [main]
+  workflow_dispatch:
+    inputs:
+      action:
+        description: Deploy the checked main commit or restore the retained staging images
+        type: choice
+        options: [deploy, rollback]
+        default: deploy
+
+permissions:
+  contents: read
+  checks: read
+
+# Never interrupt a deployment halfway through its rollback handling.
+concurrency:
+  group: fly-staging
+  cancel-in-progress: false
+
+jobs:
+  staging:
+    if: >-
+      (github.event_name == 'workflow_run' &&
+       github.event.workflow_run.conclusion == 'success' &&
+       github.event.workflow_run.event == 'push' &&
+       github.event.workflow_run.head_branch == 'main' &&
+       github.event.workflow_run.head_sha == github.sha &&
+       github.event.workflow_run.head_repository.full_name == github.repository) ||
+      (github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main')
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    environment:
+      name: staging
+      url: https://farmgun-staging-web.fly.dev
+    env:
+      DEPLOY_SHA: ${{ github.event.workflow_run.head_sha || github.sha }}
+      STAGING_ACTION: ${{ inputs.action || 'deploy' }}
+      GH_TOKEN: ${{ github.token }}
+      RELEASE_VERSION: sha-${{ github.event.workflow_run.head_sha || github.sha }}-${{ github.run_id }}-${{ github.run_attempt }}
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          ref: ${{ env.DEPLOY_SHA }}
+          persist-credentials: false
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+        with:
+          node-version: 24
+      - name: Verify current main and all required checks
+        id: gate
+        run: node scripts/fly-staging.mjs gate
+      - name: Build credential-free staging images
+        if: steps.gate.outputs.ready == 'true' && env.STAGING_ACTION == 'deploy'
+        run: |
+          docker build --file apps/api/Dockerfile --tag "fungun-staging-api:$DEPLOY_SHA" \
+            --label "org.opencontainers.image.revision=$DEPLOY_SHA" --label "org.opencontainers.image.version=$RELEASE_VERSION" .
+          docker build --file apps/web/Dockerfile --tag "fungun-staging-web:$DEPLOY_SHA" \
+            --label "org.opencontainers.image.revision=$DEPLOY_SHA" --label "org.opencontainers.image.version=$RELEASE_VERSION" .
+      - name: Install pinned Fly CLI
+        if: steps.gate.outputs.ready == 'true'
+        shell: bash
+        run: |
+          set -euo pipefail
+          install_dir=$(mktemp -d "$RUNNER_TEMP/flyctl.XXXXXX")
+          curl --fail --silent --show-error --location --proto '=https' --tlsv1.2 \
+            https://github.com/superfly/flyctl/releases/download/v0.4.108/flyctl_0.4.108_Linux_x86_64.tar.gz \
+            --output "$install_dir/flyctl.tar.gz"
+          echo "38173df9dadd6a1f413ce435b6745b29ce2893c0ba918af17d7a1eced8089844  $install_dir/flyctl.tar.gz" | sha256sum --check --strict
+          tar -xzf "$install_dir/flyctl.tar.gz" -C "$install_dir" flyctl
+          echo "$install_dir" >> "$GITHUB_PATH"
+      - name: Deploy staging and restore previous images on failure
+        if: steps.gate.outputs.ready == 'true'
+        run: node scripts/fly-staging.mjs release
+        env:
+          DEPLOY_RECORD_PATH: ${{ runner.temp }}/staging-release.json
+          FLY_STAGING_API_TOKEN: ${{ secrets.FLY_STAGING_API_TOKEN }}
+          FLY_STAGING_WEB_TOKEN: ${{ secrets.FLY_STAGING_WEB_TOKEN }}
+      - name: Retain image digests and rollback result
+        if: always() && steps.gate.outputs.ready == 'true'
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: staging-release-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/staging-release.json
+          if-no-files-found: ignore
+          retention-days: 30
+      - name: Remove registry credentials
+        if: always()
+        run: docker logout registry.fly.io
