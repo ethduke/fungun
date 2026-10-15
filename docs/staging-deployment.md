@@ -18,6 +18,9 @@ The job builds credential-free web/API images from that SHA, adds source and
 release labels, and pushes versioned tags to each staging app's Fly registry.
 The version is `sha-<commit>-<run-id>-<attempt>`; it is not reused on reruns.
 Deployment uses the pushed digest rather than a mutable version tag.
+After an immediate update, Fly may briefly report the previous image while the
+Machine is `replacing`. Both deployment and recovery wait up to one minute for a
+started Machine with the expected digest before probing the HTTP endpoints.
 
 Before changing either Machine, the job captures both deployed image digests and
 refreshes a `rollback` tag for each previous image. A failed Fly deployment, wrong

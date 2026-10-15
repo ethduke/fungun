@@ -58,7 +58,7 @@ function pushedImage(output, service) {
 
 // All side effects are injected so rollback, partial failures and registry
 // retention can be tested without a Fly account, network, or blockchain wallet.
-export async function releaseStaging({ sha, version, action = 'deploy', run, smoke = smokeStaging, record = () => {}, gate = async () => true }) {
+export async function releaseStaging({ sha, version, action = 'deploy', run, smoke = smokeStaging, record = () => {}, gate = async () => true, sleep = pause, imageAttempts = 30 }) {
   if (!/^[a-f0-9]{40}$/.test(sha ?? '') || !/^sha-[a-f0-9]{40}-[0-9]+-[0-9]+$/.test(version ?? '')
     || !['deploy', 'rollback'].includes(action)) throw new Error('Invalid staging release request.');
   const state = { sha, version, action, status: 'prepared', services: {} };
@@ -70,6 +70,19 @@ export async function releaseStaging({ sha, version, action = 'deploy', run, smo
   ]), service);
   const deploy = (service, image) => fly(service, ['deploy', '--app', service.app, '--config', service.config,
     '--image', image, '--strategy', 'immediate', '--ha=false', '--yes', '--wait-timeout', '120s']);
+  const waitForImage = async (service, expected) => {
+    const deadline = Date.now() + 60_000;
+    for (let attempt = 0; attempt < imageAttempts; attempt++) {
+      const current = await machines(service);
+      if (current.length > 1) throw new Error('Staging must have at most one Machine per app.');
+      // Immediate deployments can return while the Machine is still replacing,
+      // with both config.image and image_ref describing its previous instance.
+      if (current[0]?.state === 'started' && deployedImage(current, service) === expected) return;
+      if (attempt + 1 === imageAttempts || Date.now() >= deadline) break;
+      await sleep(2000);
+    }
+    throw new Error('Staging Machine did not start with the expected image.');
+  };
 
   // Capture both services before changing either one. No provider or signing
   // secrets are permitted even if someone manually changed a staging app.
@@ -113,23 +126,30 @@ export async function releaseStaging({ sha, version, action = 'deploy', run, smo
   }
   try {
     for (const service of services) {
+      state.phase = `deploy-${service.key}`;
+      record(state);
       attempted.push(service);
       await deploy(service, state.services[service.key].target);
-      if (deployedImage(await machines(service), service) !== state.services[service.key].target)
-        throw new Error('Deployed staging image does not match the release.');
+      state.phase = `verify-${service.key}`;
+      record(state);
+      await waitForImage(service, state.services[service.key].target);
     }
+    state.phase = 'probe';
+    record(state);
     await smoke();
     state.status = 'healthy';
     record(state);
     return state;
   } catch {
+    state.failedPhase = state.phase;
+    state.phase = 'restore';
     let restored = true;
     for (const service of attempted.reverse()) {
       try {
         const previous = state.services[service.key].previous;
         if (previous) {
           await deploy(service, previous);
-          if (deployedImage(await machines(service), service) !== previous) throw new Error();
+          await waitForImage(service, previous);
         } else {
           // A first release has no rollback image. Remove only its new staging
           // Machine so autostart cannot keep serving an unhealthy first image.
@@ -162,7 +182,8 @@ if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) 
       const run = (service, binary, args) => {
         const env = Object.fromEntries(['PATH', 'HOME', 'DOCKER_CONFIG', 'XDG_CONFIG_HOME'].filter(key => process.env[key]).map(key => [key, process.env[key]]));
         if (binary === 'flyctl') env.FLY_API_TOKEN = tokens[service.key];
-        try { return execFileSync(binary, args, { env, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'], maxBuffer: 20 * 1024 * 1024, timeout: 180_000 }); }
+        const timeout = binary === 'docker' || args[0] === 'deploy' ? 180_000 : 30_000;
+        try { return execFileSync(binary, args, { env, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'], maxBuffer: 20 * 1024 * 1024, timeout }); }
         catch { throw new Error(`Staging ${service.key} command failed.`); }
       };
       const state = await releaseStaging({ sha, action, version: process.env.RELEASE_VERSION, run, gate,
