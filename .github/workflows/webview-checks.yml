@@ -60,6 +60,8 @@ jobs:
         run: npm run build
       - run: npm --prefix apps/web audit --audit-level=high
       - run: npm --prefix apps/facilitator audit --audit-level=high
+      - run: npm --prefix apps/api audit --audit-level=high
+      - run: npm --prefix apps/agent audit --audit-level=high
 
   production-build:
     runs-on: ubuntu-latest

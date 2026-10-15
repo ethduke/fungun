@@ -34,6 +34,8 @@
 !apps/web/public/**
 !apps/web/scripts/
 !apps/web/scripts/*.mjs
+!apps/web/vendor/
+!apps/web/vendor/**
 !apps/web/Dockerfile
 !apps/web/package.json
 !apps/web/package-lock.json

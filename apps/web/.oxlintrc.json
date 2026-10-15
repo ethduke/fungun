@@ -23,6 +23,7 @@
     "typeCheck": true
   },
   "ignorePatterns": [
+    "vendor/**",
     "components/ui/**",
     "hooks/use-mobile.ts",
     ".next/**",
