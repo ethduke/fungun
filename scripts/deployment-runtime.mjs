@@ -38,6 +38,7 @@ const messages = Object.freeze({
   UNKNOWN_COMMAND: 'Unknown production command.',
   COMMAND_FAILED: 'Deployment command failed.',
   COMMAND_TIMEOUT: 'Deployment command exceeded its deadline.',
+  FLY_IMAGE_REFERENCE_INVALID: 'Fly rejected the image reference; verify the CLI version and digest formatting.',
   GITHUB_NETWORK_ERROR: 'GitHub read request failed after bounded retries.',
   GITHUB_TIMEOUT: 'GitHub read request exceeded its deadline.',
   GITHUB_HTTP_ERROR: 'GitHub rejected the read request.',
@@ -97,7 +98,10 @@ export async function deploymentCommand(binary, args, extra = {}, { executor = e
     if (binary === 'docker' && ['pull', 'tag', 'push'].includes(args[0])) command = `docker-${args[0]}`;
     if (binary === 'docker' && args[0] === 'image' && args[1] === 'inspect') command = 'docker-inspect';
     if (binary === 'gh' && args[0] === 'run' && args[1] === 'download') command = 'github-download';
-    throw deploymentFailure(error?.killed || error?.code === 'ETIMEDOUT' ? 'COMMAND_TIMEOUT' : 'COMMAND_FAILED',
+    const invalidImage = command === 'fly-machine-update' && typeof error?.stderr === 'string'
+      && error.stderr.includes('config.image: invalid image identifier');
+    throw deploymentFailure(error?.killed || error?.code === 'ETIMEDOUT' ? 'COMMAND_TIMEOUT'
+      : invalidImage ? 'FLY_IMAGE_REFERENCE_INVALID' : 'COMMAND_FAILED',
       { exitCode: error?.code, command });
   }
 }

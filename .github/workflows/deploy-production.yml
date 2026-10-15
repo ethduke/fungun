@@ -70,9 +70,9 @@ jobs:
           set -euo pipefail
           install_dir=$(mktemp -d "$RUNNER_TEMP/flyctl.XXXXXX")
           curl --fail --silent --show-error --location --proto '=https' --tlsv1.2 \
-            https://github.com/superfly/flyctl/releases/download/v0.4.108/flyctl_0.4.108_Linux_x86_64.tar.gz \
+            https://github.com/superfly/flyctl/releases/download/v0.4.118/flyctl_0.4.118_Linux_x86_64.tar.gz \
             --output "$install_dir/flyctl.tar.gz"
-          echo "38173df9dadd6a1f413ce435b6745b29ce2893c0ba918af17d7a1eced8089844  $install_dir/flyctl.tar.gz" | sha256sum --check --strict
+          echo "0f2fabbb29904a7bac8bd96009314d26751084c33e098fcc393e2dac6c472f60  $install_dir/flyctl.tar.gz" | sha256sum --check --strict
           tar -xzf "$install_dir/flyctl.tar.gz" -C "$install_dir" flyctl
           echo "$install_dir" >> "$GITHUB_PATH"
       - name: Promote tested images and restore previous images on failure
