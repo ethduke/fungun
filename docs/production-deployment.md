@@ -103,6 +103,7 @@ and code even if recovery also fails. Unknown exceptions become
 | --- | --- |
 | `revalidate-release` / `GITHUB_NETWORK_ERROR` | Final GitHub read failed after three attempts; no Machine update |
 | `copy-image-api` / `COMMAND_FAILED` | API registry preparation failed; numeric exit code retained |
+| `update-api` / `FLY_IMAGE_REFERENCE_INVALID` | Fly rejected the image identifier; check the pinned CLI's digest handling |
 | `verify-api` / `RUNTIME_CHANGED` | Runtime comparison failed after API update; recovery attempted |
 | `RELEASE_ROLLED_BACK` | Previous images and health verified; original failure is in the record |
 
@@ -115,6 +116,15 @@ errors, invalid metadata and unsuccessful required checks still block deployment
 no guard is bypassed. Production updates are never retried by this read helper.
 Raw CLI output, error stacks/causes, request/response bodies, URLs, headers,
 arguments and environment values remain excluded from logs and artifacts.
+
+Production pins Fly CLI **0.4.118**, including its official archive checksum.
+Version 0.4.108 duplicated a digest-only image reference when `machine update`
+resolved it, producing `image@digest@digest`; Fly rejected both deployment and
+recovery before changing the image. The upstream
+[digest serialization fix](https://github.com/superfly/flyctl/commit/a798342bf74203554628cc83db5eecf12de4bae4)
+is included in the production pin. Both candidate and rollback references were
+checked against the fixed CLI without confirming an update. Keep using exact
+digests; do not replace them with mutable tags to bypass a CLI parsing problem.
 
 For a later manual recovery, obtain the exact `services.<api|web>.previous` digest
 from that production artifact. After an explicit operator approval, update each
@@ -152,4 +162,4 @@ public artifact. An expired/missing token fails the release; it cannot bypass ap
 
 References: [GitHub deployment review](https://docs.github.com/en/actions/how-tos/deploy/configure-and-manage-deployments/review-deployments),
 [Fly app deploy tokens](https://fly.io/docs/security/tokens/), and the pinned
-[Fly Machine update implementation](https://github.com/superfly/flyctl/blob/v0.4.108/internal/command/machine/update.go).
+[Fly Machine update implementation](https://github.com/superfly/flyctl/blob/v0.4.118/internal/command/machine/update.go).

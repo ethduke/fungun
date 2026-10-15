@@ -60,6 +60,21 @@ test('timed-out commands produce a fixed timeout code without child process outp
   });
 });
 
+test('Fly image-reference rejection is recognized without logging raw API error output', async () => {
+  const privateText = 'private diagnostic must stay hidden';
+  await assert.rejects(deploymentCommand('flyctl', ['machine', 'update'], {}, {
+    executor: async () => { throw Object.assign(new Error(privateText), { code: 1,
+      stderr: `config.image: invalid image identifier ${privateText}` }); },
+  }), error => {
+    const safe = safeDeploymentError(error);
+    assert.equal(safe.errorCode, 'FLY_IMAGE_REFERENCE_INVALID');
+    assert.equal(safe.command, 'fly-machine-update');
+    assert.equal(safe.exitCode, 1);
+    assert.equal(JSON.stringify(error).includes(privateText), false);
+    return true;
+  });
+});
+
 test('forged errors and arbitrary diagnostic properties cannot bypass redaction', () => {
   const raw = Object.assign(new Error('private diagnostic'), { code: 'COMMAND_FAILED', details: { exitCode: 2 } });
   assert.deepEqual(safeDeploymentError(raw), { errorCode: 'UNEXPECTED_FAILURE', message: 'Unexpected deployment failure; raw details withheld.' });
