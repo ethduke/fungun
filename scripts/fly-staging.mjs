@@ -162,7 +162,7 @@ if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) 
       const run = (service, binary, args) => {
         const env = Object.fromEntries(['PATH', 'HOME', 'DOCKER_CONFIG', 'XDG_CONFIG_HOME'].filter(key => process.env[key]).map(key => [key, process.env[key]]));
         if (binary === 'flyctl') env.FLY_API_TOKEN = tokens[service.key];
-        try { return execFileSync(binary, args, { env, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'], maxBuffer: 20 * 1024 * 1024, timeout: 300_000 }); }
+        try { return execFileSync(binary, args, { env, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'], maxBuffer: 20 * 1024 * 1024, timeout: 180_000 }); }
         catch { throw new Error(`Staging ${service.key} command failed.`); }
       };
       const state = await releaseStaging({ sha, action, version: process.env.RELEASE_VERSION, run, gate,

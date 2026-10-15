@@ -15,26 +15,30 @@ export const samplePreparation = Object.freeze({
   publication: { id: 'a'.repeat(48), imageHash: 'b'.repeat(64), metadataHash: 'c'.repeat(64) },
 });
 
-export async function smokeStaging({ request = fetch, sleep = pause, origins = stagingOrigins, attempts = 24 } = {}) {
+export async function smokeStaging({ request = fetch, sleep = pause, origins = stagingOrigins, attempts = 24, timeoutMs = 120_000, now = Date.now } = {}) {
+  const deadline = now() + timeoutMs;
+  const bounded = (url, options, limit) => {
+    const remaining = deadline - now();
+    if (remaining <= 0) throw new Error('Staging probe deadline exceeded.');
+    return request(url, { ...options, redirect: 'error', signal: AbortSignal.timeout(Math.min(remaining, limit)) });
+  };
   for (let attempt = 0; attempt < attempts; attempt++) {
     try {
       for (const kind of ['api', 'web']) {
-        const response = await request(`${origins[kind]}/healthz`, {
-          redirect: 'error', signal: AbortSignal.timeout(10_000),
-        });
+        const response = await bounded(`${origins[kind]}/healthz`, {}, 10_000);
         assert.equal(response.status, 200);
         assert.deepEqual(await response.json(), { status: 'ok' });
         if (kind === 'api') assert.equal(response.headers.get('x-fungun-staging'), 'mock');
       }
-      const page = await request(origins.web, { redirect: 'error', signal: AbortSignal.timeout(10_000) });
+      const page = await bounded(origins.web, {}, 10_000);
       assert.equal(page.status, 200);
       assert.match(await page.text(), /<html[\s>]/i);
       // Send only synthetic input through the deployed web-to-API boundary.
-      const prepared = await request(`${origins.web}/api/launch-prepare`, {
-        method: 'POST', redirect: 'error', signal: AbortSignal.timeout(30_000),
+      const prepared = await bounded(`${origins.web}/api/launch-prepare`, {
+        method: 'POST',
         headers: { origin: origins.web, 'content-type': 'application/json', 'x-fungun-intent': 'launch-prepare' },
         body: JSON.stringify(samplePreparation),
-      });
+      }, 30_000);
       assert.equal(prepared.status, 200);
       const body = await prepared.json();
       assert.equal(body.mode, 'mock');
@@ -43,8 +47,8 @@ export async function smokeStaging({ request = fetch, sleep = pause, origins = s
       assert.match(body.id, /^[a-f0-9]{64}$/);
       return;
     } catch {
-      if (attempt === attempts - 1) throw new Error('Staging health or mocked preparation check failed.');
-      await sleep(3000);
+      if (attempt === attempts - 1 || now() >= deadline) throw new Error('Staging health or mocked preparation check failed.');
+      await sleep(Math.min(3000, deadline - now()));
     }
   }
 }

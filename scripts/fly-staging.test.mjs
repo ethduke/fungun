@@ -103,3 +103,12 @@ test('smoke probe rejects a real transaction or non-mock response without loggin
   };
   await assert.rejects(smokeStaging({ request, attempts: 1 }), /^Error: Staging health or mocked preparation check failed\.$/);
 });
+
+test('stalled health retries respect the overall deadline and leave time for rollback', async () => {
+  let elapsed = 0;
+  let calls = 0;
+  const request = async () => { calls++; elapsed += 10; throw new Error('unavailable'); };
+  await assert.rejects(smokeStaging({ request, now: () => elapsed, timeoutMs: 5,
+    sleep: async () => assert.fail('No retry after the deadline') }));
+  assert.equal(calls, 1);
+});
