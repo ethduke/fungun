@@ -1,5 +1,8 @@
 # Fly deployment preparation
 
+For automated staging releases, health checks, retained image rollback and the
+production approval boundary, see [staging deployment](staging-deployment.md).
+
 The webview now has a separate Node production target. This preserves the existing
 Worker-based local preview and default build; it does not migrate the framework
 or change the launch interface. Neither Fly app has been provisioned by this step.
