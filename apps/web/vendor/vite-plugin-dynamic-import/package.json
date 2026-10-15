@@ -1,0 +1,39 @@
+{
+  "name": "vite-plugin-dynamic-import",
+  "version": "1.6.0-fungun.1",
+  "description": "Enhance Vite builtin dynamic import",
+  "main": "./lib/index.js",
+  "types": "./lib/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./lib/index.d.ts",
+      "import": "./lib/index.mjs",
+      "require": "./lib/index.js"
+    },
+    "./*": "./*"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/vite-plugin/vite-plugin-dynamic-import.git"
+  },
+  "author": "草鞋没号 <308487730@qq.com>",
+  "license": "MIT",
+  "dependencies": {
+    "acorn": "^8.12.1",
+    "es-module-lexer": "^1.5.4",
+    "magic-string": "^0.30.11",
+    "tinyglobby": "^0.2.17"
+  },
+  "keywords": [
+    "vite",
+    "plugin",
+    "import",
+    "dynamic"
+  ],
+  "files": [
+    "lib",
+    "src",
+    "LICENSE",
+    "README.md"
+  ]
+}
