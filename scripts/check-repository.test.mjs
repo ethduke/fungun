@@ -61,7 +61,7 @@ test('rejects JSON, code and environment credential assignments', () => {
 });
 
 test('rejects every supported provider credential name, including public prefixes', () => {
-  const names = ['PINATA_JWT', 'FOMO_RELAY_TOKEN', 'TELEGRAM_BOT_TOKEN', 'OPENROUTER_KEY', 'X402_FACILITATOR_TOKEN'];
+  const names = ['PINATA_JWT', 'RELAY_TOKEN', 'TELEGRAM_BOT_TOKEN', 'OPENROUTER_KEY', 'X402_FACILITATOR_TOKEN'];
   for (const name of names) {
     for (const key of [name, `NEXT_PUBLIC_${name}`, `VITE_${name}`, name.toLowerCase().replaceAll('_', '')]) {
       const value = 'synthetic-'.repeat(4);
@@ -110,7 +110,6 @@ test('historical URL fixture exceptions cannot hide changed or adjacent credenti
   const fixtures = [
     ['apps/api/src/token-image.test.mjs', ['https://ipfs.io', '@localhost/'].join('')],
     ['apps/api/src/config.test.mjs', ['http://user', '@127.0.0.1:3011'].join('')],
-    ['apps/api/src/fomo-collector.test.mjs', ['wss://example.invalid?key=', 'synthetic-private-key'].join('')],
     ['apps/api/src/x402-payments.test.mjs', ['https://secret', '@payments.example'].join('')],
     ['apps/api/src/x402-payments.test.mjs', ['https://payments.example?key=', 'secret'].join('')],
   ];
@@ -120,9 +119,6 @@ test('historical URL fixture exceptions cannot hide changed or adjacent credenti
     assert.ok(scan(path, url.replace(/user|synthetic|secret|ipfs\.io/, 'changed')).includes('credential-bearing-url'));
     assert.ok(scan(path, `${url}\n${credential()}`).includes('non-placeholder-credential-assignment'));
   }
-  const legacy = JSON.stringify({ FOMO_RELAY_TOKEN: ['synthetic', 'private', 'token'].join('-') });
-  assert.deepEqual(scan('apps/api/src/fomo-api.test.mjs', legacy), []);
-  assert.ok(scan('config.json', legacy).includes('non-placeholder-credential-assignment'));
 });
 
 test('permits empty and unmistakable placeholders, environment lookups and regex source', () => {

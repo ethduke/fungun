@@ -41,7 +41,7 @@ function sensitiveKey(key) {
   const name = key.replace(/[^a-z0-9]/gi, '').toLowerCase();
   // Explicit provider names also cover prefixed variants, without treating
   // ordinary public token addresses as credentials.
-  return ['pinatajwt', 'fomorelaytoken', 'telegrambottoken', 'openrouterkey', 'x402facilitatortoken']
+  return ['pinatajwt', 'relaytoken', 'telegrambottoken', 'openrouterkey', 'x402facilitatortoken']
     .some((credential) => name.endsWith(credential))
     || /(?:apikey|privatekey|secret|password|passwd|accesstoken|refreshtoken|authtoken|bearertoken|authorization|mnemonic|seedphrase|signature|rpc(?:https?|wss?)?(?:url|endpoint))/i.test(name);
 }
@@ -51,16 +51,24 @@ function sensitiveKey(key) {
 const legacyTestUrls = new Map([
   ['apps/api/src/token-image.test.mjs', new Set([['https://ipfs.io', '@localhost/'].join('')])],
   ['apps/api/src/config.test.mjs', new Set([['http://user', '@127.0.0.1:3011'].join('')])],
-  ['apps/api/src/fomo-collector.test.mjs', new Set([['wss://example.invalid?key=', 'synthetic-private-key'].join('')])],
   ['apps/api/src/x402-payments.test.mjs', new Set([
     ['https://secret', '@payments.example'].join(''), ['https://payments.example?key=', 'secret'].join(''),
   ])],
 ]);
 
+// Exact retired negative-test blobs remain scannable in existing history.
+// Content fingerprints are stricter than the former path-only exceptions.
+const retiredFixtureExceptions = new Map([
+  ["2cb3498b91f2d6c7dd7f702a4ef07c890233b2c68c88bc2974fc5551905575d0", { urls: new Set([['wss://example.invalid?key=', 'synthetic-private-key'].join('')]) }],
+  ["9e0cb74d3cc1a879ad9c1871427db9aa865cdbf074b5097864fac9ff3ab77f23", { urls: new Set([['wss://example.invalid?key=', 'synthetic-private-key'].join('')]) }],
+  ["c8c928c3c734d309df962aafa705b8a1c2f9c642c0c75b1ba6f76122bb885087", { fields: new Map([["fc5a2b5a0b4166253af7047b222014c6dab93184e44fdd5325643cb5344a5e71", "synthetic-private-token"]]) }],
+]);
+
 function hasCredentialUrl(path, text) {
+  const retired = retiredFixtureExceptions.get(createHash('sha256').update(text).digest('hex'));
   const isValue = (value) => value !== '' && !placeholder(value) && !/^\$\{[^}]+\}$/.test(value);
   for (const match of text.matchAll(/\b(?:https?|wss?):\/\/[^\s"'`<>]+/gi)) {
-    if (legacyTestUrls.get(path)?.has(match[0])) continue;
+    if (legacyTestUrls.get(path)?.has(match[0]) || retired?.urls?.has(match[0])) continue;
     let url;
     try { url = new URL(match[0].replace(/&amp;/g, '&')); } catch { continue; }
     if ([url.username, url.password].some((value) => {
@@ -76,12 +84,12 @@ function hasCredentialUrl(path, text) {
   return false;
 }
 
-function assignmentPlaceholder(path, key, value) {
+function assignmentPlaceholder(path, key, value, source) {
+  const retired = retiredFixtureExceptions.get(createHash('sha256').update(source).digest('hex'));
+  if (retired?.fields?.get(createHash('sha256').update(key).digest('hex')) === value) return true;
   if (placeholder(value)) return true;
   if (!/\.test\.(?:mjs|ts)$/.test(path)) return false;
   const name = key.replace(/[^a-z0-9]/gi, '').toLowerCase();
-  if (path === 'apps/api/src/fomo-api.test.mjs' && name === 'fomorelaytoken'
-    && value === 'synthetic-private-token') return true;
   if (name === 'authorization') return /^Bearer (?:EXAMPLE|PLACEHOLDER|REDACTED)$/.test(value);
   // Exact reserved fixture hosts only, without user info, ports or URL suffixes.
   return /^(?:base)?rpc(?:https?|wss?)?(?:url|endpoint)$/.test(name)
@@ -132,7 +140,7 @@ function hasCredentialAssignment(path, source) {
   const quoted = /(?:["']([A-Za-z_][\w.-]*)["']|\b([A-Za-z_][\w.-]*))\s*[:=]\s*(?:"([^"\r\n]*)"|'([^'\r\n]*)'|`([^`\r\n]*)`)/g;
   for (const match of text.matchAll(quoted)) {
     const key = match[1] ?? match[2];
-    if (sensitiveKey(key) && !assignmentPlaceholder(path, key, match[3] ?? match[4] ?? match[5])) return true;
+    if (sensitiveKey(key) && !assignmentPlaceholder(path, key, match[3] ?? match[4] ?? match[5], source)) return true;
   }
   const numeric = /(?:["']([A-Za-z_][\w.-]*)["']|\b([A-Za-z_][\w.-]*))\s*[:=]\s*(-?\d+(?:\.\d+)?)(?=[,\s;}])/g;
   for (const match of text.matchAll(numeric)) {

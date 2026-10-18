@@ -12,8 +12,6 @@ import { createCatalogRefresher } from "./catalog-refresher.mjs";
 import { createHandler } from "./service.mjs";
 import { verifyProductionStorage } from "./storage.mjs";
 import { Fees } from "./fees.mjs";
-import { createFomoRelayHandler } from "./fomo-relay.mjs";
-import { createFomoService } from "./fomo-service.mjs";
 import { TrackedPrices } from "./tracked-prices.mjs";
 import { TokenImages } from "./token-image.mjs";
 
@@ -30,7 +28,6 @@ try {
   });
   const fees = new Fees(config, upstream);
   const launches = new Launches(config, upstream, budget);
-  const fomo = createFomoService(budget.db);
   const trackedPrices = new TrackedPrices(config, upstream);
   const tokenImages = new TokenImages(config, upstream);
   const agent = readAgentConfig();
@@ -39,11 +36,7 @@ try {
     { maxHeaderSize: 8192 },
     createAgentHandler(
       { config, budget, adapters, launches, agent, themes },
-      createFomoRelayHandler(
-        fomo,
-        process.env.FOMO_RELAY_TOKEN,
-        createHandler(config, budget, adapters, fees, trackedPrices, launches, fomo, tokenImages),
-      ),
+      createHandler(config, budget, adapters, fees, trackedPrices, launches, tokenImages),
     ),
   );
   server.requestTimeout = 10_000;
@@ -60,14 +53,13 @@ try {
       `Read service listening on port ${config.port}; upstream reads ${config.readsEnabled ? "enabled" : "disabled"}.`,
     );
     catalogRefresher.kick();
-    fomo.start();
   });
   let stopping = false;
   for (const signal of ["SIGINT", "SIGTERM"])
     process.once(signal, () => {
       if (stopping) return;
       stopping = true;
-      const stopped = Promise.all([catalogRefresher.stop(), fomo.stop()]);
+      const stopped = catalogRefresher.stop();
       server.close(async () => {
         await stopped;
         budget.close();

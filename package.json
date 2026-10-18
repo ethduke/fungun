@@ -10,7 +10,7 @@
     "assets:snapshot": "node scripts/asset-snapshots.mjs",
     "build": "npm --prefix apps/web run build",
     "build:fly": "npm --prefix apps/web run build:fly",
-    "lint": "npm --prefix apps/web run lint && apps/web/node_modules/.bin/oxlint apps/api/src apps/agent",
+    "lint": "npm --prefix apps/web run lint && apps/web/node_modules/.bin/oxlint apps/api/src apps/agent apps/data-pipeline",
     "typecheck": "npm --prefix apps/web run typecheck",
     "test:mocked": "node --experimental-strip-types --test apps/web/lib/launch-flow.test.ts apps/web/lib/long-wallet.test.ts apps/api/src/service.test.mjs apps/api/src/stonks.test.mjs scripts/base-platform-availability.test.mjs apps/api/src/long-*.test.mjs apps/api/src/x402-payments.test.mjs apps/api/src/image-flow.test.mjs apps/facilitator/src/*.test.mjs apps/api/src/staging-server.test.mjs scripts/fly-staging.test.mjs scripts/fly-production.test.mjs scripts/deployment-runtime.test.mjs",
     "runtime:status": "node --env-file-if-exists=.env scripts/runtime-status.mjs",
@@ -20,7 +20,10 @@
     "check:tracked": "node scripts/check-repository.mjs --tracked",
     "check:history": "node scripts/check-repository.mjs --history",
     "test:agent": "node --experimental-strip-types --test apps/agent/*.test.mjs apps/api/src/agent-*.test.mjs",
-    "agent": "node --experimental-strip-types apps/agent/cli.mjs"
+    "agent": "node --experimental-strip-types apps/agent/cli.mjs",
+    "test:data-pipeline": "node --test apps/data-pipeline/src/*.test.mjs",
+    "data:dashboard": "node apps/data-pipeline/src/demo.mjs",
+    "data:backfill": "node apps/data-pipeline/src/backfill.mjs"
   },
   "engines": {
     "node": ">=24.4.0"

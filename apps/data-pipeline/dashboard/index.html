@@ -1,0 +1,37 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="description" content="Farmgun data-quality showcase: incremental SQL backfills, duplicate recovery, missing-block recovery and recorded synthetic fork replay.">
+  <meta name="referrer" content="no-referrer">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data:; connect-src 'self'; object-src 'none'; base-uri 'none'; form-action 'none'">
+  <title>Farmgun / Data quality</title>
+  <link rel="stylesheet" href="./dashboard.css">
+  <script type="module" src="./dashboard.mjs"></script>
+</head>
+<body>
+  <header class="topbar"><a class="brand" href="./"><span class="brand-mark" aria-hidden="true">F<span>↗</span></span>farmgun<span class="brand-slash">/</span><span class="brand-section">data quality</span></a><nav aria-label="Project"><a href="./quality-report.json">Report JSON ↗</a><a href="https://github.com/ethduke/fungun/tree/main/apps/data-pipeline" rel="noreferrer">Source ↗</a></nav></header>
+  <main>
+    <section class="hero" aria-labelledby="heading"><div><h1 id="heading">Data quality</h1></div><aside class="verification"><span class="verification-icon" aria-hidden="true">✓</span><div><strong id="overall-status">Loading evidence</strong><span id="overall-detail">Reading the published replay report…</span></div></aside></section>
+    <div class="notice"><span aria-hidden="true">◈</span><p><strong>Synthetic replay · not live chain data.</strong></p></div>
+    <noscript><p>This interactive report requires JavaScript. The complete aggregate evidence is available in <a href="./quality-report.json">quality-report.json</a>.</p></noscript>
+    <div id="load-error" role="alert" hidden>Report could not be loaded. No results are shown as verified. Open the JSON report or try again.</div>
+    <section class="metrics" aria-label="Selected snapshot metrics">
+      <article><span class="metric-label">CANONICAL BLOCKS</span><strong id="metric-blocks">—</strong><span id="metric-coverage">Waiting for report</span></article>
+      <article><span class="metric-label">NORMALIZED TRANSFERS</span><strong id="metric-events">—</strong><span>Canonical branch only</span></article>
+      <article><span class="metric-label">DURABLE CHECKPOINT</span><strong id="metric-checkpoint">—</strong><span>Last atomically committed block</span></article>
+      <article><span class="metric-label">QUALITY CHECKS</span><strong id="metric-checks">—</strong><span id="metric-health">Waiting for report</span></article>
+    </section>
+    <section class="workspace" aria-labelledby="recovery-heading">
+      <div class="section-heading"><h2 id="recovery-heading">Recovery scenarios</h2></div>
+      <div class="scenario-tabs" role="tablist" aria-label="Recovery scenario"><button id="tab-duplicates" role="tab" aria-selected="true" aria-controls="scenario-panel" data-scenario="duplicates"><span>01</span> Duplicate events</button><button id="tab-gap" role="tab" aria-selected="false" aria-controls="scenario-panel" data-scenario="gap"><span>02</span> Missing blocks</button><button id="tab-reorg" role="tab" aria-selected="false" aria-controls="scenario-panel" data-scenario="reorg"><span>03</span> Recorded reorg</button></div>
+      <div id="scenario-panel" role="tabpanel" aria-labelledby="tab-duplicates">
+        <div class="scenario-heading"><div><h3 id="scenario-title">Loading scenario</h3><p id="scenario-description"></p></div><div class="stage-switch" aria-label="Snapshot"><button data-stage="before" aria-pressed="false">Before recovery</button><button data-stage="after" aria-pressed="true">After recovery</button></div></div>
+        <div class="block-section"><div class="block-heading"><strong>Canonical block coverage</strong><span><i class="legend-dot"></i> Present <i class="legend-dot missing"></i> Missing</span></div><div id="block-timeline" class="block-timeline" aria-label="Block coverage"></div><p id="coverage-note" class="subtle"></p></div>
+        <div class="detail-grid"><section class="checks-panel" aria-labelledby="checks-heading"><div class="panel-heading"><h3 id="checks-heading">Reconciliation checks</h3><span id="quality-badge" class="status-badge">—</span></div><table><caption class="sr-only">Independent reconciliation against the replay source</caption><thead><tr><th scope="col">Invariant</th><th scope="col">Result</th></tr></thead><tbody id="check-rows"></tbody></table></section><aside class="evidence-panel"><h3>Recovery evidence</h3><dl id="evidence-list"></dl><div class="volume"><span class="metric-label">CANONICAL TRANSFER TOTAL</span><strong id="volume-total">—</strong><span>DEMO units · canonical transfers only</span></div></aside></div>
+      </div>
+    </section>
+  </main>
+</body>
+</html>
