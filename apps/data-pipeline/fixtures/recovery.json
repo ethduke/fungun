@@ -1,0 +1,855 @@
+{
+  "version": 1,
+  "encoding": "symbolic-synthetic-identifiers",
+  "provenance": {
+    "kind": "synthetic",
+    "description": "Deterministic recorded EVM-shaped replay; not a historical mainnet capture.",
+    "generator": "Symbolic fixture IDs expand to SHA-256 identifiers locally; no wallets, RPC or signing."
+  },
+  "chain": {
+    "chainId": 31337,
+    "name": "Synthetic EVM",
+    "startHeight": 100,
+    "tokens": [
+      {
+        "address": "demo-token",
+        "symbol": "DEMO",
+        "decimals": 18
+      }
+    ]
+  },
+  "original": [
+    {
+      "chainId": 31337,
+      "height": 99,
+      "hash": "main-block-99",
+      "parentHash": "anchor-parent",
+      "timestamp": 1760001188,
+      "transactions": [],
+      "events": []
+    },
+    {
+      "chainId": 31337,
+      "height": 100,
+      "hash": "main-block-100",
+      "parentHash": "main-block-99",
+      "timestamp": 1760001200,
+      "transactions": [
+        {
+          "hash": "main-tx-100-0",
+          "index": 0
+        },
+        {
+          "hash": "main-tx-100-1",
+          "index": 1
+        }
+      ],
+      "events": [
+        {
+          "index": 0,
+          "txHash": "main-tx-100-0",
+          "token": "demo-token",
+          "sender": "sender-0",
+          "recipient": "recipient-0",
+          "amountRaw": "100000000000123456789"
+        },
+        {
+          "index": 1,
+          "txHash": "main-tx-100-1",
+          "token": "demo-token",
+          "sender": "sender-1",
+          "recipient": "recipient-1",
+          "amountRaw": "101000000000123456789"
+        }
+      ]
+    },
+    {
+      "chainId": 31337,
+      "height": 101,
+      "hash": "main-block-101",
+      "parentHash": "main-block-100",
+      "timestamp": 1760001212,
+      "transactions": [
+        {
+          "hash": "main-tx-101-0",
+          "index": 0
+        },
+        {
+          "hash": "main-tx-101-1",
+          "index": 1
+        },
+        {
+          "hash": "main-tx-101-2",
+          "index": 2
+        }
+      ],
+      "events": [
+        {
+          "index": 0,
+          "txHash": "main-tx-101-0",
+          "token": "demo-token",
+          "sender": "sender-0",
+          "recipient": "recipient-0",
+          "amountRaw": "101000000000123456789"
+        },
+        {
+          "index": 1,
+          "txHash": "main-tx-101-1",
+          "token": "demo-token",
+          "sender": "sender-1",
+          "recipient": "recipient-1",
+          "amountRaw": "102000000000123456789"
+        },
+        {
+          "index": 2,
+          "txHash": "main-tx-101-2",
+          "token": "demo-token",
+          "sender": "sender-2",
+          "recipient": "recipient-2",
+          "amountRaw": "103000000000123456789"
+        }
+      ]
+    },
+    {
+      "chainId": 31337,
+      "height": 102,
+      "hash": "main-block-102",
+      "parentHash": "main-block-101",
+      "timestamp": 1760001224,
+      "transactions": [
+        {
+          "hash": "main-tx-102-0",
+          "index": 0
+        }
+      ],
+      "events": [
+        {
+          "index": 0,
+          "txHash": "main-tx-102-0",
+          "token": "demo-token",
+          "sender": "sender-0",
+          "recipient": "recipient-0",
+          "amountRaw": "102000000000123456789"
+        }
+      ]
+    },
+    {
+      "chainId": 31337,
+      "height": 103,
+      "hash": "main-block-103",
+      "parentHash": "main-block-102",
+      "timestamp": 1760001236,
+      "transactions": [
+        {
+          "hash": "main-tx-103-0",
+          "index": 0
+        },
+        {
+          "hash": "main-tx-103-1",
+          "index": 1
+        }
+      ],
+      "events": [
+        {
+          "index": 0,
+          "txHash": "main-tx-103-0",
+          "token": "demo-token",
+          "sender": "sender-0",
+          "recipient": "recipient-0",
+          "amountRaw": "103000000000123456789"
+        },
+        {
+          "index": 1,
+          "txHash": "main-tx-103-1",
+          "token": "demo-token",
+          "sender": "sender-1",
+          "recipient": "recipient-1",
+          "amountRaw": "104000000000123456789"
+        }
+      ]
+    },
+    {
+      "chainId": 31337,
+      "height": 104,
+      "hash": "main-block-104",
+      "parentHash": "main-block-103",
+      "timestamp": 1760001248,
+      "transactions": [
+        {
+          "hash": "main-tx-104-0",
+          "index": 0
+        },
+        {
+          "hash": "main-tx-104-1",
+          "index": 1
+        },
+        {
+          "hash": "main-tx-104-2",
+          "index": 2
+        }
+      ],
+      "events": [
+        {
+          "index": 0,
+          "txHash": "main-tx-104-0",
+          "token": "demo-token",
+          "sender": "sender-0",
+          "recipient": "recipient-0",
+          "amountRaw": "104000000000123456789"
+        },
+        {
+          "index": 1,
+          "txHash": "main-tx-104-1",
+          "token": "demo-token",
+          "sender": "sender-1",
+          "recipient": "recipient-1",
+          "amountRaw": "105000000000123456789"
+        },
+        {
+          "index": 2,
+          "txHash": "main-tx-104-2",
+          "token": "demo-token",
+          "sender": "sender-2",
+          "recipient": "recipient-2",
+          "amountRaw": "106000000000123456789"
+        }
+      ]
+    },
+    {
+      "chainId": 31337,
+      "height": 105,
+      "hash": "main-block-105",
+      "parentHash": "main-block-104",
+      "timestamp": 1760001260,
+      "transactions": [],
+      "events": []
+    },
+    {
+      "chainId": 31337,
+      "height": 106,
+      "hash": "main-block-106",
+      "parentHash": "main-block-105",
+      "timestamp": 1760001272,
+      "transactions": [
+        {
+          "hash": "main-tx-106-0",
+          "index": 0
+        },
+        {
+          "hash": "main-tx-106-1",
+          "index": 1
+        }
+      ],
+      "events": [
+        {
+          "index": 0,
+          "txHash": "main-tx-106-0",
+          "token": "demo-token",
+          "sender": "sender-0",
+          "recipient": "recipient-0",
+          "amountRaw": "106000000000123456789"
+        },
+        {
+          "index": 1,
+          "txHash": "main-tx-106-1",
+          "token": "demo-token",
+          "sender": "sender-1",
+          "recipient": "recipient-1",
+          "amountRaw": "107000000000123456789"
+        }
+      ]
+    },
+    {
+      "chainId": 31337,
+      "height": 107,
+      "hash": "main-block-107",
+      "parentHash": "main-block-106",
+      "timestamp": 1760001284,
+      "transactions": [
+        {
+          "hash": "main-tx-107-0",
+          "index": 0
+        },
+        {
+          "hash": "main-tx-107-1",
+          "index": 1
+        },
+        {
+          "hash": "main-tx-107-2",
+          "index": 2
+        }
+      ],
+      "events": [
+        {
+          "index": 0,
+          "txHash": "main-tx-107-0",
+          "token": "demo-token",
+          "sender": "sender-0",
+          "recipient": "recipient-0",
+          "amountRaw": "107000000000123456789"
+        },
+        {
+          "index": 1,
+          "txHash": "main-tx-107-1",
+          "token": "demo-token",
+          "sender": "sender-1",
+          "recipient": "recipient-1",
+          "amountRaw": "108000000000123456789"
+        },
+        {
+          "index": 2,
+          "txHash": "main-tx-107-2",
+          "token": "demo-token",
+          "sender": "sender-2",
+          "recipient": "recipient-2",
+          "amountRaw": "109000000000123456789"
+        }
+      ]
+    },
+    {
+      "chainId": 31337,
+      "height": 108,
+      "hash": "main-block-108",
+      "parentHash": "main-block-107",
+      "timestamp": 1760001296,
+      "transactions": [
+        {
+          "hash": "main-tx-108-0",
+          "index": 0
+        }
+      ],
+      "events": [
+        {
+          "index": 0,
+          "txHash": "main-tx-108-0",
+          "token": "demo-token",
+          "sender": "sender-0",
+          "recipient": "recipient-0",
+          "amountRaw": "108000000000123456789"
+        }
+      ]
+    },
+    {
+      "chainId": 31337,
+      "height": 109,
+      "hash": "main-block-109",
+      "parentHash": "main-block-108",
+      "timestamp": 1760001308,
+      "transactions": [
+        {
+          "hash": "main-tx-109-0",
+          "index": 0
+        },
+        {
+          "hash": "main-tx-109-1",
+          "index": 1
+        }
+      ],
+      "events": [
+        {
+          "index": 0,
+          "txHash": "main-tx-109-0",
+          "token": "demo-token",
+          "sender": "sender-0",
+          "recipient": "recipient-0",
+          "amountRaw": "109000000000123456789"
+        },
+        {
+          "index": 1,
+          "txHash": "main-tx-109-1",
+          "token": "demo-token",
+          "sender": "sender-1",
+          "recipient": "recipient-1",
+          "amountRaw": "110000000000123456789"
+        }
+      ]
+    },
+    {
+      "chainId": 31337,
+      "height": 110,
+      "hash": "main-block-110",
+      "parentHash": "main-block-109",
+      "timestamp": 1760001320,
+      "transactions": [
+        {
+          "hash": "main-tx-110-0",
+          "index": 0
+        },
+        {
+          "hash": "main-tx-110-1",
+          "index": 1
+        },
+        {
+          "hash": "main-tx-110-2",
+          "index": 2
+        }
+      ],
+      "events": [
+        {
+          "index": 0,
+          "txHash": "main-tx-110-0",
+          "token": "demo-token",
+          "sender": "sender-0",
+          "recipient": "recipient-0",
+          "amountRaw": "110000000000123456789"
+        },
+        {
+          "index": 1,
+          "txHash": "main-tx-110-1",
+          "token": "demo-token",
+          "sender": "sender-1",
+          "recipient": "recipient-1",
+          "amountRaw": "111000000000123456789"
+        },
+        {
+          "index": 2,
+          "txHash": "main-tx-110-2",
+          "token": "demo-token",
+          "sender": "sender-2",
+          "recipient": "recipient-2",
+          "amountRaw": "112000000000123456789"
+        }
+      ]
+    },
+    {
+      "chainId": 31337,
+      "height": 111,
+      "hash": "main-block-111",
+      "parentHash": "main-block-110",
+      "timestamp": 1760001332,
+      "transactions": [
+        {
+          "hash": "main-tx-111-0",
+          "index": 0
+        }
+      ],
+      "events": [
+        {
+          "index": 0,
+          "txHash": "main-tx-111-0",
+          "token": "demo-token",
+          "sender": "sender-0",
+          "recipient": "recipient-0",
+          "amountRaw": "111000000000123456789"
+        }
+      ]
+    }
+  ],
+  "replacement": [
+    {
+      "chainId": 31337,
+      "height": 99,
+      "hash": "main-block-99",
+      "parentHash": "anchor-parent",
+      "timestamp": 1760001188,
+      "transactions": [],
+      "events": []
+    },
+    {
+      "chainId": 31337,
+      "height": 100,
+      "hash": "main-block-100",
+      "parentHash": "main-block-99",
+      "timestamp": 1760001200,
+      "transactions": [
+        {
+          "hash": "main-tx-100-0",
+          "index": 0
+        },
+        {
+          "hash": "main-tx-100-1",
+          "index": 1
+        }
+      ],
+      "events": [
+        {
+          "index": 0,
+          "txHash": "main-tx-100-0",
+          "token": "demo-token",
+          "sender": "sender-0",
+          "recipient": "recipient-0",
+          "amountRaw": "100000000000123456789"
+        },
+        {
+          "index": 1,
+          "txHash": "main-tx-100-1",
+          "token": "demo-token",
+          "sender": "sender-1",
+          "recipient": "recipient-1",
+          "amountRaw": "101000000000123456789"
+        }
+      ]
+    },
+    {
+      "chainId": 31337,
+      "height": 101,
+      "hash": "main-block-101",
+      "parentHash": "main-block-100",
+      "timestamp": 1760001212,
+      "transactions": [
+        {
+          "hash": "main-tx-101-0",
+          "index": 0
+        },
+        {
+          "hash": "main-tx-101-1",
+          "index": 1
+        },
+        {
+          "hash": "main-tx-101-2",
+          "index": 2
+        }
+      ],
+      "events": [
+        {
+          "index": 0,
+          "txHash": "main-tx-101-0",
+          "token": "demo-token",
+          "sender": "sender-0",
+          "recipient": "recipient-0",
+          "amountRaw": "101000000000123456789"
+        },
+        {
+          "index": 1,
+          "txHash": "main-tx-101-1",
+          "token": "demo-token",
+          "sender": "sender-1",
+          "recipient": "recipient-1",
+          "amountRaw": "102000000000123456789"
+        },
+        {
+          "index": 2,
+          "txHash": "main-tx-101-2",
+          "token": "demo-token",
+          "sender": "sender-2",
+          "recipient": "recipient-2",
+          "amountRaw": "103000000000123456789"
+        }
+      ]
+    },
+    {
+      "chainId": 31337,
+      "height": 102,
+      "hash": "main-block-102",
+      "parentHash": "main-block-101",
+      "timestamp": 1760001224,
+      "transactions": [
+        {
+          "hash": "main-tx-102-0",
+          "index": 0
+        }
+      ],
+      "events": [
+        {
+          "index": 0,
+          "txHash": "main-tx-102-0",
+          "token": "demo-token",
+          "sender": "sender-0",
+          "recipient": "recipient-0",
+          "amountRaw": "102000000000123456789"
+        }
+      ]
+    },
+    {
+      "chainId": 31337,
+      "height": 103,
+      "hash": "main-block-103",
+      "parentHash": "main-block-102",
+      "timestamp": 1760001236,
+      "transactions": [
+        {
+          "hash": "main-tx-103-0",
+          "index": 0
+        },
+        {
+          "hash": "main-tx-103-1",
+          "index": 1
+        }
+      ],
+      "events": [
+        {
+          "index": 0,
+          "txHash": "main-tx-103-0",
+          "token": "demo-token",
+          "sender": "sender-0",
+          "recipient": "recipient-0",
+          "amountRaw": "103000000000123456789"
+        },
+        {
+          "index": 1,
+          "txHash": "main-tx-103-1",
+          "token": "demo-token",
+          "sender": "sender-1",
+          "recipient": "recipient-1",
+          "amountRaw": "104000000000123456789"
+        }
+      ]
+    },
+    {
+      "chainId": 31337,
+      "height": 104,
+      "hash": "main-block-104",
+      "parentHash": "main-block-103",
+      "timestamp": 1760001248,
+      "transactions": [
+        {
+          "hash": "main-tx-104-0",
+          "index": 0
+        },
+        {
+          "hash": "main-tx-104-1",
+          "index": 1
+        },
+        {
+          "hash": "main-tx-104-2",
+          "index": 2
+        }
+      ],
+      "events": [
+        {
+          "index": 0,
+          "txHash": "main-tx-104-0",
+          "token": "demo-token",
+          "sender": "sender-0",
+          "recipient": "recipient-0",
+          "amountRaw": "104000000000123456789"
+        },
+        {
+          "index": 1,
+          "txHash": "main-tx-104-1",
+          "token": "demo-token",
+          "sender": "sender-1",
+          "recipient": "recipient-1",
+          "amountRaw": "105000000000123456789"
+        },
+        {
+          "index": 2,
+          "txHash": "main-tx-104-2",
+          "token": "demo-token",
+          "sender": "sender-2",
+          "recipient": "recipient-2",
+          "amountRaw": "106000000000123456789"
+        }
+      ]
+    },
+    {
+      "chainId": 31337,
+      "height": 105,
+      "hash": "main-block-105",
+      "parentHash": "main-block-104",
+      "timestamp": 1760001260,
+      "transactions": [],
+      "events": []
+    },
+    {
+      "chainId": 31337,
+      "height": 106,
+      "hash": "main-block-106",
+      "parentHash": "main-block-105",
+      "timestamp": 1760001272,
+      "transactions": [
+        {
+          "hash": "main-tx-106-0",
+          "index": 0
+        },
+        {
+          "hash": "main-tx-106-1",
+          "index": 1
+        }
+      ],
+      "events": [
+        {
+          "index": 0,
+          "txHash": "main-tx-106-0",
+          "token": "demo-token",
+          "sender": "sender-0",
+          "recipient": "recipient-0",
+          "amountRaw": "106000000000123456789"
+        },
+        {
+          "index": 1,
+          "txHash": "main-tx-106-1",
+          "token": "demo-token",
+          "sender": "sender-1",
+          "recipient": "recipient-1",
+          "amountRaw": "107000000000123456789"
+        }
+      ]
+    },
+    {
+      "chainId": 31337,
+      "height": 107,
+      "hash": "main-block-107",
+      "parentHash": "main-block-106",
+      "timestamp": 1760001284,
+      "transactions": [
+        {
+          "hash": "main-tx-107-0",
+          "index": 0
+        },
+        {
+          "hash": "main-tx-107-1",
+          "index": 1
+        },
+        {
+          "hash": "main-tx-107-2",
+          "index": 2
+        }
+      ],
+      "events": [
+        {
+          "index": 0,
+          "txHash": "main-tx-107-0",
+          "token": "demo-token",
+          "sender": "sender-0",
+          "recipient": "recipient-0",
+          "amountRaw": "107000000000123456789"
+        },
+        {
+          "index": 1,
+          "txHash": "main-tx-107-1",
+          "token": "demo-token",
+          "sender": "sender-1",
+          "recipient": "recipient-1",
+          "amountRaw": "108000000000123456789"
+        },
+        {
+          "index": 2,
+          "txHash": "main-tx-107-2",
+          "token": "demo-token",
+          "sender": "sender-2",
+          "recipient": "recipient-2",
+          "amountRaw": "109000000000123456789"
+        }
+      ]
+    },
+    {
+      "chainId": 31337,
+      "height": 108,
+      "hash": "main-block-108",
+      "parentHash": "main-block-107",
+      "timestamp": 1760001296,
+      "transactions": [
+        {
+          "hash": "main-tx-108-0",
+          "index": 0
+        }
+      ],
+      "events": [
+        {
+          "index": 0,
+          "txHash": "main-tx-108-0",
+          "token": "demo-token",
+          "sender": "sender-0",
+          "recipient": "recipient-0",
+          "amountRaw": "108000000000123456789"
+        }
+      ]
+    },
+    {
+      "chainId": 31337,
+      "height": 109,
+      "hash": "fork-block-109",
+      "parentHash": "main-block-108",
+      "timestamp": 1760001308,
+      "transactions": [
+        {
+          "hash": "fork-tx-109-0",
+          "index": 0
+        },
+        {
+          "hash": "fork-tx-109-1",
+          "index": 1
+        }
+      ],
+      "events": [
+        {
+          "index": 0,
+          "txHash": "fork-tx-109-0",
+          "token": "demo-token",
+          "sender": "sender-0",
+          "recipient": "recipient-0",
+          "amountRaw": "126000000000123456789"
+        },
+        {
+          "index": 1,
+          "txHash": "fork-tx-109-1",
+          "token": "demo-token",
+          "sender": "sender-1",
+          "recipient": "recipient-1",
+          "amountRaw": "127000000000123456789"
+        }
+      ]
+    },
+    {
+      "chainId": 31337,
+      "height": 110,
+      "hash": "fork-block-110",
+      "parentHash": "fork-block-109",
+      "timestamp": 1760001320,
+      "transactions": [
+        {
+          "hash": "fork-tx-110-0",
+          "index": 0
+        },
+        {
+          "hash": "fork-tx-110-1",
+          "index": 1
+        },
+        {
+          "hash": "fork-tx-110-2",
+          "index": 2
+        }
+      ],
+      "events": [
+        {
+          "index": 0,
+          "txHash": "fork-tx-110-0",
+          "token": "demo-token",
+          "sender": "sender-0",
+          "recipient": "recipient-0",
+          "amountRaw": "127000000000123456789"
+        },
+        {
+          "index": 1,
+          "txHash": "fork-tx-110-1",
+          "token": "demo-token",
+          "sender": "sender-1",
+          "recipient": "recipient-1",
+          "amountRaw": "128000000000123456789"
+        },
+        {
+          "index": 2,
+          "txHash": "fork-tx-110-2",
+          "token": "demo-token",
+          "sender": "sender-2",
+          "recipient": "recipient-2",
+          "amountRaw": "129000000000123456789"
+        }
+      ]
+    },
+    {
+      "chainId": 31337,
+      "height": 111,
+      "hash": "fork-block-111",
+      "parentHash": "fork-block-110",
+      "timestamp": 1760001332,
+      "transactions": [
+        {
+          "hash": "fork-tx-111-0",
+          "index": 0
+        }
+      ],
+      "events": [
+        {
+          "index": 0,
+          "txHash": "fork-tx-111-0",
+          "token": "demo-token",
+          "sender": "sender-0",
+          "recipient": "recipient-0",
+          "amountRaw": "128000000000123456789"
+        }
+      ]
+    }
+  ]
+}

@@ -2,7 +2,7 @@
 
 import { createElement, useEffect } from 'react';
 
-export function MarketFeed({ compact = false }: { compact?: boolean }) {
+export function MarketFeed() {
   useEffect(() => {
     // Register only in the browser; the server handler is a separate module.
     void import('./tracked-market-feed.mjs');
@@ -10,6 +10,5 @@ export function MarketFeed({ compact = false }: { compact?: boolean }) {
 
   return createElement('tracked-market-feed', {
     src: '/api/tracked-feed',
-    ...(compact ? { compact: '' } : {}),
   });
 }

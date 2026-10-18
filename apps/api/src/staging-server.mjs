@@ -38,7 +38,7 @@ export function stagingServer(origin) {
   };
   const handler = createHandler({ origin }, budget, adapters,
     { list: async () => ({ mode: 'mock', status: 'unavailable', positions: [] }), prepare: disabled },
-    { list: disabled }, launches, { snapshot: () => ({ mode: 'mock', events: [] }) }, { get: disabled });
+    { list: disabled }, launches, { get: disabled });
   const server = createServer({ maxHeaderSize: 8192 }, (request, response) => {
     response.setHeader('x-fungun-staging', 'mock');
     response.setHeader('x-robots-tag', 'noindex, nofollow');

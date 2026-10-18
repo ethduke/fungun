@@ -1,4 +1,3 @@
-import { fomoHighlightsHTML, fomoStatus } from '../lib/fomo-highlights.mjs';
 import { TrackedFeedPoller } from '../lib/tracked-feed-poller.mjs';
 import { feedLaunchpad } from '../lib/tracked-feed-labels.mjs';
 import {
@@ -277,15 +276,12 @@ function card(row) {
 
 const styles = `
   :host{display:block;color:var(--feed-text,#223a2c);font:14px/1.4 var(--font-site,'Quicksand',sans-serif)}
-  :host([compact]) .heading,:host([compact]) .popular,:host([compact]) .inflow,:host([compact]) .columns{display:none}:host([compact]) .top{border-bottom:0}:host([compact]) .fomo{margin-top:0}
   *{box-sizing:border-box}section{border:1px solid var(--feed-border);border-radius:16px;background:var(--feed-bg);overflow:hidden}
   .top{padding:14px 16px;border-bottom:1px solid var(--feed-border)}.heading,.metadata,.identity,.totals{display:flex;align-items:center;justify-content:space-between;gap:10px}
   .statuses{display:flex;align-items:center;justify-content:flex-end;gap:8px;flex-wrap:wrap}.price-status{font-size:13px;color:var(--feed-muted)}.price-status[data-error=true]{color:#92520e}
   h2,h3,p{margin:0}h2{font-size: 16px}.status{font-size: 13px;color:var(--feed-muted)}.status[data-error=true]{color:#92520e}
   .popular{display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-top:10px}.popular-label{font-size: 13px;letter-spacing:.08em;font-weight:750;color:var(--feed-muted)}
   .popular a{padding:5px 9px;border-radius:6px;border:1px solid var(--feed-border);background:var(--feed-panel);overflow-wrap:anywhere}.popular small{font-size: 14px;color:var(--feed-muted);margin-left:6px}
-  .fomo{margin-top:8px;padding:9px 12px;border:1px solid var(--feed-border);border-radius:6px;background:var(--feed-panel)}
-  .fomo-line{display:flex;align-items:baseline;gap:9px;min-width:0}.fomo-label{color:var(--feed-accent);font-size:14px;font-weight:750;letter-spacing:.08em;flex-shrink:0}.fomo-buys{display:flex;align-items:baseline;gap:6px;overflow-x:auto;min-width:0;padding:3px 0;scrollbar-width:thin;font-size:14px}.fomo-buy{white-space:nowrap}.fomo-token{font-weight:750}.fomo-buy time,.fomo-separator,.fomo-empty{color:var(--feed-muted)}.fomo-buy time{font-size:12px}.fomo-health{display:block;color:var(--feed-muted);font-size:12px;margin-top:3px}
   .inflow{display:flex;align-items:center;gap:8px;margin-top:7px;min-width:0}.inflow>.popular-label{flex-shrink:0}
   .inflow-tokens{display:flex;align-items:center;gap:6px;min-width:0;overflow-x:auto;padding:3px;white-space:nowrap;scrollbar-width:thin}.inflow-tokens a{display:inline-flex;align-items:center;gap:5px;flex-shrink:0;padding:4px 7px;border:1px solid var(--feed-border);border-radius:5px;background:var(--feed-panel);font-size: 13px;font-weight:600}.inflow-ticker{max-width:110px;overflow:hidden;text-overflow:ellipsis}.price-change{font-variant-numeric:tabular-nums;color:var(--feed-muted)}.price-change[data-direction=up]{color:#268044}.price-change[data-direction=down]{color:#b13b33}.price-change[data-stale=true]{color:var(--feed-muted)}.inflow-tokens .empty{padding:4px 0;font-size: 13px}
   .columns{display:grid;grid-template-columns:1fr 1fr;gap:1px;background:var(--feed-border)}.lane{min-width:0;background:var(--feed-bg);padding:10px}
@@ -313,7 +309,7 @@ if (
     constructor() {
       super();
       this.attachShadow({ mode: 'open' });
-      this.shadowRoot.innerHTML = `<style>${styles}</style><section aria-label="Tracked market feed"><div class="top"><div class="heading"><h2>Market feed</h2><div class="statuses"><span class="status" role="status" aria-live="polite">Connecting…</span><span class="price-status" role="status" aria-live="polite" hidden></span></div></div><div class="popular"></div><div class="fomo" aria-label="FOMO trader purchases"><div class="fomo-line"><span class="fomo-label">FOMO:</span><div class="fomo-buys" tabindex="0" role="region" aria-label="Recorded trader buys"></div></div><span class="fomo-health" role="status"></span></div><div class="inflow"><span class="popular-label">&gt;10ETH INFL:</span><nav class="inflow-tokens" aria-label="Tokens over 10 ETH total inflow, oldest first"></nav></div></div><div class="columns"><div class="lane"><h3>ETH <span class="count-eth"></span></h3><div class="list" data-kind="eth" tabindex="0" role="region" aria-label="Tracked ETH pairs"></div></div><div class="lane"><h3>SHARES <span class="count-shares"></span></h3><div class="list" data-kind="shares" tabindex="0" role="region" aria-label="Tracked SHARES pairs"></div></div></div></section>`;
+      this.shadowRoot.innerHTML = `<style>${styles}</style><section aria-label="Tracked market feed"><div class="top"><div class="heading"><h2>Market feed</h2><div class="statuses"><span class="status" role="status" aria-live="polite">Connecting…</span><span class="price-status" role="status" aria-live="polite" hidden></span></div></div><div class="popular"></div><div class="inflow"><span class="popular-label">&gt;10ETH INFL:</span><nav class="inflow-tokens" aria-label="Tokens over 10 ETH total inflow, oldest first"></nav></div></div><div class="columns"><div class="lane"><h3>ETH <span class="count-eth"></span></h3><div class="list" data-kind="eth" tabindex="0" role="region" aria-label="Tracked ETH pairs"></div></div><div class="lane"><h3>SHARES <span class="count-shares"></span></h3><div class="list" data-kind="shares" tabindex="0" role="region" aria-label="Tracked SHARES pairs"></div></div></div></section>`;
       this.rows = [];
       this.inflowQueue = new TrackedInflowQueue();
       this.inflows = [];
@@ -361,33 +357,6 @@ if (
           this.render();
         },
       });
-      this.fomoPayload = null;
-      this.fomoUnavailable = false;
-      this.fomoPoller = new TrackedFeedPoller({
-        getUrl: () => '/api/fomo',
-        intervalMs: 15_000,
-        validateSnapshot: (body) => Array.isArray(body?.stream_highlights),
-        fetcher: (url, options) =>
-          fetch(url, {
-            ...options,
-            method: 'POST',
-            credentials: 'omit',
-            headers: {
-              'content-type': 'application/json',
-              'x-fungun-intent': 'fomo',
-            },
-            body: '{}',
-          }),
-        onSnapshot: (payload) => {
-          this.fomoPayload = payload;
-          this.fomoUnavailable = false;
-          this.renderFomo();
-        },
-        onError: () => {
-          this.fomoUnavailable = true;
-          this.renderFomo();
-        },
-      });
       this.syncActivity = () => this.updateActivity();
       this.onPageHide = () => {
         this.pageHidden = true;
@@ -418,16 +387,7 @@ if (
       this.render();
     }
 
-    static get observedAttributes() {
-      return ['compact'];
-    }
-
-    attributeChangedCallback() {
-      if (this.fomoPoller) this.updateActivity();
-    }
-
     connectedCallback() {
-      this.fomoExpiryTimer = setInterval(() => this.renderFomo(), 15_000);
       this.pageHidden = false;
       this.inView = false;
       document.addEventListener('visibilitychange', this.syncActivity);
@@ -448,7 +408,6 @@ if (
     }
 
     disconnectedCallback() {
-      clearInterval(this.fomoExpiryTimer);
       this.observer?.disconnect();
       this.observer = null;
       document.removeEventListener('visibilitychange', this.syncActivity);
@@ -457,7 +416,6 @@ if (
       window.removeEventListener('pagehide', this.onPageHide);
       window.removeEventListener('pageshow', this.onPageShow);
       this.poller.setActive(false);
-      this.fomoPoller.setActive(false);
       this.priceController?.abort();
       this.priceController = null;
     }
@@ -472,45 +430,19 @@ if (
               ? 'offscreen'
               : null;
       const active = this.isConnected && !reason;
-      const marketActive = active && !this.hasAttribute('compact');
+      const marketActive = active;
       if (
         reason === this.pauseReason &&
-        marketActive === this.poller.active &&
-        active === this.fomoPoller.active
+        marketActive === this.poller.active
       )
         return;
       this.pauseReason = reason;
       this.poller.setActive(marketActive);
-      this.fomoPoller.setActive(active);
       if (!marketActive) {
         this.priceController?.abort();
         this.priceController = null;
       }
       this.render();
-    }
-
-    renderFomo() {
-      const list = this.shadowRoot.querySelector('.fomo-buys');
-      const html = fomoHighlightsHTML(this.fomoPayload);
-      if (list._html !== html) {
-        const focused = this.shadowRoot.activeElement;
-        const href =
-          focused && list.contains(focused)
-            ? focused.getAttribute('href')
-            : null;
-        const left = list.scrollLeft;
-        list.innerHTML = html;
-        list._html = html;
-        list.scrollLeft = left;
-        if (href)
-          [...list.querySelectorAll('a')]
-            .find((a) => a.getAttribute('href') === href)
-            ?.focus({ preventScroll: true });
-      }
-      this.shadowRoot.querySelector('.fomo-health').textContent = fomoStatus(
-        this.fomoPayload,
-        this.fomoUnavailable,
-      );
     }
 
     async refreshPrices() {
@@ -575,7 +507,6 @@ if (
     }
 
     render() {
-      this.renderFomo();
       const status = this.shadowRoot.querySelector('.status');
       const priceStatus = this.shadowRoot.querySelector('.price-status');
       const priceView = priceServiceStatus(this.priceState);

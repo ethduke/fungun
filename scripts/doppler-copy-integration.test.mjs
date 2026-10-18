@@ -41,7 +41,7 @@ for (const scenario of ['doppler', 'pons-v2', 'gmgn-blocked']) test(`${scenario}
     return new Response(String(url).endsWith(imageCid) ? png : metadata);
   };
   const images = new TokenImages(config, new Upstream(budget, providerFetch), providerFetch);
-  const server = createServer(createHandler(config, budget, {}, null, null, null, null, images));
+  const server = createServer(createHandler(config, budget, {}, null, null, null, images));
   t.after(async () => {
     globalThis.fetch = realFetch;
     if (previousOrigin === undefined) delete process.env.APP_ORIGIN; else process.env.APP_ORIGIN = previousOrigin;

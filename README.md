@@ -76,3 +76,7 @@ with a neutral placeholder. See [agent setup](docs/agent-launches.md) for runtim
 access, spending limits, CLI commands and recovery. Run `npm run test:agent` for
 agent, payment, subscription and integration checks. This feature is disabled by
 default and requires deployment configuration before use.
+
+## Data-quality showcase
+
+[Incremental SQL recovery pipeline](apps/data-pipeline/README.md): resumable backfills, normalized tables, independent reconciliation, and recorded synthetic duplicate/gap/reorg recovery. The existing required CI job tests recovery without external networking and exports an aggregate-only [dashboard](https://ethduke.github.io/farmgun-dashboard/).

@@ -20,7 +20,10 @@
     "check:tracked": "node scripts/check-repository.mjs --tracked",
     "check:history": "node scripts/check-repository.mjs --history",
     "test:agent": "node --experimental-strip-types --test apps/agent/*.test.mjs apps/api/src/agent-*.test.mjs",
-    "agent": "node --experimental-strip-types apps/agent/cli.mjs"
+    "agent": "node --experimental-strip-types apps/agent/cli.mjs",
+    "test:data-pipeline": "node --test apps/data-pipeline/src/*.test.mjs",
+    "data:dashboard": "node apps/data-pipeline/src/demo.mjs",
+    "data:backfill": "node apps/data-pipeline/src/backfill.mjs"
   },
   "engines": {
     "node": ">=24.4.0"

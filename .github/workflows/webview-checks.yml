@@ -47,7 +47,16 @@ jobs:
             --mount "type=bind,src=$GITHUB_WORKSPACE,dst=/workspace,readonly" \
             --workdir /workspace \
             node:24-bookworm-slim@sha256:ba849c60be29959425b8734d57b8b4b7d56f98edd9504c9af091d5281095a71e \
-            sh -c 'npm run test:mocked && npm run test:agent'
+            sh -c 'npm run test:mocked && npm run test:agent && npm run test:data-pipeline'
+      - name: Generate verified data-quality replay dashboard
+        run: npm run data:dashboard -- --out "$RUNNER_TEMP/data-quality"
+      - name: Retain aggregate data-quality dashboard
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: data-quality-${{ github.sha }}
+          path: ${{ runner.temp }}/data-quality
+          if-no-files-found: error
+          retention-days: 14
       - name: Application regression tests
         run: npm test
       - name: Facilitator regression tests

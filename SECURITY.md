@@ -23,10 +23,10 @@ node scripts/check-repository.mjs --history
 
 Checks reject sensitive/generated filenames, credential assignments and common provider tokens, literal EVM addresses/private-key hex/signatures, symlinks/submodules, and files larger than 1 MiB. Package-manager lockfiles may be up to 3 MiB. Findings contain filenames and rule names only. Never put secrets in filenames.
 
-Credential checks include Pinata JWTs, FOMO relay tokens, Telegram bot tokens,
+Credential checks include Pinata JWTs, relay tokens, Telegram bot tokens,
 OpenRouter keys, and authenticated HTTP/WebSocket URLs (including encoded query
 parameter names). A few exact historical negative-test fixtures are permitted
-only at their reviewed test paths; other values in those files are still scanned.
+only at their reviewed test paths or exact retired content fingerprints; other values in those files are still scanned.
 Construct new fake credentials and authenticated test URLs at runtime.
 
 CI additionally runs [Gitleaks 8.30.1](https://github.com/gitleaks/gitleaks/releases/tag/v8.30.1),
