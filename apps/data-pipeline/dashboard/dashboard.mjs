@@ -31,7 +31,6 @@ function render() {
   text('coverage-note', snapshot.mismatchedBlocks ? `${snapshot.mismatchedBlocks} stored blocks disagree with the source branch. Coverage alone does not establish correctness.`
     : snapshot.missingBlocks ? 'Incomplete coverage is reported as unhealthy; the checkpoint never skips a failed batch.'
     : 'Every block is accounted for, including empty block 105.');
-  $('recovery-steps').replaceChildren(...scenario.steps.map(step => { const li = document.createElement('li'); li.textContent = step; return li; }));
   text('quality-badge', snapshot.healthy ? 'VERIFIED' : 'NEEDS RECOVERY'); $('quality-badge').className = 'status-badge' + (snapshot.healthy ? '' : ' bad');
   $('check-rows').replaceChildren(...snapshot.checks.map(check => {
     const row = document.createElement('tr'), name = document.createElement('td'), status = document.createElement('td');
@@ -41,7 +40,7 @@ function render() {
   const evidence = [['Snapshot', stage === 'after' ? 'After recovery' : 'Before recovery'],
     ['Duplicates ignored', snapshot.duplicatesIgnored], ['Orphan blocks (excluded)', snapshot.orphanBlocks],
     ['Source fingerprint', snapshot.fingerprintsMatch ? 'MATCH' : 'MISMATCH'],
-    ...Object.entries(scenario.evidence).map(([key, value]) => [labels[key], value])];
+    ...Object.entries(scenario.evidence).filter(([key]) => key !== 'duplicatesIgnored').map(([key, value]) => [labels[key], value])];
   $('evidence-list').replaceChildren(...evidence.flatMap(([key, value]) => {
     const dt = document.createElement('dt'), dd = document.createElement('dd'); dt.textContent = key; dd.textContent = value; return [dt, dd];
   }));
@@ -68,8 +67,6 @@ try {
   text('overall-status', report.healthy ? 'All recovery scenarios verified' : 'Recovery verification failed');
   text('overall-detail', '3 scenarios · 24 final checks · SQLite');
   if (!report.healthy) document.querySelector('.verification-icon').textContent = '×';
-  text('generated-at', `Generated ${new Date(report.generatedAt).toLocaleString('en-US', { timeZone: 'UTC', dateStyle: 'medium', timeStyle: 'short' })} UTC`);
-  $('schema-tables').replaceChildren(...report.tables.map(name => { const item = document.createElement('span'); item.textContent = name; return item; }));
   render();
 } catch {
   $('load-error').hidden = false;
