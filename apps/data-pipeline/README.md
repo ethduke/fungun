@@ -91,12 +91,15 @@ final invariant fails that job. A 14-day artifact retains only the static site
 and aggregate JSON; it excludes database files, raw fixtures, wallet addresses,
 raw errors, and environment values. Existing audit policies stay enforced.
 
-The separate `farmgun-dashboard` Pages repository serves the generated files.
-To refresh it, build/test from a reviewed source revision, copy only the generated
-site files into that repository, commit, and let its Pages workflow publish them.
-This deliberately needs no cross-repository write token. The dashboard repository
-records the source revision and includes its own aggregate validation before
-publication. Do not copy databases, local environment files, or runtime logs.
+The separate `farmgun-dashboard` Pages repository pins a reviewed implementation
+commit in `source.json`. Its workflow checks out that exact public revision,
+reruns the recovery tests in a network-disabled container, regenerates the site,
+validates the aggregate-only export, and deploys only the generated directory.
+It then checks the public page and exact report digest. Refresh by reviewing and
+updating that source pin, then pushing or manually dispatching the Pages workflow.
+This needs no cross-repository write token and copies no application database,
+local environment files, or runtime logs. To restore an earlier demonstration,
+revert the source pin to its previous reviewed commit and publish again.
 
 ## Live adapter boundary
 
