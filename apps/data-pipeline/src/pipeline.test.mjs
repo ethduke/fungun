@@ -100,6 +100,21 @@ test('re-included transaction hashes on another fork do not double count', async
   assert.equal(result.canonicalEvents, 23);
 });
 
+test('interrupted fork replay resumes from the rewound checkpoint after restart', async t => {
+  const f = setup(t);
+  await f.pipeline.sync(f.source());
+  await assert.rejects(f.pipeline.sync(f.source({ branch: 'replacement', missing: [110] })), { code: 'SOURCE_UNAVAILABLE' });
+  assert.equal(f.pipeline.checkpoint().last_height, 108);
+  assert.equal(f.pipeline.canonical().length, 9);
+  f.reopen();
+  const replacement = f.source({ branch: 'replacement' });
+  assert.equal((await f.pipeline.sync(replacement)).blocksWritten, 3);
+  const result = await reconcile(f.pipeline, replacement);
+  assert.equal(result.healthy, true);
+  assert.equal(result.reorgs, 1);
+  assert.equal(result.orphanBlocks, 3);
+});
+
 test('deep reorg limit fails closed without changing the existing canonical chain', async t => {
   const f = setup(t);
   await f.pipeline.sync(f.source());
