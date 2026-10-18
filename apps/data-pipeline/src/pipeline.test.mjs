@@ -103,7 +103,13 @@ test('re-included transaction hashes on another fork do not double count', async
 test('interrupted fork replay resumes from the rewound checkpoint after restart', async t => {
   const f = setup(t);
   await f.pipeline.sync(f.source());
-  await assert.rejects(f.pipeline.sync(f.source({ branch: 'replacement', missing: [110] })), { code: 'SOURCE_UNAVAILABLE' });
+  const interrupted = f.source({ branch: 'replacement' }), read = interrupted.getBlock.bind(interrupted);
+  let reads = 0;
+  interrupted.getBlock = async height => {
+    if (height === 110 && ++reads > 1) throw new Error('Synthetic replay interruption');
+    return read(height);
+  };
+  await assert.rejects(f.pipeline.sync(interrupted), { code: 'SOURCE_UNAVAILABLE' });
   assert.equal(f.pipeline.checkpoint().last_height, 108);
   assert.equal(f.pipeline.canonical().length, 9);
   f.reopen();
