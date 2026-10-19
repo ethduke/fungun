@@ -49,7 +49,7 @@ function mockCapture(){
   const raw=b=>({number:hex(b.height),hash:b.hash,parentHash:b.parentHash,timestamp:hex(b.timestamp),transactions:b.transactions.map(t=>t.hash)});
   const answer=(method,params)=>{
     if(method==='eth_chainId')return hex(stream.chainId);
-    if(method==='eth_call')return hex(stream.token.decimals);
+    if(method==='eth_call'){assert.equal(params[1],'latest','public RPC does not promise archival contract state');return hex(stream.token.decimals);}
     if(method==='eth_getBlockByNumber'){
       if(params[0]==='finalized')return raw(blocks.at(-1));
       const height=quantity(params[0]);const b=blocks.find(b=>b.height===height);

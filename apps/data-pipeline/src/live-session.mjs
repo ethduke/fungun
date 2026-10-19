@@ -26,7 +26,7 @@ export class LiveSession {
     if(quantity(await this.rpc.call('eth_chainId'))!==this.stream.chainId)stop('WRONG_CHAIN');
     const head=await this.header('finalized'),tipTime=quantity(head.timestamp),tip=quantity(head.number);
     if(Math.abs(Date.parse(this.now())/1000-tipTime)>7200)stop('LIVE_SOURCE_STALE');
-    if(quantity(await this.rpc.call('eth_call',[{to:this.stream.token.address,data:'0x313ce567'},hex(tip)]))!==this.stream.token.decimals)stop('TOKEN_METADATA_MISMATCH');
+    if(quantity(await this.rpc.call('eth_call',[{to:this.stream.token.address,data:'0x313ce567'},'latest']))!==this.stream.token.decimals)stop('TOKEN_METADATA_MISMATCH');
     let saved;
     if(existsSync(join(this.directory,'session.json')))saved=JSON.parse(readFileSync(join(this.directory,'session.json'),'utf8'));
     if(saved&&saved.identity!==this.identity)stop('INVALID_WINDOW');

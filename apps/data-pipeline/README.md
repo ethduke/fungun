@@ -107,6 +107,8 @@ The live CLI uses only the official keyless public Robinhood Chain RPC, chain
 4663, and the canonical USDG contract from the official token registry. It records
 one Transfer stream, not all chain activity or Farmgun payment records. It has no
 wallet, signing methods, provider keys, production service access, or paid RPC.
+Token decimals are checked against current state because the public RPC prunes
+historical state; event headers and receipts still come from finalized blocks.
 
 With Node 24.4+ in a checkout of this revision:
 
