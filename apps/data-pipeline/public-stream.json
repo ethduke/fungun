@@ -1,0 +1,14 @@
+{
+  "chainId": 4663,
+  "name": "Robinhood Chain",
+  "token": {
+    "address": "0x5fc5360d0400a0fd4f2af552add042d716f1d168",
+    "symbol": "USDG",
+    "decimals": 6
+  },
+  "transferTopic": "0xddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523b3ef",
+  "endpoints": [
+    "https://rpc.mainnet.chain.robinhood.com"
+  ],
+  "reference": "https://docs.robinhood.com/chain/contracts/"
+}

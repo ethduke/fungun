@@ -23,7 +23,9 @@
     "agent": "node --experimental-strip-types apps/agent/cli.mjs",
     "test:data-pipeline": "node --test apps/data-pipeline/src/*.test.mjs",
     "data:dashboard": "node apps/data-pipeline/src/demo.mjs",
-    "data:backfill": "node apps/data-pipeline/src/backfill.mjs"
+    "data:backfill": "node apps/data-pipeline/src/backfill.mjs",
+    "data:collect": "node apps/data-pipeline/src/live-session.mjs",
+    "data:publish": "node apps/data-pipeline/src/publish-local.mjs"
   },
   "engines": {
     "node": ">=24.4.0"

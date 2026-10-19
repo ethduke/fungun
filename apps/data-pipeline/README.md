@@ -1,8 +1,8 @@
 # Incremental SQL recovery showcase
 
-This module replays recorded **synthetic** EVM-shaped fixtures into a separate
+The recovery demo replays recorded **synthetic** EVM-shaped fixtures into a separate
 SQLite database. It demonstrates delivery/recovery mechanics, not live indexing
-or a historical mainnet reorg. It never connects to a wallet, RPC, provider,
+or a historical mainnet reorg. The replay path never connects to a wallet, RPC, provider,
 application database, or production service. Node 24.4+ is sufficient; there are
 no additional dependencies or services to maintain.
 
@@ -101,21 +101,78 @@ This needs no cross-repository write token and copies no application database,
 local environment files, or runtime logs. To restore an earlier demonstration,
 revert the source pin to its previous reviewed commit and publish again.
 
-## Live adapter boundary
+## Live Robinhood collection (manual start)
 
-`Pipeline.sync(source)` accepts `getHead()` and `getBlock(height)`; see
-[fixture-source.mjs](src/fixture-source.mjs) for the replay implementation. A live
-adapter has **not** been configured. Before adding one, choose the chain, contracts,
-event decoder/filter, starting block, finality policy, and provider budget.
-Validate chain ID, log/transaction membership and filter identity; normalize
-hex case and quantities, bound RPC deadlines/rate-limited reads, and pin a source
-view while fetching. Reconciliation against the same provider cannot prove that
-the provider omitted no logs: use receipts or a second independent source for
-that assurance. Persist the complete stream/filter identity with the checkpoint
-before extending beyond this fixed transfer schema.
+The live CLI uses only the official keyless public Robinhood Chain RPC, chain
+4663, and the canonical USDG contract from the official token registry. It records
+one Transfer stream, not all chain activity or Farmgun payment records. It has no
+wallet, signing methods, provider keys, production service access, or paid RPC.
+Token decimals are checked against current state because the public RPC prunes
+historical state; event headers and receipts still come from finalized blocks.
 
-The current worker is single-writer per database; use an external worker lock
-before scheduling concurrent processes. Reconciliation is bounded to 10,000
-heights for this showcase; production workloads should use bounded partitions
-plus retained quality runs. No automatic schema migration or finality override
-is implied. Raw data and forensic repair stay local; the public export is aggregate-only.
+With Node 24.4+ in a checkout of this revision:
+
+```sh
+npm run data:collect -- --out local/robinhood-showcase
+```
+
+This boots from the most recent 15 minutes of finalized blocks, then checks new
+finalized data every 15 minutes until the fixed 24-hour window is complete. It
+stops afterward; an outer 26-hour deadline bounds unavailable/stale-chain waits.
+The initial bootstrap means the remaining capture is approximately 23h45m plus
+finality lag. Keep this process and computer awake. There is no cron, Actions
+schedule, server deployment, or Codex/LLM involved in periodic checks.
+
+To take just the initial snapshot, add `--once`. After an interruption, explicitly
+resume the same session with `--resume`. An exclusive PID lock prevents concurrent
+writers; a live process cannot be taken over by another CLI run. Failed batches
+preserve the last verified checkpoint and are retried on the next check. A changed
+finalized anchor is never silently overwritten. Public RPC congestion can delay
+checks; no incomplete range is labelled complete.
+
+Every requested block range is recorded and re-read. Identical events are
+idempotent; conflicting payloads stop the range. If reads disagree, a third replay
+must confirm their union before missing events can be recovered. Each range also
+audits a midpoint block and an event-bearing block against complete block receipts
+and transaction membership. Event facts, range evidence and cursor changes commit
+atomically. These are **sampled receipt audits**, not exhaustive block verification;
+consistent provider omissions outside the sampled blocks remain undetectable.
+
+The snapshot schema stores block height/hash observations, relevant transactions,
+Transfer facts, exact hourly query partitions, verification ranges and checkpoints.
+Unsampled block timestamps and parents remain SQL NULL rather than invented data.
+Hourly counts use block ranges split at observed timestamp boundaries. The replay
+demo keeps its separate exhaustive synthetic model and tests.
+
+`local/robinhood-showcase/` contains the continuing `snapshot.sqlite`, a consistent
+`frozen.sqlite`, and `snapshot-report.json`. They remain local and ignored by Git.
+Reports have actual capture dates and partial/complete status; an initial
+15-minute capture never claims 24 hours were collected. The static export includes
+counts and totals, but no database, wallet addresses, transaction hashes, keys,
+provider diagnostics, or authenticated URLs. Local database size is capped at 2 GiB.
+
+## Owner-only manual publication
+
+Only the account `ethduke` (stable GitHub ID 2248185) may dispatch or rerun the
+publisher repository's `Refresh real-chain snapshot` workflow on main. Both the
+workflow guard and publication script enforce actor, triggering actor, repository,
+branch, and manual event type. The static publisher never calls a chain RPC.
+Administrators who change repository security/workflows can alter that policy.
+
+To freeze and publish the latest verified local report:
+
+```sh
+npm run data:publish -- --report local/robinhood-showcase/snapshot-report.json
+```
+
+Sign in to GitHub CLI as the owner first. This sends aggregate JSON to the guarded
+manual workflow; it checks the collector revision against the reviewed source pin,
+commits the frozen report, and explicitly dispatches Pages (token-created commits
+do not trigger push workflows). The continuing collector does not publish.
+Public visitors cannot refresh or collect data through the dashboard. The separate
+synthetic recovery page remains at `recovery.html` after real data is published.
+
+The publisher's `source.json` pins the reviewed implementation. Update that pin
+after merging a collector revision before starting a new session; a source pin
+change during publication fails closed. To restore an older dashboard, restore
+its previous source pin and aggregate report, then republish without any collection.
