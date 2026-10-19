@@ -7,6 +7,7 @@ import { pathToFileURL } from 'node:url';
 // These exact reviewed files contain public deployment addresses and code hashes.
 // Any edit invalidates the exception; every other credential rule still applies.
 const reviewedPublicDeployments = new Map([
+  ['apps/data-pipeline/public-stream.json', 'f17d189d7a2906d65d3d223efccc783433cb094cda6ed65d3ebec05b9c233e42'],
   ['apps/api/src/o1-fee-profiles.mjs', '71a27ba20027adc67d057c8ca98e0236f710031eaa5efe9ea405776802c10f7c'],
   ['docs/o1-fee-verification.md', 'aca46910c7223b6610f9a47c2c6950cbc216f08cbd822b47ee58dd21f519c0fa'],
 ]);

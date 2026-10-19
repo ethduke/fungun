@@ -72,7 +72,7 @@ export async function runDemo() {
 export async function buildDashboard(output) {
   const report = await runDemo();
   mkdirSync(output, { recursive: true });
-  cpSync(new URL('../dashboard/', import.meta.url), output, { recursive: true });
+  for (const name of ['index.html','dashboard.css','dashboard.mjs']) cpSync(new URL(`../dashboard/${name}`, import.meta.url), join(output,name));
   // No raw fixture records, SQL files, databases, addresses, or credentials.
   writeFileSync(join(output, 'quality-report.json'), JSON.stringify(report, null, 2) + '\n');
   writeFileSync(join(output, '.nojekyll'), '');

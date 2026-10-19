@@ -1,0 +1,26 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+  <meta name="description" content="A saved real-chain collection session with SQL analysis and reconciliation.">
+  <meta name="referrer" content="no-referrer">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self'; connect-src 'self'; img-src 'self' data:; object-src 'none'; base-uri 'none'; form-action 'none'">
+  <title>Farmgun / Data quality</title><link rel="stylesheet" href="./dashboard.css"><script type="module" src="./snapshot.mjs"></script>
+</head>
+<body>
+  <header class="topbar"><a class="brand" href="./"><span class="brand-mark" aria-hidden="true">F<span>↗</span></span>farmgun<span class="brand-slash">/</span><span class="brand-section">data quality</span></a><nav aria-label="Project"><a href="./snapshot-report.json">Report JSON ↗</a><a href="./recovery.html">Recovery tests ↗</a></nav></header>
+  <main>
+    <section class="hero"><h1>Chain snapshot</h1><aside class="verification"><span class="verification-icon" aria-hidden="true">·</span><div><strong id="snapshot-status">Loading snapshot</strong><span id="snapshot-scope">Reading saved evidence…</span></div></aside></section>
+    <div class="notice"><p><strong id="snapshot-window">Saved real-chain dataset</strong><br>Static publication · collection checks every 15 min · owner-only manual refresh</p></div>
+    <noscript><p>Open <a href="./snapshot-report.json">the saved JSON report</a> to read the snapshot without JavaScript.</p></noscript>
+    <div id="snapshot-error" role="alert" hidden>Snapshot unavailable. No results are shown as verified.</div>
+    <section class="metrics" aria-label="Recorded chain metrics">
+      <article><span class="metric-label">TRANSFERS</span><strong id="snapshot-transfers">—</strong><span id="snapshot-transactions">—</span></article>
+      <article><span class="metric-label">TRANSFERRED AMOUNT</span><strong id="snapshot-total">—</strong><span>Token units · not trading volume</span></article>
+      <article><span class="metric-label">ACTIVE ADDRESSES</span><strong id="snapshot-addresses">—</strong><span>Distinct senders and recipients · zero address excluded</span></article>
+      <article><span class="metric-label">QUALITY CHECKS</span><strong id="snapshot-check-count">—</strong><span id="snapshot-range">—</span></article>
+    </section>
+    <section class="checks-panel" aria-labelledby="activity-heading"><div class="panel-heading"><h2 id="activity-heading">Transfer activity</h2><span class="subtle">24h session · shaded hours not yet captured</span></div><div id="hourly-chart" class="hourly-chart" role="img" aria-label="Hourly transfer counts"></div><p id="snapshot-peak" class="subtle"></p><details><summary>Hourly values</summary><table><thead><tr><th scope="col">Hour starting UTC</th><th scope="col">Transfers</th><th scope="col">Token amount</th></tr></thead><tbody id="hourly-rows"></tbody></table></details></section>
+    <div class="detail-grid"><section class="checks-panel" aria-labelledby="snapshot-checks-heading"><h3 id="snapshot-checks-heading">Data-quality evidence</h3><table><thead><tr><th scope="col">Check</th><th scope="col">Result</th></tr></thead><tbody id="snapshot-checks"></tbody></table></section><aside class="evidence-panel"><h3>Snapshot details</h3><dl id="snapshot-details"></dl><p class="subtle">Transfer activity can include contract movements, minting and burning; it does not measure trades, prices or user counts.</p><p id="snapshot-verification" class="subtle"></p><a class="subtle" href="https://github.com/ethduke/farmgun-dashboard/actions/workflows/refresh.yml" rel="noreferrer">Manual refresh workflow ↗</a></aside></div>
+  </main>
+</body></html>
