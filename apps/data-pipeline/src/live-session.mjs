@@ -116,7 +116,7 @@ export class LiveSession {
       if(statSync(this.path).size>2*1024**3)stop('DATABASE_SIZE_LIMIT');
     }
     db.prepare('INSERT INTO live_checks(checked_at,status,checkpoint) VALUES (?,?,?)').run(this.now(),'verified',p.checkpoint().last_height);
-    if(headTime>=this.meta.end&&p.checkpoint().last_height===target){
+    if(headTime>this.meta.end&&p.checkpoint().last_height===target){
       this.meta.status='complete';db.prepare('UPDATE snapshot_metadata SET payload=? WHERE id=1').run(JSON.stringify(this.meta));
       writeFileSync(join(this.directory,'session.json'),JSON.stringify(this.meta,null,2)+'\n');
     }
@@ -163,7 +163,7 @@ export class LiveSession {
       session:{status:this.meta.status,targetEnd:time(this.meta.end),intervalMinutes:15,capturedSeconds:end-this.meta.start,targetSeconds:86400},
       duplicatesIgnored:totals.duplicates,missingEventsRecovered:totals.omissions,failedChecks:failures,
       verifiedIntervals:db.prepare("SELECT count(*) AS n FROM live_checks WHERE status='verified'").get().n,
-      blockHashDigest:digest(batches.map(b=>b.capture_digest)),captureDigest:digest(batches.map(b=>({first:b.first_height,last:b.last_height,digest:b.capture_digest}))),
+      blockHashDigest:digest(db.prepare('SELECT block_hash FROM canonical_blocks WHERE chain_id=? ORDER BY height').all(p.chainId).map(row=>row.block_hash)),captureDigest:digest(batches.map(b=>({first:b.first_height,last:b.last_height,digest:b.capture_digest}))),
       collectorCommit:this.meta.codeCommit,
       scope:'Canonical USDG Transfer events on Robinhood Chain; every block and receipt in the captured range is checked.',
       verification:'One public RPC: log queries are reconciled against complete block receipts and transaction membership. Shared provider errors are not independently ruled out.'};
