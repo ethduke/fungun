@@ -10,7 +10,7 @@ import { createHash } from 'node:crypto';
 
 const safeCodes=new Set(['RPC_QUERY_REJECTED','RPC_HTTP_REJECTED','RPC_INVALID_RESPONSE','PUBLIC_RPC_UNAVAILABLE',
   'RPC_RESPONSE_TOO_LARGE','FINALIZED_SOURCE_CHANGED','RECEIPTS_INCOMPLETE','LOG_RECEIPT_CONFLICT','INVALID_WINDOW',
-  'WRONG_CHAIN','TOKEN_METADATA_MISMATCH','LIVE_SOURCE_STALE','DATABASE_SIZE_LIMIT','CONFLICTING_RPC_LOG']);
+  'INVALID_QUANTITY','INVALID_HASH','INVALID_TRANSFER_LOG','WRONG_CHAIN','TOKEN_METADATA_MISMATCH','LIVE_SOURCE_STALE','DATABASE_SIZE_LIMIT','CONFLICTING_RPC_LOG']);
 export const sessionCode=e=>safeCodes.has(e?.message)?e.message:'COLLECTION_FAILED';
 export class LiveSession {
   constructor(directory,{rpc=new PublicRpc(STREAM.endpoints[0]),stream=STREAM,now=()=>new Date().toISOString(),progress=()=>{}}={}){
@@ -26,7 +26,8 @@ export class LiveSession {
     if(quantity(await this.rpc.call('eth_chainId'))!==this.stream.chainId)stop('WRONG_CHAIN');
     const head=await this.header('finalized'),tipTime=quantity(head.timestamp),tip=quantity(head.number);
     if(Math.abs(Date.parse(this.now())/1000-tipTime)>7200)stop('LIVE_SOURCE_STALE');
-    if(quantity(await this.rpc.call('eth_call',[{to:this.stream.token.address,data:'0x313ce567'},'latest']))!==this.stream.token.decimals)stop('TOKEN_METADATA_MISMATCH');
+    const decimals=await this.rpc.call('eth_call',[{to:this.stream.token.address,data:'0x313ce567'},'latest']);
+    if(!/^0x[0-9a-f]{64}$/i.test(decimals)||BigInt(decimals)!==BigInt(this.stream.token.decimals))stop('TOKEN_METADATA_MISMATCH');
     let saved;
     if(existsSync(join(this.directory,'session.json')))saved=JSON.parse(readFileSync(join(this.directory,'session.json'),'utf8'));
     if(saved&&saved.identity!==this.identity)stop('INVALID_WINDOW');
