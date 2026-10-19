@@ -31,9 +31,9 @@ test('RPC batch responses are matched by ID and provider diagnostics never escap
   await assert.rejects(rpc.call('eth_chainId'),error=>error.message==='RPC_QUERY_REJECTED'&&!String(error).includes('SENSITIVE_SENTINEL'));
 });
 test('RPC retries transient reads but refuses malformed quantities and duplicate IDs',async()=>{
-  let calls=0;const rpc=new PublicRpc('https://rpc.mainnet.chain.robinhood.com',{wait:async()=>{},fetcher:async()=>{
+  let calls=0;const waits=[];const rpc=new PublicRpc('https://rpc.mainnet.chain.robinhood.com',{wait:async ms=>{waits.push(ms);},fetcher:async()=>{
     calls++;return calls<3?new Response('',{status:429}):new Response(JSON.stringify([{jsonrpc:'2.0',id:0,result:'0x1'}]));}});
-  assert.equal(await rpc.call('eth_chainId'),'0x1');assert.equal(calls,3);
+  assert.equal(await rpc.call('eth_chainId'),'0x1');assert.equal(calls,3);assert.ok(waits.slice(1).every(ms=>ms>=30000));
   for(const value of ['1','0x01','0x10000000000000000',null])assert.throws(()=>quantity(value));
   rpc.fetcher=async()=>new Response(JSON.stringify([{jsonrpc:'2.0',id:0,result:'a'},{jsonrpc:'2.0',id:0,result:'b'}]));
   await assert.rejects(rpc.batch([{method:'eth_chainId',params:[]},{method:'eth_chainId',params:[]}]),/RPC_INVALID_RESPONSE/);

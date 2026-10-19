@@ -23,13 +23,21 @@ export class PublicRpc {
   async batch(requests) {
     if (!requests.length || requests.length > 25 || requests.some(r => !METHODS.has(r.method))) stop('INVALID_READ_REQUEST');
     const body = requests.map((r, id) => ({ jsonrpc: '2.0', id, method: r.method, params: r.params }));
-    for (let attempt = 0; attempt < 4; attempt++) {
-      await this.wait(attempt ? 750 * 2 ** attempt : 120);
+    let retryDelay=0;
+    for (let attempt = 0; attempt < 6; attempt++) {
+      await this.wait(attempt ? retryDelay : 500);
       try {
         this.calls += requests.length;
         const response = await this.fetcher(this.endpoint, { method: 'POST', headers: { 'content-type': 'application/json' },
           body: JSON.stringify(body.length===1 ? body[0] : body), redirect: 'error', signal: AbortSignal.timeout(25000) });
-        if (!response.ok) { if (response.status === 429 || response.status >= 500) continue; stop('RPC_HTTP_REJECTED'); }
+        if (!response.ok) {
+          const status=response.status,after=response.headers.get('retry-after');await response.body?.cancel();
+          if(status===429||status>=500){
+            const seconds=after&&/^\d+$/.test(after)?Number(after):after?Math.max(0,(Date.parse(after)-Date.now())/1000):NaN;
+            retryDelay=Math.min(120000,Math.max(status===429?30000:1000,Number.isFinite(seconds)?seconds*1000:1000*2**attempt));continue;
+          }
+          stop('RPC_HTTP_REJECTED');
+        }
         // Bound response size before parsing or retaining provider diagnostics.
         const reader = response.body.getReader(); let size = 0; const parts = [];
         for (;;) { const { done, value } = await reader.read(); if (done) break; size += value.length;
@@ -46,6 +54,7 @@ export class PublicRpc {
         }
         return requests.map((_, i) => byId.get(i));
       } catch (error) {
+        retryDelay=Math.min(30000,1000*2**attempt);
         if (['INVALID_READ_REQUEST','RPC_HTTP_REJECTED','RPC_RESPONSE_TOO_LARGE','RPC_INVALID_RESPONSE','RPC_QUERY_REJECTED'].includes(error.message)) throw error;
       }
     }
