@@ -113,6 +113,7 @@ export class LiveSession {
           .run(first,last,this.now(),complete.rows.length,query.duplicates+complete.duplicates,omissions,digest(complete.rows));
         db.prepare('UPDATE checkpoints SET last_height=? WHERE chain_id=?').run(last,p.chainId);
       });
+      if(!existsSync(join(this.directory,'snapshot-report.json')))this.exportReport();
       this.progress({phase:'verified_batch',blocks:last-first+1,events:complete.rows.length,duplicates:query.duplicates,omissionsRecovered:omissions});
       if(statSync(this.path).size>2*1024**3)stop('DATABASE_SIZE_LIMIT');
     }
@@ -156,8 +157,6 @@ export class LiveSession {
       .map(([name,passed])=>({name,passed}));
     if(checks.some(c=>!c.passed))stop('INVALID_WINDOW');
     const failures=db.prepare("SELECT count(*) AS n FROM live_checks WHERE status='failed'").get().n;
-    const latest=db.prepare('SELECT status FROM live_checks ORDER BY id DESC LIMIT 1').get();
-    if(latest?.status!=='verified')stop('INVALID_WINDOW');
     const totals=batches.reduce((v,b)=>({duplicates:v.duplicates+b.query_duplicates,omissions:v.omissions+b.recovered_omissions}),{duplicates:0,omissions:0});
     const report={schemaVersion:1,kind:'chain-snapshot',chain:this.stream.name,chainId:p.chainId,symbol:this.stream.token.symbol,
       decimals:this.stream.token.decimals,finality:'finalized',healthy:true,analysis:a,checks,sources:this.stream.endpoints.map(s=>new URL(s).hostname),

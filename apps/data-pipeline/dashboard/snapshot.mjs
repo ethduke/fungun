@@ -6,7 +6,7 @@ try{
   const r=await response.json(),a=r.analysis;
   if(r.schemaVersion!==1||r.kind!=='chain-snapshot'||r.healthy!==true||!Array.isArray(a?.hours)||a.hours.length!==24||
     !r.checks?.length||!r.checks.every(c=>c.passed===true)||!(Date.parse(a.end)>Date.parse(a.start)&&Date.parse(a.end)-Date.parse(a.start)<=86400000)||r.session?.intervalMinutes!==15)throw new Error('Invalid snapshot');
-  text('snapshot-status','Saved range verified');text('snapshot-scope',`${r.chain} · ${r.symbol} · ${r.session.status==='complete'?'24h complete':Math.floor(r.session.capturedSeconds/60)+' min captured / 24h target'}`);
+  text('snapshot-status','Saved range verified');text('snapshot-scope',`${r.chain} · ${r.symbol} · ${r.session.status==='complete'?'24h complete':(r.session.capturedSeconds<60?r.session.capturedSeconds+' sec':Math.floor(r.session.capturedSeconds/60)+' min')+' captured / 24h target'}`);
   document.querySelector('.verification-icon').textContent='✓';
   text('snapshot-window',`${date(a.start)} → ${date(a.end)}`);
   text('snapshot-transfers',a.transfers.toLocaleString('en-US'));text('snapshot-transactions',`${a.transactions.toLocaleString('en-US')} transactions`);

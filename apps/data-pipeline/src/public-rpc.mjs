@@ -25,7 +25,7 @@ export class PublicRpc {
     const body = requests.map((r, id) => ({ jsonrpc: '2.0', id, method: r.method, params: r.params }));
     let retryDelay=0;
     for (let attempt = 0; attempt < 6; attempt++) {
-      await this.wait(attempt ? retryDelay : 500);
+      await this.wait(attempt ? retryDelay : Math.max(500,requests.length*40));
       try {
         this.calls += requests.length;
         const response = await this.fetcher(this.endpoint, { method: 'POST', headers: { 'content-type': 'application/json' },
