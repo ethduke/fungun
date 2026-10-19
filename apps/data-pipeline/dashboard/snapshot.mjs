@@ -23,7 +23,7 @@ try{
   $('snapshot-checks').replaceChildren(...r.checks.map(c=>{const tr=document.createElement('tr'),name=document.createElement('td'),status=document.createElement('td');name.textContent=c.name;status.textContent='✓ PASS';status.className='pass';tr.append(name,status);return tr;}));
   const details=[['Captured',date(a.capturedAt)],['Chain ID',r.chainId],['First block',a.startHeight],['Last block',a.endHeight],
     ['Median transfer',amount(a.medianRaw,r.decimals,r.symbol)],['Largest transfer',amount(a.largestRaw,r.decimals,r.symbol)],
-    ['Public RPC',r.sources.join(' · ')],['Duplicates ignored',r.duplicatesIgnored],['Missing events recovered',r.missingEventsRecovered],['Failed checks retried',r.failedChecks],['Verified intervals',r.verifiedIntervals],['SQLite SHA-256',r.databaseSha256]];
+    ['Public RPC',r.sources.join(' · ')],['Duplicates ignored',r.duplicatesIgnored],['Missing events recovered',r.missingEventsRecovered],['Failed checks retried',r.failedChecks],['Verified intervals',r.verifiedIntervals],['Receipt blocks sampled',r.receiptBlocksVerified],['SQLite SHA-256',r.databaseSha256]];
   $('snapshot-details').replaceChildren(...details.flatMap(([name,value])=>{const dt=document.createElement('dt'),dd=document.createElement('dd');dt.textContent=name;dd.textContent=value;return[dt,dd];}));
   text('snapshot-verification',r.verification);
 }catch{$('snapshot-error').hidden=false;text('snapshot-status','Snapshot unavailable');text('snapshot-scope','Verification could not be displayed');document.querySelector('.verification-icon').textContent='!';}

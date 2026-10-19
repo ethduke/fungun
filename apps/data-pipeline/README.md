@@ -130,12 +130,19 @@ preserve the last verified checkpoint and are retried on the next check. A chang
 finalized anchor is never silently overwritten. Public RPC congestion can delay
 checks; no incomplete range is labelled complete.
 
-Every captured block, including empty blocks, is stored. The CLI compares log
-queries with complete block receipts, verifies every receipt against the header's
-transaction list, deduplicates identical events, rejects conflicting events, and
-recovers query omissions from the receipt stream. Event facts, verification
-batches, and checkpoint changes commit atomically. This checks one provider's
-internal consistency; it is not independent consensus verification.
+Every requested block range is recorded and re-read. Identical events are
+idempotent; conflicting payloads stop the range. If reads disagree, a third replay
+must confirm their union before missing events can be recovered. Each range also
+audits a midpoint block and an event-bearing block against complete block receipts
+and transaction membership. Event facts, range evidence and cursor changes commit
+atomically. These are **sampled receipt audits**, not exhaustive block verification;
+consistent provider omissions outside the sampled blocks remain undetectable.
+
+The snapshot schema stores block height/hash observations, relevant transactions,
+Transfer facts, exact hourly query partitions, verification ranges and checkpoints.
+Unsampled block timestamps and parents remain SQL NULL rather than invented data.
+Hourly counts use block ranges split at observed timestamp boundaries. The replay
+demo keeps its separate exhaustive synthetic model and tests.
 
 `local/robinhood-showcase/` contains the continuing `snapshot.sqlite`, a consistent
 `frozen.sqlite`, and `snapshot-report.json`. They remain local and ignored by Git.

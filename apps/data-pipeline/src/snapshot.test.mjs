@@ -64,7 +64,7 @@ function mockCapture(){
   return{stream,logs,rpc:rpc(),now:()=>new Date((end+600)*1000).toISOString()};
 }
 function temp(t){const path=mkdtempSync(join(tmpdir(),'real-snapshot-test-'));t.after(()=>rmSync(path,{recursive:true,force:true}));return path;}
-test('live session verifies all receipts, saves SQLite and exports an honest partial snapshot',async t=>{
+test('live session checks replay ranges and sampled receipts, saves SQLite and exports an honest partial snapshot',async t=>{
   const mocks=mockCapture(),root=temp(t),session=await new LiveSession(join(root,'capture'),mocks).initialize();t.after(()=>session.close());
   const report=await session.tick();assert.equal(report.healthy,true);assert.equal(report.analysis.transfers,23);
   assert.equal(report.analysis.blocks,12);assert.equal(report.session.status,'collecting');assert.equal(report.session.capturedSeconds,900);
@@ -73,25 +73,25 @@ test('live session verifies all receipts, saves SQLite and exports an honest par
   await buildSnapshotSite(join(root,'site'),join(root,'capture/snapshot-report.json'));
   assert.deepEqual(readdirSync(join(root,'site')).sort(),['.nojekyll','dashboard.css','dashboard.mjs','index.html','quality-report.json','recovery.html','snapshot-report.json','snapshot.mjs']);
   assert.throws(()=>validateSnapshot({...report,analysis:{...report.analysis,amountRaw:'0'}}));
-  const rerun=await session.tick();assert.equal(rerun.analysis.transfers,23);assert.equal(session.pipeline.canonical().length,12);
+  const rerun=await session.tick();assert.equal(rerun.analysis.transfers,23);assert.ok(session.pipeline.canonical().length<=12);
   session.pipeline.db.prepare('UPDATE transfers SET amount_raw=? WHERE amount_raw=?').run('999','100000000000000000000');
   // A direct SQL corruption must not pass by comparing derived totals to themselves.
   session.pipeline.db.prepare('UPDATE transfers SET amount_raw=? WHERE rowid=(SELECT min(rowid) FROM transfers)').run('999');
   assert.throws(()=>session.exportReport(),/INVALID_WINDOW/);
 });
-test('missing query events are recovered from complete receipts; duplicate deliveries are idempotent',async t=>{
+test('missing query events are recovered from replays and sampled receipts; duplicate deliveries are idempotent',async t=>{
   const mocks=mockCapture(),call=mocks.rpc.call,root=temp(t);
-  mocks.rpc.call=async(m,p)=>{const result=await call(m,p);return m==='eth_getLogs'?result.slice(1).concat(result.slice(1,2)):result;};
+  let logReads=0;mocks.rpc.call=async(m,p)=>{const result=await call(m,p);if(m!=='eth_getLogs')return result;logReads++;return logReads===1?result.slice(1).concat(result.slice(1,2)):result;};
   const session=await new LiveSession(root,mocks).initialize();t.after(()=>session.close());
   const r=await session.tick();assert.equal(r.analysis.transfers,23);assert.equal(r.missingEventsRecovered,1);assert.equal(r.duplicatesIgnored,1);
   assert.throws(()=>uniqueLogs([mocks.logs[0],{...mocks.logs[0],data:'0x'+'0'.repeat(64)}],mocks.stream),/CONFLICTING_RPC_LOG/);
 });
 test('incomplete receipts cannot advance the checkpoint and retry fills the missing range',async t=>{
-  const mocks=mockCapture(),batch=mocks.rpc.batch,root=temp(t);
+  const mocks=mockCapture(),call=mocks.rpc.call,root=temp(t);
   const session=await new LiveSession(root,mocks).initialize();t.after(()=>session.close());
-  mocks.rpc.batch=async requests=>requests[0].method==='eth_getBlockReceipts'?(await batch(requests)).map(()=>[]):batch(requests);
+  mocks.rpc.call=async(m,p)=>m==='eth_getBlockReceipts'?[]:call(m,p);
   await assert.rejects(session.tick(),/RECEIPTS_INCOMPLETE/);assert.equal(session.pipeline.checkpoint().last_height,99);
-  mocks.rpc.batch=batch;assert.equal((await session.tick()).analysis.transfers,23);
+  mocks.rpc.call=call;assert.equal((await session.tick()).analysis.transfers,23);
 });
 test('conflicting log payloads and changed finalized anchors stop collection',async t=>{
   const mocks=mockCapture(),call=mocks.rpc.call,root=temp(t);

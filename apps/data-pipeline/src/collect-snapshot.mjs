@@ -45,24 +45,3 @@ export async function findFirstBlock(rpc, endHeight, startExclusive) {
   }
   return low;
 }
-export function analyze(pipeline, start, end, capturedAt) {
-  const db = pipeline.db, first = pipeline.startHeight, last = pipeline.checkpoint().last_height;
-  const rows = db.prepare(`SELECT b.timestamp,t.amount_raw,t.sender,t.recipient,e.tx_hash FROM canonical_transfers t
-    JOIN event_logs e USING(chain_id,block_hash,log_index) JOIN blocks b ON b.chain_id=e.chain_id AND b.hash=e.block_hash
-    WHERE t.chain_id=? ORDER BY b.timestamp,e.log_index`).all(pipeline.chainId);
-  const buckets = Array.from({length:24}, (_,i) => ({ start: time(start+i*3600), end: time(start+(i+1)*3600), observed:start+i*3600<end, transfers:0, amountRaw:'0' }));
-  const amounts = [], wallets = new Set(), txs = new Set(); let total = 0n;
-  for (const row of rows) {
-    const index = Math.min(23, Math.floor((row.timestamp - start - 1) / 3600));
-    if (row.timestamp <= start || row.timestamp > end || index < 0) stop('EVENT_OUTSIDE_WINDOW');
-    const bucket = buckets[index], amount = BigInt(row.amount_raw); bucket.transfers++; bucket.amountRaw = String(BigInt(bucket.amountRaw)+amount);
-    total += amount; amounts.push(amount); txs.add(row.tx_hash);
-    for (const address of [row.sender,row.recipient]) if (BigInt(address) !== 0n) wallets.add(address);
-  }
-  amounts.sort((a,b) => a < b ? -1 : a > b ? 1 : 0);
-  const middle = Math.floor(amounts.length/2), median = !amounts.length ? 0n : amounts.length%2 ? amounts[middle] : (amounts[middle-1]+amounts[middle])/2n;
-  return { capturedAt, start:time(start), end:time(end), startHeight:first, endHeight:last,
-    blocks:last-first+1, transfers:rows.length, transactions:txs.size, activeAddresses:wallets.size,
-    amountRaw:String(total), medianRaw:String(median), largestRaw:String(amounts.at(-1) ?? 0n),
-    peakHour:buckets.reduce((a,b) => b.transfers > a.transfers ? b : a).start, hours:buckets };
-}
